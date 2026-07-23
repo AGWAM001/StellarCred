@@ -24,7 +24,7 @@ export function useStellarCred(
   const [error, setError] = useState<Error | null>(null);
   const mountedRef = useRef(true);
 
-  const fetchClaims = useCallback(async () => {
+  const fetchClaims = useCallback(async () => { {
     if (!wallet) {
       setClaims(null);
       setLoading(false);
@@ -65,7 +65,7 @@ export function useStellarCred(
         setLoading(false);
       }
     }
-  }, [wallet, options?.claims]);
+  }, [wallet, JSON.stringify(options?.claims)]);
 
   useEffect(() => {
     mountedRef.current = true;
