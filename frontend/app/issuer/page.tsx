@@ -4,8 +4,6 @@ import { useState } from "react";
 import {
   IconKey,
   IconArrowRight,
-  IconCopy,
-  IconCheck,
   IconLoader2,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
@@ -13,6 +11,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { saveCredential, TYPE_META, type Credential } from "@/lib/credential";
 import type { CredentialType } from "@/lib/stellar";
+import CopyButton from "@/components/CopyButton";
 
 const TYPES = Object.entries(TYPE_META) as [
   CredentialType,
@@ -45,7 +44,6 @@ export default function IssuerPage() {
   const [expiry, setExpiry] = useState("90 days");
   const [issued, setIssued] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
 
   const meta = TYPE_META[type];
@@ -59,7 +57,6 @@ export default function IssuerPage() {
   async function onIssue() {
     setBusy(true);
     setError("");
-    setCopied(false);
     try {
       // Map this page's single attribute onto the shared attributes shape, then
       // request one credential type wrapped in an array (multi-claim API).
@@ -90,11 +87,6 @@ export default function IssuerPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function onCopy() {
-    if (issued) navigator.clipboard?.writeText(issued);
-    setCopied(true);
   }
 
   return (
@@ -220,10 +212,7 @@ export default function IssuerPage() {
             {issued && (
               <div className="row" style={{ gap: "0.5rem" }}>
                 <Badge variant="verified">Saved to wallet</Badge>
-                <button className="btn btn-ghost btn-sm" onClick={onCopy}>
-                  {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-                  {copied ? "Copied" : "Copy"}
-                </button>
+                <CopyButton value={issued} />
               </div>
             )}
           </div>

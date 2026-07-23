@@ -32,6 +32,7 @@ import {
   markProved,
   parseCredential,
 } from "@/lib/credential";
+import CopyButton from "@/components/CopyButton";
 
 // Parse "90 days", "30 days" etc from the credential's expiry string.
 function credTtlSecs(cred: Credential): number {
@@ -477,16 +478,22 @@ function ProofFlow({
               stage === "submitting" ? (
                 <AnimatedDots text="Writing to ProofRegistry" style={{ marginTop: "0.35rem" }} />
               ) : submitDone ? (
-                <a
-                  href={EXPLORER_TX(txHash)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="row accent"
-                  style={{ gap: "0.3rem", fontSize: "0.775rem", marginTop: "0.3rem" }}
+                <div
+                  className="row"
+                  style={{ gap: "0.5rem", marginTop: "0.3rem", alignItems: "center" }}
                 >
-                  {txHash.slice(0, 8)}…{txHash.slice(-6)}
-                  <IconExternalLink size={12} />
-                </a>
+                  <a
+                    href={EXPLORER_TX(txHash)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="row accent"
+                    style={{ gap: "0.3rem", fontSize: "0.775rem" }}
+                  >
+                    {txHash.slice(0, 8)}...{txHash.slice(-6)}
+                    <IconExternalLink size={12} />
+                  </a>
+                  <CopyButton value={txHash} />
+                </div>
               ) : null
             }
           />
