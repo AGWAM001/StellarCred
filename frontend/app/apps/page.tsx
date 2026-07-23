@@ -11,6 +11,7 @@ import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { ConfigBanner } from "@/components/ConfigBanner";
+import { usePreviewMode } from "@/lib/wallet-context";
 import { checkClaim } from "@/lib/contracts";
 import { PROTOCOLS, type Protocol } from "@/lib/protocols";
 
@@ -25,8 +26,14 @@ function ProtocolCard({
   const [statuses, setStatuses] = useState<boolean[]>(protocol.requirements.map(() => false));
   const [checked, setChecked] = useState(false);
   const eligible = statuses.every(Boolean);
+  const isPreview = usePreviewMode();
 
   useEffect(() => {
+    if (isPreview) {
+      setChecked(true);
+      setStatuses(protocol.requirements.map(() => true));
+      return;
+    }
     if (!activeWallet) {
       setChecked(false);
       setStatuses(protocol.requirements.map(() => false));
@@ -113,8 +120,9 @@ function ProtocolCard({
 }
 
 function AppsInner() {
-  const { address } = useWallet();
+  const { address, connect } = useWallet();
   const searchParams = useSearchParams();
+  const isPreview = usePreviewMode();
 
   const scVerified = searchParams.get("sc_verified") === "true";
   const scWallet = searchParams.get("sc_wallet");
@@ -173,6 +181,29 @@ function AppsInner() {
       )}
 
       <ConfigBanner />
+
+      {isPreview && (
+        <div
+          style={{
+            padding: "0.85rem 1rem",
+            borderRadius: "var(--radius)",
+            background: "rgba(62,207,142,0.1)",
+            border: "1px solid rgba(62,207,142,0.3)",
+            color: "var(--text)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "1.5rem",
+          }}
+        >
+          <span style={{ fontSize: "0.875rem", fontWeight: 500 }}>
+            Connect wallet to use your real credentials
+          </span>
+          <button className="btn btn-primary btn-sm" onClick={connect}>
+            Connect Wallet
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-3" style={{ alignItems: "start", gap: "1.25rem" }}>
         {PROTOCOLS.map((p) => (
