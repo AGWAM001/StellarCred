@@ -9,16 +9,23 @@
 //! On `submit_proof` the registry (1) checks the named issuer is registered and
 //! trusted for the credential type via IssuerRegistry, (2) forwards the proof to
 //! CredentialVerifier, and only caches the result if both pass.
+//!
+//! `submit_proofs_batch` accepts up to 5 `ProofSubmission` entries and verifies
+//! and stores all of them atomically: if any single proof fails the entire call
+//! reverts, saving the holder from multiple wallet confirmations and fee payments.
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
-    symbol_short, Address, Bytes, BytesN, Env, Symbol,
+    symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec,
 };
 
 // Persistent-entry lifetime management (~5s ledgers).
 const DAY_IN_LEDGERS: u32 = 17280;
 const PROOF_BUMP_THRESHOLD: u32 = DAY_IN_LEDGERS;
 const PROOF_TTL: u32 = 90 * DAY_IN_LEDGERS;
+
+/// Maximum number of submissions accepted by `submit_proofs_batch`.
+const MAX_BATCH_SIZE: u32 = 5;
 
 /// Typed client for the deployed CredentialVerifier contract. Declared as an
 /// interface (not a crate dependency) so this contract links only the client,
@@ -53,6 +60,18 @@ pub struct ProofRecord {
     pub threshold: Option<u64>,
 }
 
+/// A single proof submission inside a batch. Mirrors the individual parameters
+/// of `submit_proof` but grouped into a struct so they can be passed as a `Vec`.
+#[contracttype]
+#[derive(Clone)]
+pub struct ProofSubmission {
+    pub credential_type: Symbol,
+    pub proof: Bytes,
+    pub public_inputs: Vec<u32>,
+    pub issuer_id: Address,
+    pub expiry: u64,
+}
+
 #[contracttype]
 pub enum DataKey {
     Verifier,
@@ -72,10 +91,22 @@ pub enum Error {
     /// The public key the proof was made against does not match the registered
     /// issuer's key.
     IssuerKeyMismatch = 5,
+    /// The batch contains more than `MAX_BATCH_SIZE` submissions.
+    BatchTooLarge = 6,
+    /// The batch must contain at least one submission.
+    BatchEmpty = 7,
 }
 
 #[contract]
 pub struct ProofRegistry;
+
+fn vec_u32_to_bytes(env: &Env, vec: &Vec<u32>) -> Bytes {
+    let mut bytes = Bytes::new(env);
+    for val in vec.iter() {
+        bytes.append(&Bytes::from_array(env, &val.to_be_bytes()));
+    }
+    bytes
+}
 
 #[contractimpl]
 impl ProofRegistry {
@@ -132,6 +163,74 @@ impl ProofRegistry {
         env.storage()
             .persistent()
             .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+    }
+
+    /// Verify and store multiple proofs in a single atomic transaction.
+    ///
+    /// Accepts up to [`MAX_BATCH_SIZE`] (5) submissions. The holder authorises
+    /// the whole batch with a single signature. If **any** proof fails
+    /// verification — or any issuer check fails — the entire call reverts and
+    /// nothing is stored.
+    ///
+    /// One event is emitted per successfully verified credential, with the same
+    /// shape as the single-proof path, so existing listeners need no changes.
+    pub fn submit_proofs_batch(env: Env, holder: Address, submissions: Vec<ProofSubmission>) {
+        holder.require_auth();
+
+        let len = submissions.len();
+        if len == 0 {
+            panic_with_error!(&env, Error::BatchEmpty);
+        }
+        if len > MAX_BATCH_SIZE {
+            panic_with_error!(&env, Error::BatchTooLarge);
+        }
+
+        let issuer_registry_addr = Self::issuer_registry(&env);
+        let verifier_addr = Self::verifier(&env);
+        let registry = IssuerClient::new(&env, &issuer_registry_addr);
+        let verifier = VerifierClient::new(&env, &verifier_addr);
+
+        let now = env.ledger().timestamp();
+
+        for i in 0..len {
+            let sub = submissions.get(i).unwrap();
+            let public_inputs_bytes = vec_u32_to_bytes(&env, &sub.public_inputs);
+
+            // Step 1: issuer must be registered and trusted for this type.
+            if !registry.is_valid_issuer(&sub.issuer_id, &sub.credential_type) {
+                panic_with_error!(&env, Error::IssuerNotTrusted);
+            }
+
+            // Step 2: the public key embedded in the proof must match the
+            // on-chain registered key for the claimed issuer.
+            let expected = registry.get_issuer_pubkey(&sub.issuer_id);
+            if !Self::public_inputs_match_pubkey(&public_inputs_bytes, &expected) {
+                panic_with_error!(&env, Error::IssuerKeyMismatch);
+            }
+
+            // Step 3: the proof must verify against the registered VK.
+            if !verifier.verify_proof(&sub.credential_type, &sub.proof, &public_inputs_bytes) {
+                panic_with_error!(&env, Error::VerificationFailed);
+            }
+
+            let key = DataKey::Proof(holder.clone(), sub.credential_type.clone());
+            let record = ProofRecord {
+                verified_at: now,
+                expiry: sub.expiry,
+                threshold: Self::extract_threshold(&sub.credential_type, &public_inputs_bytes),
+            };
+            env.storage().persistent().set(&key, &record);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+
+            // Emit one event per credential, matching the shape callers already
+            // expect from the single-proof path.
+            env.events().publish(
+                (symbol_short!("proof"), symbol_short!("verified")),
+                record.expiry,
+            );
+        }
     }
 
     /// Returns `(is_currently_valid, verified_at, expiry)`. `is_currently_valid`
