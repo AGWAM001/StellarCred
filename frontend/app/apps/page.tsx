@@ -10,7 +10,7 @@ import { Badge } from "@/components/Badge";
 import { ConfigBanner } from "@/components/ConfigBanner";
 import { checkClaim } from "@/lib/contracts";
 import { PROTOCOLS, type Protocol } from "@/lib/protocols";
-import { CLAIM_TYPES, type ClaimType } from "@/lib/stellar";
+import { CREDENTIAL_TYPES, type CredentialType } from "@/lib/stellar";
 
 const CLAIM_LABELS: Record<string, string> = {
   kyc: "KYC",
@@ -242,7 +242,7 @@ function AppsInner() {
         </div>
         <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap" }}>
           <IconFilter size={14} stroke={1.8} color="var(--faint)" />
-          {CLAIM_TYPES.map((claim) => {
+          {CREDENTIAL_TYPES.map((claim) => {
             const isActive = selectedClaims.has(claim);
             return (
               <button
