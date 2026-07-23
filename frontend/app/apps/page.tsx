@@ -184,7 +184,7 @@ function AppsInner() {
         }}
       >
         <strong style={{ color: "var(--text)" }}>Any protocol, any claim.</strong>{" "}
-        Each app below gates access on a different credential type — one read-only call to{" "}
+        Each app below gates access on a different credential type - one read-only call to{" "}
         <span className="mono" style={{ fontSize: "0.75rem" }}>ProofRegistry.is_verified</span>.
         The protocol never sees the credential, the commitment, or the proof itself.
       </div>
