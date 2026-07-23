@@ -10,7 +10,7 @@ import { Badge } from "@/components/Badge";
 import { ConfigBanner } from "@/components/ConfigBanner";
 import { checkClaim } from "@/lib/contracts";
 import { PROTOCOLS, type Protocol } from "@/lib/protocols";
-import { CREDENTIAL_TYPES, type CredentialType } from "@/lib/stellar";
+import { CREDENTIAL_TYPES } from "@/lib/stellar";
 
 const CLAIM_LABELS: Record<string, string> = {
   kyc: "KYC",
@@ -66,8 +66,8 @@ function ProtocolCard({
           {protocol.name}
         </span>
         <div className="row" style={{ gap: "0.3rem" }}>
-          {protocol.requirements.map((r) => {
-            const isClaimMet = checked && statuses[protocol.requirements.indexOf(r)];
+          {protocol.requirements.map((r, i) => {
+            const isClaimMet = checked && statuses[i];
             return (
               <span
                 key={r.type}
