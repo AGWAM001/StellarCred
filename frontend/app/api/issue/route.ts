@@ -5,6 +5,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 // Resolved by webpack at build time — avoids process.cwd() which is unreliable
 // in Next.js server routes (can return "/" depending on how the server starts).
 import commitCircuit from "../../../public/circuits/commit.json";
+import { logger, stripSensitiveFields } from "../../../lib/logger";
 
 // Server-side only — never shipped to the browser.
 // Set ISSUER_PRIVATE_KEY in .env.local to the 64-char hex secp256k1 private
@@ -320,6 +321,30 @@ async function buildCredential({ type, holder, issuerId, issuerName, expiry, att
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = randomBytes(16).toString("hex");
+  const startTime = Date.now();
+  let outcome: "success" | "failure" = "failure";
+  let credentialTypes: string[] = [];
+  let issuerId: string | undefined;
+  let walletAddress: string | undefined;
+
+  const sendResponse = (response: NextResponse) => {
+    const durationMs = Date.now() - startTime;
+    response.headers.set("x-request-id", requestId);
+    for (const type of credentialTypes) {
+      logger.info(stripSensitiveFields({
+        event: "response_sent",
+        credentialType: type,
+        issuerId,
+        walletAddress,
+        outcome,
+        durationMs,
+        requestId,
+      }));
+    }
+    return response;
+  };
+
   let body: {
     credential_types?: string[];
     // Legacy single-type shape — still accepted for backward compatibility.
@@ -339,22 +364,34 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return sendResponse(NextResponse.json({ error: "Invalid JSON" }, { status: 400 }));
   }
 
   const {
     holder,
-    issuerId,
+    issuerId: reqIssuerId,
     issuerName = "StellarCred Authority",
     expiry = "90 days",
     claimParams,
     persona_inquiry_id: personaInquiryId,
     returnUrl,
   } = body;
+  issuerId = reqIssuerId;
+  walletAddress = holder;
 
   // Normalize to the multi-claim shape. Legacy callers send { type, attribute };
   // map that single attribute onto the right key in `attributes`.
-  const credentialTypes = body.credential_types ?? (body.type ? [body.type] : []);
+  credentialTypes = body.credential_types ?? (body.type ? [body.type] : []);
+  for (const type of credentialTypes) {
+    logger.info(stripSensitiveFields({
+      event: "request_received",
+      credentialType: type,
+      issuerId,
+      walletAddress,
+      requestId,
+    }));
+  }
+
   const attributes: Record<string, string> = { ...(body.attributes ?? {}) };
   if (body.attribute !== undefined && body.type) {
     if (body.type === "age") attributes.date_of_birth ??= body.attribute;
@@ -363,17 +400,27 @@ export async function POST(req: NextRequest) {
   }
 
   if (credentialTypes.length === 0) {
-    return NextResponse.json({ error: "credential_types must contain at least one type" }, { status: 400 });
+    return sendResponse(NextResponse.json({ error: "credential_types must contain at least one type" }, { status: 400 }));
   }
   const invalid = credentialTypes.find((t) => !VALID_TYPES.includes(t));
   if (invalid) {
-    return NextResponse.json({ error: `Invalid credential type: ${invalid}` }, { status: 400 });
+    for (const type of credentialTypes) {
+      logger.info(stripSensitiveFields({
+        event: "validation_result",
+        credentialType: type,
+        issuerId,
+        walletAddress,
+        outcome: "invalid_type",
+        requestId,
+      }));
+    }
+    return sendResponse(NextResponse.json({ error: `Invalid credential type: ${invalid}` }, { status: 400 }));
   }
   if (!holder) {
-    return NextResponse.json({ error: "holder address is required" }, { status: 400 });
+    return sendResponse(NextResponse.json({ error: "holder address is required" }, { status: 400 }));
   }
   if (!issuerId) {
-    return NextResponse.json({ error: "issuerId is required" }, { status: 400 });
+    return sendResponse(NextResponse.json({ error: "issuerId is required" }, { status: 400 }));
   }
 
   // ---------------------------------------------------------------------------
@@ -400,29 +447,60 @@ export async function POST(req: NextRequest) {
   const needsIdentity = credentialTypes.includes("kyc");
   if (needsIdentity) {
     if (!process.env.PERSONA_API_KEY) {
-      console.warn("[StellarCred] PERSONA_API_KEY not set — demo mode, identity verification skipped");
+      logger.info(stripSensitiveFields({
+        event: "provider_call",
+        credentialType: "kyc",
+        issuerId,
+        walletAddress,
+        outcome: "demo_mode",
+        requestId,
+      }));
     } else {
       const templateId = process.env.PERSONA_KYC_TEMPLATE_ID;
       if (!templateId) {
-        return NextResponse.json(
+        return sendResponse(NextResponse.json(
           { error: "PERSONA_KYC_TEMPLATE_ID is required when PERSONA_API_KEY is set" },
           { status: 500 },
-        );
+        ));
       }
       const baseUrl = process.env.NEXT_PUBLIC_STELLARCRED_BASE_URL ?? req.nextUrl.origin;
       if (!personaInquiryId) {
         // First request — create a Persona inquiry and ask the frontend to redirect.
+        logger.info(stripSensitiveFields({
+          event: "provider_call",
+          credentialType: "kyc",
+          issuerId,
+          walletAddress,
+          outcome: "inquiry_created",
+          requestId,
+        }));
         const redirectUrl = returnUrl
           ? `${baseUrl}/verify?return_url=${encodeURIComponent(returnUrl)}`
           : `${baseUrl}/verify`;
         const { url, id } = await createPersonaInquiry(templateId, redirectUrl);
-        return NextResponse.json({ needsPersona: true, personaUrl: url, inquiryId: id }, { status: 202 });
+        return sendResponse(NextResponse.json({ needsPersona: true, personaUrl: url, inquiryId: id }, { status: 202 }));
       }
       // Second request — user returned from Persona, verify the completed inquiry.
       const kyc = await resolvePersonaKYC(personaInquiryId);
       if (!kyc.ok) {
-        return NextResponse.json({ error: kyc.error ?? "Identity verification failed" }, { status: 403 });
+        logger.info(stripSensitiveFields({
+          event: "provider_call",
+          credentialType: "kyc",
+          issuerId,
+          walletAddress,
+          outcome: "verification_failed",
+          requestId,
+        }));
+        return sendResponse(NextResponse.json({ error: kyc.error ?? "Identity verification failed" }, { status: 403 }));
       }
+      logger.info(stripSensitiveFields({
+        event: "provider_call",
+        credentialType: "kyc",
+        issuerId,
+        walletAddress,
+        outcome: "verified",
+        requestId,
+      }));
       if (kyc.dob) attributes.date_of_birth = kyc.dob;
       if (kyc.countryNumeric) attributes.country_code = kyc.countryNumeric;
     }
@@ -434,11 +512,27 @@ export async function POST(req: NextRequest) {
   if (needsFunds) {
     const plaid = await verifyWithPlaid();
     if (!plaid.ok) {
-      return NextResponse.json(
+      logger.info(stripSensitiveFields({
+        event: "provider_call",
+        credentialType: "funds",
+        issuerId,
+        walletAddress,
+        outcome: "verification_failed",
+        requestId,
+      }));
+      return sendResponse(NextResponse.json(
         { error: plaid.error ?? "Balance verification failed" },
         { status: 403 },
-      );
+      ));
     }
+    logger.info(stripSensitiveFields({
+      event: "provider_call",
+      credentialType: "funds",
+      issuerId,
+      walletAddress,
+      outcome: "verified",
+      requestId,
+    }));
     attributes.balance = String(plaid.balance ?? 0);
   }
 
@@ -447,12 +541,36 @@ export async function POST(req: NextRequest) {
     const uniqueTypes = Array.from(new Set(credentialTypes));
     const credentials = [];
     for (const type of uniqueTypes) {
-      credentials.push(
-        await buildCredential({ type, holder, issuerId, issuerName, expiry, attributes, claimParams }),
-      );
+      logger.info(stripSensitiveFields({
+        event: "signing_started",
+        credentialType: type,
+        issuerId,
+        walletAddress,
+        requestId,
+      }));
+      const credential = await buildCredential({ type, holder, issuerId, issuerName, expiry, attributes, claimParams });
+      credentials.push(credential);
+      logger.info(stripSensitiveFields({
+        event: "signing_success",
+        credentialType: type,
+        issuerId,
+        walletAddress,
+        requestId,
+      }));
     }
-    return NextResponse.json({ credentials });
+    outcome = "success";
+    return sendResponse(NextResponse.json({ credentials }));
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    for (const type of credentialTypes) {
+      logger.error(stripSensitiveFields({
+        event: "signing_failed",
+        credentialType: type,
+        issuerId,
+        walletAddress,
+        error: (e as Error).message,
+        requestId,
+      }));
+    }
+    return sendResponse(NextResponse.json({ error: (e as Error).message }, { status: 500 }));
   }
 }
