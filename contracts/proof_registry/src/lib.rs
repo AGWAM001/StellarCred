@@ -195,7 +195,7 @@ impl ProofRegistry {
         let record = ProofRecord {
             verified_at: env.ledger().timestamp(),
             expiry,
-            threshold: Self::extract_threshold(&credential_type, &public_inputs),
+            threshold: Self::extract_threshold(&env, &credential_type, &public_inputs),
             revoked: false,
         };
         env.storage().persistent().set(&key, &record);
@@ -260,7 +260,7 @@ impl ProofRegistry {
             let record = ProofRecord {
                 verified_at: now,
                 expiry: sub.expiry,
-                threshold: Self::extract_threshold(&sub.credential_type, &public_inputs_bytes),
+                threshold: Self::extract_threshold(&env, &sub.credential_type, &public_inputs_bytes),
                 revoked: false,
             };
             env.storage().persistent().set(&key, &record);
@@ -372,13 +372,13 @@ impl ProofRegistry {
     ///   income:     field 65 = threshold
     ///   funds:      field 65 = threshold
     ///   kyc:        (no extra fields)
-    fn extract_threshold(credential_type: &Symbol, public_inputs: &Bytes) -> Option<u64> {
+    fn extract_threshold(env: &Env, credential_type: &Symbol, public_inputs: &Bytes) -> Option<u64> {
         if *credential_type == symbol_short!("age") {
             // field 66, bytes 2112-2143, u64 in last 8 bytes
             Some(Self::read_u64_field(public_inputs, 66))
         } else if *credential_type == symbol_short!("income")
             || *credential_type == symbol_short!("funds")
-            || *credential_type == symbol_short!("accreditation")
+            || *credential_type == Symbol::new(env, "accreditation")
         {
             // field 65, bytes 2080-2111, u64 in last 8 bytes
             Some(Self::read_u64_field(public_inputs, 65))
