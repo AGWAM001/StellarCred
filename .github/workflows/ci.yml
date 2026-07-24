@@ -72,3 +72,38 @@ jobs:
           NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
           NEXT_PUBLIC_STELLAR_NETWORK: testnet
           NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
+
+  sdk-integration:
+    name: SDK integration tests (testnet)
+    runs-on: ubuntu-latest
+    if: vars.SC_TEST_WALLET != ''
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck SDK + tests
+        run: pnpm --filter @stellarcred/sdk tsc --noEmit
+
+      - name: Run integration tests
+        run: pnpm --filter @stellarcred/sdk test:integration
+        env:
+          SC_TEST_WALLET: ${{ vars.SC_TEST_WALLET }}
+          STELLARCRED_REGISTRY_ID: ${{ vars.STELLARCRED_REGISTRY_ID }}
+          STELLARCRED_RPC_URL: ${{ vars.STELLARCRED_RPC_URL || 'https://soroban-testnet.stellar.org' }}
