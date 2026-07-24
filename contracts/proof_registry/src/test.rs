@@ -542,52 +542,60 @@ fn batch_one_fail_reverts_all() {
 }
 
 /// Exactly MAX_BATCH_SIZE (5) submissions — should succeed.
+/// Uses 5 distinct credential types to satisfy the duplicate-type guard.
 #[test]
 fn batch_max_size_boundary_accepts_five() {
     let env = Env::default();
     env.mock_all_auths();
     env.cost_estimate().budget().reset_unlimited();
-    let h = deploy(&env); // kyc-only harness
+    // Five distinct symbols — same kyc proof/VK reused for all of them.
+    let types = [
+        symbol_short!("kyc"),
+        symbol_short!("funds"),
+        symbol_short!("age"),
+        symbol_short!("income"),
+        symbol_short!("juris"),
+    ];
 
-    // Register the same issuer for a couple of extra dummy types so we can
-    // fill up to 5 slots. For simplicity, reuse the same kyc proof/inputs for
-    // all five submissions (same issuer key, same VK).
     let admin = Address::generate(&env);
     let ir_id = env.register(IssuerRegistry, (admin.clone(),));
     let ir = IssuerRegistryClient::new(&env, &ir_id);
     let issuer = Address::generate(&env);
-
-    // Register the issuer with the kyc public key for all 5 slots.
-    // We only have one VK fixture so we reuse kyc for every slot.
+    // Register issuer for all 5 types in a single call (repeated calls overwrite).
     ir.register_issuer(
         &issuer,
         &pubkey_from(&env, PUBLIC_INPUTS),
-        &vec![&env, symbol_short!("kyc")],
+        &vec![&env, types[0].clone(), types[1].clone(), types[2].clone(), types[3].clone(), types[4].clone()],
     );
 
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
-    CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
+    let vc = CredentialVerifierClient::new(&env, &v_id);
+    // Register the kyc VK under all 5 type symbols.
+    for t in types.iter() {
+        vc.set_vk(t, &Bytes::from_slice(&env, VK));
+    }
 
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
-    // Build a batch of exactly 5 identical kyc submissions.
-    let sub = kyc_submission(&env, &issuer, 9999);
+    // Build a batch of exactly 5 submissions, each with a unique type.
     let submissions = vec![
         &env,
-        sub.clone(),
-        sub.clone(),
-        sub.clone(),
-        sub.clone(),
-        sub,
+        ProofSubmission { credential_type: types[0].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[1].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[2].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[3].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[4].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
     ];
 
-    // Must not panic — 5 is the allowed maximum.
+    // Must not panic — 5 distinct types is within the allowed maximum.
     registry.submit_proofs_batch(&holder, &submissions);
-    assert!(registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(registry.is_verified(&holder, &types[0]).0);
+    assert!(registry.is_verified(&holder, &types[4]).0);
 }
+
+
 
 /// Six submissions must be rejected with BatchTooLarge.
 #[test]
@@ -639,6 +647,22 @@ fn batch_empty_is_rejected() {
 
     let submissions: Vec<ProofSubmission> = Vec::new(&env);
     let res = registry.try_submit_proofs_batch(&holder, &submissions);
+    assert!(res.is_err());
+}
+
+/// A batch with two entries sharing the same credential_type must be rejected.
+#[test]
+fn batch_duplicate_credential_type_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    let sub = kyc_submission(&env, &h.issuer, 9999);
+    // Two identical kyc entries — second would silently overwrite the first.
+    let submissions = vec![&env, sub.clone(), sub];
+
+    let res = h.registry.try_submit_proofs_batch(&holder, &submissions);
     assert!(res.is_err());
 }
 

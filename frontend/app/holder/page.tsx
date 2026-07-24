@@ -197,7 +197,11 @@ export default function HolderPage() {
   const proved   = displayCreds.filter((c) => proofStatus(c) === "proved");
 
   // Credentials eligible for "Prove all" (unproved or expired), capped at 5.
-  const batchCandidates = unproved.slice(0, 5);
+  // Deduplicate by type: the contract writes one slot per (holder, credential_type),
+  // so two entries of the same type in a batch would silently overwrite each other.
+  const batchCandidates = unproved
+    .filter((c, idx, arr) => arr.findIndex((x) => x.type === c.type) === idx)
+    .slice(0, 5);
   const canBatch = address && batchCandidates.length >= 2;
 
   return (
@@ -236,6 +240,7 @@ export default function HolderPage() {
       )}
 
       {view.kind === "single" ? (
+
         <ProofFlow
           cred={view.cred}
           holder={address}
@@ -698,6 +703,12 @@ function BatchProofFlow({
   const generatedProofs = useRef<Array<{ proof: Uint8Array; publicInputs: Uint8Array } | null>>(
     creds.map(() => null),
   );
+  // Stable refs so the submission effect always reads the latest values
+  // even if the parent re-renders between proof generation and submission.
+  const credsRef = useRef(creds);
+  const holderRef = useRef(holder);
+  useEffect(() => { credsRef.current = creds; }, [creds]);
+  useEffect(() => { holderRef.current = holder; }, [holder]);
 
   // Generate proofs for all credentials in sequence.
   useEffect(() => {
@@ -791,7 +802,9 @@ function BatchProofFlow({
     if (!allReady) return;
     setBatchStage("submitting");
 
-    const submissions: ProofSubmissionParams[] = creds.map((cred, i) => {
+    const currentCreds = credsRef.current;
+    const currentHolder = holderRef.current;
+    const submissions: ProofSubmissionParams[] = currentCreds.map((cred, i) => {
       const p = generatedProofs.current[i]!;
       return {
         issuerId: cred.issuerId,
@@ -802,18 +815,17 @@ function BatchProofFlow({
       };
     });
 
-    submitProofsBatch({ holder, submissions })
+    submitProofsBatch({ holder: currentHolder, submissions })
       .then((hash) => {
         setTxHash(hash);
         setBatchStage("confirmed");
-        onProved(hash, creds.map((c) => c.commitment));
+        onProved(hash, currentCreds.map((c) => c.commitment));
       })
       .catch((e) => {
         setBatchError(parseContractError((e as Error).message));
         setBatchStage("error");
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allReady]);
+  }, [allReady, onProved]);
 
   const isSubmitting = batchStage === "submitting";
   const isConfirmed = batchStage === "confirmed";
