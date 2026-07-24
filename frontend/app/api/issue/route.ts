@@ -333,6 +333,7 @@ export async function POST(req: NextRequest) {
     claimParams?: ClaimParams;
     // Set by the frontend after the user returns from Persona's hosted flow.
     persona_inquiry_id?: string;
+    returnUrl?: string;
   };
 
   try {
@@ -348,6 +349,7 @@ export async function POST(req: NextRequest) {
     expiry = "90 days",
     claimParams,
     persona_inquiry_id: personaInquiryId,
+    returnUrl,
   } = body;
 
   // Normalize to the multi-claim shape. Legacy callers send { type, attribute };
@@ -410,7 +412,10 @@ export async function POST(req: NextRequest) {
       const baseUrl = process.env.NEXT_PUBLIC_STELLARCRED_BASE_URL ?? req.nextUrl.origin;
       if (!personaInquiryId) {
         // First request — create a Persona inquiry and ask the frontend to redirect.
-        const { url, id } = await createPersonaInquiry(templateId, `${baseUrl}/verify`);
+        const redirectUrl = returnUrl
+          ? `${baseUrl}/verify?return_url=${encodeURIComponent(returnUrl)}`
+          : `${baseUrl}/verify`;
+        const { url, id } = await createPersonaInquiry(templateId, redirectUrl);
         return NextResponse.json({ needsPersona: true, personaUrl: url, inquiryId: id }, { status: 202 });
       }
       // Second request — user returned from Persona, verify the completed inquiry.
