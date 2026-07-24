@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { fetchIssuerPubkey } from "@/lib/issuer-registry";
 // Resolved by webpack at build time — avoids process.cwd() which is unreliable
 // in Next.js server routes (can return "/" depending on how the server starts).
 import commitCircuit from "../../../public/circuits/commit.json";
@@ -13,6 +14,10 @@ import commitCircuit from "../../../public/circuits/commit.json";
 const DEMO_SK = process.env.ISSUER_PRIVATE_KEY
   ? Buffer.from(process.env.ISSUER_PRIVATE_KEY, "hex")
   : sha256(new TextEncoder().encode("stellarcred-demo-issuer"));
+
+const SIM_ACCOUNT =
+  process.env.NEXT_PUBLIC_ISSUER_ADDRESS ??
+  "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 function be32(v: bigint): Uint8Array {
   const b = new Uint8Array(32);
@@ -71,9 +76,13 @@ async function poseidonCommit(value: string, salt: string): Promise<string> {
   return String(returnValue);
 }
 
-function issuerPublicKey(): { x: number[]; y: number[] } {
+function issuerPublicKey(): { x: number[]; y: number[]; bytes: Buffer } {
   const p = secp256k1.getPublicKey(DEMO_SK, false); // 0x04 || x || y
-  return { x: Array.from(p.slice(1, 33)), y: Array.from(p.slice(33, 65)) };
+  return {
+    x: Array.from(p.slice(1, 33)),
+    y: Array.from(p.slice(33, 65)),
+    bytes: Buffer.from(p.slice(1, 65)),
+  };
 }
 
 function signCommitment(commitment: string): {
@@ -362,6 +371,26 @@ export async function POST(req: NextRequest) {
   }
   if (!issuerId) {
     return NextResponse.json({ error: "issuerId is required" }, { status: 400 });
+  }
+
+  if (process.env.NEXT_PUBLIC_ISSUER_REGISTRY_ID) {
+    const registered = await fetchIssuerPubkey(issuerId, SIM_ACCOUNT);
+    if (!registered) {
+      return NextResponse.json(
+        { error: "Selected issuer is not registered on IssuerRegistry." },
+        { status: 400 },
+      );
+    }
+    const { bytes: localKey } = issuerPublicKey();
+    if (!Buffer.from(registered).equals(localKey)) {
+      return NextResponse.json(
+        {
+          error:
+            "ISSUER_PRIVATE_KEY does not match the selected issuer's registered public key on IssuerRegistry. Choose the issuer that matches your server key, or update ISSUER_PRIVATE_KEY.",
+        },
+        { status: 403 },
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
