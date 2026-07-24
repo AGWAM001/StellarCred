@@ -87,7 +87,9 @@ export async function computeWitness(
 export async function proveWithBackend(
   type: CredentialType,
   witness: Uint8Array,
+  onStep?: (step: "circuit" | "proof") => void,
 ): Promise<GeneratedProof> {
+  onStep?.("circuit");
   const circuitRes = await fetch(`/circuits/${type}.json`);
   if (!circuitRes.ok) {
     throw new Error(
@@ -99,6 +101,7 @@ export async function proveWithBackend(
   const { UltraHonkBackend } = await loadBb();
   const backend = new UltraHonkBackend(circuit.bytecode, { threads: 1 });
   try {
+    onStep?.("proof");
     const { proof, publicInputs } = await backend.generateProof(witness, {
       keccak: true,
     });

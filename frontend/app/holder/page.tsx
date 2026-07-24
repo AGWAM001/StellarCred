@@ -43,7 +43,7 @@ import {
 import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
 import { usePreviewMode } from "@/lib/wallet-context";
 import CopyButton from "@/components/CopyButton";
-
+import { ProofProgress, type ProgressStep, type StepStatus } from "@/components/ProofProgress";
 // Parse "90 days", "30 days" etc from the credential's expiry string.
 function credTtlSecs(cred: Credential): number {
   const match = cred.expiry?.match(/(\d+)/);
@@ -388,7 +388,7 @@ function ImportPanel({ onImport, onCancel }: { onImport: (c: Credential) => void
 
 // ── ProofFlow ─────────────────────────────────────────────────────────────────
 
-type Stage = "witness" | "proving" | "generated" | "submitting" | "confirmed" | "error";
+type Stage = "witness" | "circuit" | "proof" | "generated" | "submitting" | "confirmed";
 
 function ProofFlow({
   cred,
@@ -414,15 +414,13 @@ function ProofFlow({
     let cancelled = false;
     (async () => {
       try {
-        // Stage 1: witness (server)
+        setStage("witness");
         const witness = await computeWitness(
           cred.type,
           cred as unknown as Record<string, unknown>,
         );
         if (cancelled) return;
 
-        // Stage 2: prove (browser WASM)
-        setStage("proving");
         const start = Date.now();
         timerRef.current = setInterval(
           () => setElapsed(Math.floor((Date.now() - start) / 1000)),
@@ -432,6 +430,9 @@ function ProofFlow({
         const result = await proveWithBackend(
           cred.type,
           witness,
+          (step) => {
+            if (!cancelled) setStage(step);
+          }
         );
         clearInterval(timerRef.current!);
         if (cancelled) return;
@@ -440,10 +441,7 @@ function ProofFlow({
         setStage("generated");
       } catch (e) {
         clearInterval(timerRef.current!);
-        if (!cancelled) {
-          setError(parseContractError((e as Error).message));
-          setStage("error");
-        }
+        if (!cancelled) setError(parseContractError((e as Error).message));
       }
     })();
     return () => {
@@ -469,9 +467,42 @@ function ProofFlow({
       setStage("confirmed");
     } catch (e) {
       setError(parseContractError((e as Error).message));
-      setStage("error");
     }
   }
+
+  const getStatus = (stepStage: string): StepStatus => {
+    const order = ["witness", "circuit", "proof", "generated", "submitting", "confirmed"];
+    const currentIndex = order.indexOf(stage);
+    const stepIndex = order.indexOf(stepStage);
+    
+    if (error && currentIndex === stepIndex) return "error";
+    if (currentIndex === stepIndex) return "active";
+    if (currentIndex > stepIndex) return "done";
+    return "pending";
+  };
+
+  const steps: ProgressStep[] = [
+    {
+      label: "Loading circuit",
+      status: getStatus("circuit"),
+      error: (error && stage === "circuit") ? error.friendly : undefined,
+    },
+    {
+      label: "Computing witness",
+      status: getStatus("witness"),
+      error: (error && stage === "witness") ? error.friendly : undefined,
+    },
+    {
+      label: "Generating proof" + (stage === "proof" && !error ? ` (${elapsed}s)` : ""),
+      status: getStatus("proof"),
+      error: (error && stage === "proof") ? error.friendly : undefined,
+    },
+    {
+      label: "Submitting to Stellar",
+      status: getStatus("submitting"),
+      error: (error && stage === "submitting") ? error.friendly : undefined,
+    }
+  ];
 
   const proofDone = stage === "generated" || stage === "submitting" || stage === "confirmed";
   const submitDone = stage === "confirmed";
@@ -494,89 +525,37 @@ function ProofFlow({
         </div>
 
         {/* step list */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
-          <ProofStep
-            icon={<IconServer size={14} stroke={1.8} />}
-            title="Compute witness"
-            subtitle="Poseidon2 · secp256k1 · server-side Noir execution"
-            state={
-              stage === "witness"  ? "active" :
-              stage === "error"    ? "idle"   : "done"
-            }
-            detail={
-              stage === "witness" ? <AnimatedDots text="Running circuit on server" /> : null
-            }
-          />
-
-          <ProofStep
-            icon={<IconCpu size={14} stroke={1.8} />}
-            title="UltraHonk proof"
-            subtitle="BN254 · keccak transcript · browser WASM"
-            state={
-              stage === "proving"  ? "active" :
-              proofDone            ? "done"   : "idle"
-            }
-            detail={
-              stage === "proving" ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.65rem" }}>
-                  <ProvingBar />
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
-                      Generating proof in browser…
-                    </span>
-                    <span className="mono" style={{ fontSize: "0.72rem", color: "var(--faint)" }}>
-                      {elapsed}s
-                    </span>
-                  </div>
-                  <span style={{ fontSize: "0.72rem", color: "var(--faint)" }}>
-                    First run loads the WASM prover (~5–15 s)
-                  </span>
-                </div>
-              ) : proofDone && proof ? (
-                <div style={{ marginTop: "0.4rem" }}>
-                  <span className="mono" style={{ fontSize: "0.75rem", color: "var(--accent)" }}>
-                    π {truncateHash("0x" + toHex(proof.proof))}
-                  </span>
-                  <span className="mono faint" style={{ fontSize: "0.72rem", marginLeft: "0.5rem" }}>
-                    {proof.proof.length.toLocaleString()} bytes
-                  </span>
-                </div>
-              ) : null
-            }
-          />
-
-          <ProofStep
-            icon={<IconCloudUpload size={14} stroke={1.8} />}
-            title="Submit to Stellar"
-            subtitle="ProofRegistry.submit_proof · Freighter signature"
-            state={
-              stage === "submitting" ? "active" :
-              submitDone             ? "done"   : "idle"
-            }
-            last
-            detail={
-              stage === "submitting" ? (
-                <AnimatedDots text="Writing to ProofRegistry" style={{ marginTop: "0.35rem" }} />
-              ) : submitDone ? (
-                <div
-                  className="row"
-                  style={{ gap: "0.5rem", marginTop: "0.3rem", alignItems: "center" }}
-                >
-                  <a
-                    href={EXPLORER_TX(txHash)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="row accent"
-                    style={{ gap: "0.3rem", fontSize: "0.775rem" }}
-                  >
-                    {txHash.slice(0, 8)}...{txHash.slice(-6)}
-                    <IconExternalLink size={12} />
-                  </a>
-                  <CopyButton value={txHash} />
-                </div>
-              ) : null
-            }
-          />
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+          <ProofProgress steps={steps} />
+          
+          {proofDone && proof && stage !== "submitting" && stage !== "confirmed" && (
+            <div style={{ marginTop: "0.5rem" }}>
+              <span className="mono" style={{ fontSize: "0.75rem", color: "var(--accent)" }}>
+                π {truncateHash("0x" + toHex(proof.proof))}
+              </span>
+              <span className="mono faint" style={{ fontSize: "0.72rem", marginLeft: "0.5rem" }}>
+                {proof.proof.length.toLocaleString()} bytes
+              </span>
+            </div>
+          )}
+          {submitDone && (
+            <div
+              className="row"
+              style={{ gap: "0.5rem", marginTop: "0.5rem", alignItems: "center" }}
+            >
+              <a
+                href={EXPLORER_TX(txHash)}
+                target="_blank"
+                rel="noreferrer"
+                className="row accent"
+                style={{ gap: "0.3rem", fontSize: "0.775rem" }}
+              >
+                {txHash.slice(0, 8)}...{txHash.slice(-6)}
+                <IconExternalLink size={12} />
+              </a>
+              <CopyButton value={txHash} />
+            </div>
+          )}
         </div>
 
         {/* CTA */}
@@ -591,7 +570,7 @@ function ProofFlow({
           </button>
         )}
 
-        {stage === "error" && error && (
+        {error && (
           <div
             style={{
               marginTop: "1.5rem",
@@ -604,9 +583,6 @@ function ProofFlow({
             <div className="row" style={{ gap: "0.5rem", color: "var(--danger)", fontWeight: 600, fontSize: "0.875rem" }}>
               <IconAlertTriangle size={15} />
               {error.code !== null ? `Contract error #${error.code}` : "Could not complete"}
-            </div>
-            <div style={{ fontSize: "0.8125rem", marginTop: "0.45rem", lineHeight: 1.65, color: "var(--text)" }}>
-              {error.friendly}
             </div>
             {error.raw !== error.friendly && (
               <div style={{ marginTop: "0.6rem" }}>
