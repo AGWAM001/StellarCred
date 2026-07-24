@@ -58,10 +58,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm tsc --noEmit
-
-      - name: Build
+      - name: Typecheck & Build
         run: pnpm build
         env:
           # Dummy values so the build doesn't error on missing env vars
