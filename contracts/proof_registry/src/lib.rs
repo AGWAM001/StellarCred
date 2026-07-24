@@ -76,6 +76,7 @@ pub struct ProofSubmission {
 
 #[contracttype]
 pub enum DataKey {
+    Admin,
     Verifier,
     IssuerRegistry,
     /// Cached verification, keyed by (holder, credential_type).
@@ -93,12 +94,11 @@ pub enum Error {
     /// The public key the proof was made against does not match the registered
     /// issuer's key.
     IssuerKeyMismatch = 5,
+    ProofNotFound = 6,
     /// The batch contains more than `MAX_BATCH_SIZE` submissions.
-    BatchTooLarge = 6,
+    BatchTooLarge = 7,
     /// The batch must contain at least one submission.
-    BatchEmpty = 7,
-    /// Attempted to revoke a proof that does not exist.
-    ProofNotFound = 8,
+    BatchEmpty = 8,
     /// Two or more submissions in the batch share the same `credential_type`;
     /// only the last write would survive, so the batch is rejected outright.
     DuplicateCredentialType = 9,
@@ -117,17 +117,51 @@ fn vec_u32_to_bytes(env: &Env, vec: &Vec<u32>) -> Bytes {
 
 #[contractimpl]
 impl ProofRegistry {
-    /// `verifier` and `issuer_registry` are the deployed contract addresses.
-    pub fn __constructor(env: Env, verifier: Address, issuer_registry: Address) {
+    /// `admin`, `verifier` and `issuer_registry` are the deployed contract addresses.
+    pub fn __constructor(env: Env, admin: Address, verifier: Address, issuer_registry: Address) {
+        env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Verifier, &verifier);
         env.storage()
             .instance()
             .set(&DataKey::IssuerRegistry, &issuer_registry);
     }
 
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    pub fn set_admin(env: Env, new_admin: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+    }
+
+    pub fn admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized))
+    }
+
     /// Verify a proof and, if valid, cache it for `holder` until `expiry`
     /// (ledger timestamp, seconds). The holder authorizes their own submission.
     /// `issuer_id` must be registered and trusted for `credential_type`.
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
+    // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
+    // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
+    // value-based `publish` API, we maintain consistency with other modules to avoid 
+    // introducing architectural mismatch.
+    #[allow(deprecated)]
     pub fn submit_proof(
         env: Env,
         holder: Address,
@@ -171,17 +205,22 @@ impl ProofRegistry {
         env.storage()
             .persistent()
             .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+
+        // Emit an event matching the event emission shape in the batch-proof path.
+        env.events().publish(
+            (symbol_short!("proof"), symbol_short!("verified")),
+            record.expiry,
+        );
     }
 
-    /// Verify and store multiple proofs in a single atomic transaction.
-    ///
-    /// Accepts up to [`MAX_BATCH_SIZE`] (5) submissions. The holder authorises
-    /// the whole batch with a single signature. If **any** proof fails
-    /// verification — or any issuer check fails — the entire call reverts and
-    /// nothing is stored.
-    ///
-    /// One event is emitted per successfully verified credential, with the same
-    /// shape as the single-proof path, so existing listeners need no changes.
+    /// One event is emitted per successfully verified credential, matching
+    /// the event emission shape in the single-proof path.
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
+    // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
+    // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
+    // value-based `publish` API, we maintain consistency with other modules to avoid 
+    // introducing architectural mismatch.
+    #[allow(deprecated)]
     pub fn submit_proofs_batch(env: Env, holder: Address, submissions: Vec<ProofSubmission>) {
         holder.require_auth();
 
@@ -214,8 +253,7 @@ impl ProofRegistry {
 
         let now = env.ledger().timestamp();
 
-        for i in 0..len {
-            let sub = submissions.get(i).unwrap();
+        for sub in submissions.iter() {
             let public_inputs_bytes = vec_u32_to_bytes(&env, &sub.public_inputs);
 
             // Step 1: issuer must be registered and trusted for this type.
