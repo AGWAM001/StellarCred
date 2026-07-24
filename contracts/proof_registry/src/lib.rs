@@ -99,6 +99,9 @@ pub enum Error {
     BatchEmpty = 7,
     /// Attempted to revoke a proof that does not exist.
     ProofNotFound = 8,
+    /// Two or more submissions in the batch share the same `credential_type`;
+    /// only the last write would survive, so the batch is rejected outright.
+    DuplicateCredentialType = 9,
 }
 
 #[contract]
@@ -188,6 +191,20 @@ impl ProofRegistry {
         }
         if len > MAX_BATCH_SIZE {
             panic_with_error!(&env, Error::BatchTooLarge);
+        }
+
+        // Guard: reject batches with duplicate credential_type entries.
+        // The contract writes DataKey::Proof(holder, type) so duplicates would
+        // silently overwrite each other (last-write-wins), misleading the caller.
+        // MAX_BATCH_SIZE is 5, so O(n²) is fine here.
+        for i in 0..len {
+            for j in (i + 1)..len {
+                if submissions.get(i).unwrap().credential_type
+                    == submissions.get(j).unwrap().credential_type
+                {
+                    panic_with_error!(&env, Error::DuplicateCredentialType);
+                }
+            }
         }
 
         let issuer_registry_addr = Self::issuer_registry(&env);

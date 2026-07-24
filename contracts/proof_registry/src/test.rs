@@ -620,3 +620,19 @@ fn batch_empty_is_rejected() {
     let res = registry.try_submit_proofs_batch(&holder, &submissions);
     assert!(res.is_err());
 }
+
+/// A batch with two entries sharing the same credential_type must be rejected.
+#[test]
+fn batch_duplicate_credential_type_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    let sub = kyc_submission(&env, &h.issuer, 9999);
+    // Two identical kyc entries — second would silently overwrite the first.
+    let submissions = vec![&env, sub.clone(), sub];
+
+    let res = h.registry.try_submit_proofs_batch(&holder, &submissions);
+    assert!(res.is_err());
+}
