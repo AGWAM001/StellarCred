@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+extern crate std;
+
 use super::*;
 use credential_verifier::{CredentialVerifier, CredentialVerifierClient};
 use issuer_registry::{IssuerRegistry, IssuerRegistryClient};
@@ -51,9 +53,24 @@ fn u8_slice_to_vec_u32(env: &Env, slice: &[u8]) -> Vec<u32> {
     vec
 }
 
+fn get_test_wasm(env: &Env) -> Bytes {
+    let paths = [
+        "target/wasm32v1-none/release/proof_registry.wasm",
+        "../../target/wasm32v1-none/release/proof_registry.wasm",
+        "../target/wasm32v1-none/release/proof_registry.wasm",
+    ];
+    for path in paths.iter() {
+        if let Ok(wasm) = std::fs::read(path) {
+            return Bytes::from_slice(env, &wasm);
+        }
+    }
+    panic!("Could not find target/wasm32v1-none/release/proof_registry.wasm. Please run 'cargo build --target wasm32v1-none --release' first.");
+}
+
 struct Harness {
     registry: ProofRegistryClient<'static>,
     issuer: Address,
+    admin: Address,
 }
 
 fn deploy(env: &Env) -> Harness {
@@ -70,14 +87,15 @@ fn deploy(env: &Env) -> Harness {
     );
 
     // CredentialVerifier with the kyc VK.
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(env, &v_id)
         .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, VK));
 
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin.clone(), v_id, ir_id));
     Harness {
         registry: ProofRegistryClient::new(env, &pr_id),
         issuer,
+        admin,
     }
 }
 
@@ -136,10 +154,10 @@ fn rejects_wrong_issuer_key() {
         &BytesN::from_array(&env, &[3u8; 64]),
         &vec![&env, symbol_short!("kyc")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
 
     let holder = Address::generate(&env);
@@ -246,10 +264,10 @@ fn funds_threshold_stored_and_checked() {
         &pubkey_from(&env, FUNDS_PUBLIC_INPUTS),
         &vec![&env, symbol_short!("funds")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
@@ -286,10 +304,10 @@ fn age_threshold_stored_and_checked() {
         &pubkey_from(&env, AGE_PUBLIC_INPUTS),
         &vec![&env, symbol_short!("age")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, AGE_VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
@@ -332,6 +350,7 @@ struct MultiHarness {
     kyc_issuer: Address,
     funds_issuer: Address,
     age_issuer: Address,
+    admin: Address,
 }
 
 fn deploy_multi(env: &Env) -> MultiHarness {
@@ -360,18 +379,19 @@ fn deploy_multi(env: &Env) -> MultiHarness {
         &vec![env, symbol_short!("age")],
     );
 
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     let vc = CredentialVerifierClient::new(env, &v_id);
     vc.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, VK));
     vc.set_vk(&symbol_short!("funds"), &Bytes::from_slice(env, FUNDS_VK));
     vc.set_vk(&symbol_short!("age"), &Bytes::from_slice(env, AGE_VK));
 
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin.clone(), v_id, ir_id));
     MultiHarness {
         registry: ProofRegistryClient::new(env, &pr_id),
         kyc_issuer,
         funds_issuer,
         age_issuer,
+        admin,
     }
 }
 
@@ -380,6 +400,7 @@ fn deploy_multi(env: &Env) -> MultiHarness {
 fn batch_all_pass() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let h = deploy_multi(&env);
     let holder = Address::generate(&env);
 
@@ -421,6 +442,7 @@ fn batch_all_pass() {
 fn batch_one_fail_reverts_all() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let h = deploy_multi(&env);
     let holder = Address::generate(&env);
 
@@ -459,6 +481,7 @@ fn batch_one_fail_reverts_all() {
 fn batch_max_size_boundary_accepts_five() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let h = deploy(&env); // kyc-only harness
 
     // Register the same issuer for a couple of extra dummy types so we can
@@ -477,11 +500,11 @@ fn batch_max_size_boundary_accepts_five() {
         &vec![&env, symbol_short!("kyc")],
     );
 
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
 
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
@@ -515,10 +538,10 @@ fn batch_exceeds_max_size_is_rejected() {
         &pubkey_from(&env, PUBLIC_INPUTS),
         &vec![&env, symbol_short!("kyc")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
@@ -544,12 +567,68 @@ fn batch_empty_is_rejected() {
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let ir_id = env.register(IssuerRegistry, (admin.clone(),));
-    let v_id = env.register(CredentialVerifier, (admin,));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
     let submissions: Vec<ProofSubmission> = Vec::new(&env);
     let res = registry.try_submit_proofs_batch(&holder, &submissions);
+    assert!(res.is_err());
+}
+
+#[test]
+fn upgrade_by_admin_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    
+    let real_wasm = get_test_wasm(&env);
+    let new_wasm_hash = env.deployer().upload_contract_wasm(real_wasm);
+    
+    h.registry.upgrade(&new_wasm_hash);
+}
+
+#[test]
+fn upgrade_by_non_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    
+    let real_wasm = get_test_wasm(&env);
+    let new_wasm_hash = env.deployer().upload_contract_wasm(real_wasm);
+    
+    let res = h.registry
+        .mock_auths(&[])
+        .try_upgrade(&new_wasm_hash);
+    assert!(res.is_err());
+}
+
+#[test]
+fn admin_transfer_works() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    
+    let new_admin = Address::generate(&env);
+    
+    h.registry.set_admin(&new_admin);
+    assert_eq!(h.registry.admin(), new_admin);
+    
+    let real_wasm = get_test_wasm(&env);
+    let new_wasm_hash = env.deployer().upload_contract_wasm(real_wasm);
+    
+    h.registry.upgrade(&new_wasm_hash);
+}
+
+#[test]
+fn set_admin_by_non_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let new_admin = Address::generate(&env);
+    let res = h.registry
+        .mock_auths(&[])
+        .try_set_admin(&new_admin);
     assert!(res.is_err());
 }
