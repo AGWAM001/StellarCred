@@ -1,3 +1,6 @@
+packages:
+  - '.'
+
 allowBuilds:
   blake-hash: true
   bufferutil: true
