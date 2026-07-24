@@ -58,6 +58,11 @@ function attributeToValue(type: string, attributes: Record<string, string>): str
       if (!Number.isFinite(balance)) throw new Error("funds credential requires attributes.balance");
       return String(balance);
     }
+    case "accreditation": {
+      const netWorth = parseInt(attributes.net_worth ?? "", 10);
+      if (!Number.isFinite(netWorth)) throw new Error("accreditation credential requires attributes.net_worth");
+      return String(netWorth);
+    }
     default:
       throw new Error(`Unknown credential type: ${type}`);
   }
@@ -237,14 +242,15 @@ async function verifyWithPlaid(): Promise<{ ok: boolean; balance?: number; error
   return { ok: true, balance: verifiedBalance };
 }
 
-const VALID_TYPES = ["kyc", "age", "income", "jurisdiction", "funds"];
+const VALID_TYPES = ["kyc", "age", "income", "jurisdiction", "funds", "accreditation"];
 
 const TYPE_TITLE: Record<string, string> = {
   kyc: "KYC Complete",
   age: "Age Verified",
-  income: "Accredited Investor",
+  income: "Accredited (Income)",
   jurisdiction: "Jurisdiction Eligible",
   funds: "Proof of Funds",
+  accreditation: "Accredited Investor (Net Worth)",
 };
 
 function buildClaimLabel(type: string, claimParams?: ClaimParams): string {
@@ -258,6 +264,10 @@ function buildClaimLabel(type: string, claimParams?: ClaimParams): string {
     case "funds": {
       const t = Number(claimParams?.threshold ?? "10000");
       return `balance > $${t.toLocaleString("en-US")}`;
+    }
+    case "accreditation": {
+      const t = Number(claimParams?.threshold ?? "1000000");
+      return `net worth ≥ $${t.toLocaleString("en-US")}`;
     }
     case "jurisdiction":
       return "country not restricted";

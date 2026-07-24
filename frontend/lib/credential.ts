@@ -38,7 +38,7 @@ export const TYPE_META: Record<
   kyc: { title: "KYC Complete", claim: "identity verified", issuable: true },
   age: { title: "Age Verified", claim: "age ≥ 18", issuable: true, attribute: "Date of birth" },
   income: {
-    title: "Accredited Investor",
+    title: "Accredited (Income)",
     claim: "income > $200,000",
     issuable: true,
     attribute: "Annual income (USD)",
@@ -54,6 +54,12 @@ export const TYPE_META: Record<
     claim: "balance > $10,000",
     issuable: true,
     attribute: "Account balance (USD)",
+  },
+  accreditation: {
+    title: "Accredited Investor",
+    claim: "net worth ≥ $1,000,000",
+    issuable: true,
+    attribute: "Net worth (USD)",
   },
 };
 

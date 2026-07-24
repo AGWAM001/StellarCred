@@ -59,6 +59,7 @@ function VerifyInner() {
   const [attributes, setAttributes] = useState<Record<string, string>>({
     date_of_birth: "1995-06-15",
     income: "250000",
+    net_worth: "1500000",
     country_code: "566",
   });
   const [expiry, setExpiry] = useState("90 days");
@@ -320,7 +321,9 @@ function VerifyInner() {
                               ? `age ≥ ${claimParamsFromUrl.threshold_years}`
                               : key === "income" && claimParamsFromUrl.threshold
                                 ? `income > $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
-                                : m.claim}
+                                : key === "accreditation" && claimParamsFromUrl.threshold
+                                  ? `net worth ≥ $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
+                                  : m.claim}
                         </span>
                       </div>
 
@@ -346,6 +349,16 @@ function VerifyInner() {
                             type="number"
                             value={attributes.income}
                             onChange={(e) => setAttr("income", e.target.value)}
+                          />
+                        </div>
+                      )}
+                      {on && key === "accreditation" && (
+                        <div style={{ marginTop: "0.75rem" }} onClick={(e) => e.stopPropagation()}>
+                          <label className="field-label">{m.attribute}</label>
+                          <input
+                            type="number"
+                            value={attributes.net_worth}
+                            onChange={(e) => setAttr("net_worth", e.target.value)}
                           />
                         </div>
                       )}
