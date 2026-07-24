@@ -207,6 +207,11 @@ export async function submitProofsBatch(params: {
     const expiry = now + s.ttlSecs;
 
     // Convert s.publicInputs (Uint8Array) to an array of u32 (big-endian).
+    if (s.publicInputs.length % 4 !== 0) {
+      throw new Error(
+        `publicInputs for credential "${s.credentialType}" has length ${s.publicInputs.length}, which is not a multiple of 4 bytes.`,
+      );
+    }
     const u32s: number[] = [];
     for (let i = 0; i < s.publicInputs.length; i += 4) {
       const val =

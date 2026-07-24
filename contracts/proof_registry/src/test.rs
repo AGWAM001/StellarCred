@@ -380,6 +380,7 @@ fn deploy_multi(env: &Env) -> MultiHarness {
 fn batch_all_pass() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let h = deploy_multi(&env);
     let holder = Address::generate(&env);
 
@@ -459,6 +460,7 @@ fn batch_one_fail_reverts_all() {
 fn batch_max_size_boundary_accepts_five() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let h = deploy(&env); // kyc-only harness
 
     // Register the same issuer for a couple of extra dummy types so we can
