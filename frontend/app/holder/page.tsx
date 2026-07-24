@@ -40,6 +40,8 @@ import {
   markAllProved,
   parseCredential,
 } from "@/lib/credential";
+import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
+import { usePreviewMode } from "@/lib/wallet-context";
 import CopyButton from "@/components/CopyButton";
 
 // Parse "90 days", "30 days" etc from the credential's expiry string.
@@ -68,11 +70,13 @@ function CredCard({
   address,
   onProve,
   onRemove,
+  isPreview,
 }: {
   c: Credential;
   address: string;
   onProve: () => void;
   onRemove: () => void;
+  isPreview?: boolean;
 }) {
   const status = proofStatus(c);
 
@@ -116,6 +120,7 @@ function CredCard({
 
         {/* right: badges + button + trash */}
         <div className="row" style={{ gap: "0.4rem", flexShrink: 0 }}>
+          {isPreview && <Badge variant="pending">Preview</Badge>}
           <Badge variant="verified" dot={false}>Held</Badge>
           {status === "proved" && <Badge variant="verified" dot={false}>On-chain</Badge>}
           <button
@@ -179,15 +184,17 @@ type PageView =
   | { kind: "batch"; creds: Credential[] };
 
 export default function HolderPage() {
-  const { address } = useWallet();
+  const { address, connect } = useWallet();
+  const isPreview = usePreviewMode();
   const [creds, setCreds] = useState<Credential[]>([]);
   const [view, setView] = useState<PageView>({ kind: "list" });
   const [importing, setImporting] = useState(false);
 
   useEffect(() => setCreds(loadCredentials()), []);
 
-  const unproved = creds.filter((c) => proofStatus(c) !== "proved");
-  const proved   = creds.filter((c) => proofStatus(c) === "proved");
+  const displayCreds = isPreview ? PREVIEW_CREDENTIALS : creds;
+  const unproved = displayCreds.filter((c) => proofStatus(c) !== "proved");
+  const proved   = displayCreds.filter((c) => proofStatus(c) === "proved");
 
   // Credentials eligible for "Prove all" (unproved or expired), capped at 5.
   const batchCandidates = unproved.slice(0, 5);
@@ -204,6 +211,29 @@ export default function HolderPage() {
       </div>
 
       <ConfigBanner />
+
+      {isPreview && (
+        <div
+          style={{
+            padding: "0.85rem 1rem",
+            borderRadius: "var(--radius)",
+            background: "rgba(62,207,142,0.1)",
+            border: "1px solid rgba(62,207,142,0.3)",
+            color: "var(--text)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "1.5rem",
+          }}
+        >
+          <span style={{ fontSize: "0.875rem", fontWeight: 500 }}>
+            Connect wallet to use your real credentials
+          </span>
+          <button className="btn btn-primary btn-sm" onClick={connect}>
+            Connect Wallet
+          </button>
+        </div>
+      )}
 
       {view.kind === "single" ? (
         <ProofFlow
@@ -252,6 +282,7 @@ export default function HolderPage() {
                   address={address}
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
+                  isPreview={isPreview}
                 />
               ))}
 
@@ -287,6 +318,7 @@ export default function HolderPage() {
                   address={address}
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
+                  isPreview={isPreview}
                 />
               ))}
             </div>
