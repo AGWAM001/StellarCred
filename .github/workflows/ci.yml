@@ -76,7 +76,7 @@ jobs:
   sdk-integration:
     name: SDK integration tests (testnet)
     runs-on: ubuntu-latest
-    if: vars.SC_TEST_WALLET != ''
+    if: vars.SC_TEST_WALLET != '' && vars.STELLARCRED_REGISTRY_ID != ''
     defaults:
       run:
         working-directory: frontend
