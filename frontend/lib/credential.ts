@@ -101,6 +101,19 @@ export function markProved(commitment: string, txHash: string): Credential[] {
   return next;
 }
 
+/** Mark multiple credentials as proved in a single localStorage write. */
+export function markAllProved(commitments: string[], txHash: string): Credential[] {
+  const set = new Set(commitments);
+  const now = Math.floor(Date.now() / 1000);
+  const next = loadCredentials().map((c) =>
+    set.has(c.commitment)
+      ? { ...c, provedAt: now, provedTxHash: txHash }
+      : c,
+  );
+  localStorage.setItem(KEY, JSON.stringify(next));
+  return next;
+}
+
 export function removeCredential(commitment: string): Credential[] {
   const next = loadCredentials().filter((c) => c.commitment !== commitment);
   localStorage.setItem(KEY, JSON.stringify(next));

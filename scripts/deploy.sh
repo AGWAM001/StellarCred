@@ -37,7 +37,7 @@ echo "Deploying credential_verifier..."
 CREDENTIAL_VERIFIER_ID="$(deploy credential_verifier --admin "$ADMIN")"
 
 echo "Deploying proof_registry (-> verifier, issuer_registry)..."
-PROOF_REGISTRY_ID="$(deploy proof_registry --verifier "$CREDENTIAL_VERIFIER_ID" --issuer_registry "$ISSUER_REGISTRY_ID")"
+PROOF_REGISTRY_ID="$(deploy proof_registry --admin "$ADMIN" --verifier "$CREDENTIAL_VERIFIER_ID" --issuer_registry "$ISSUER_REGISTRY_ID")"
 
 echo "Deploying gated_pool (-> registry)..."
 GATED_POOL_ID="$(deploy gated_pool --registry "$PROOF_REGISTRY_ID")"
