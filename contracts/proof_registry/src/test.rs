@@ -27,6 +27,7 @@ const AGE_VK: &[u8] = include_bytes!("../../../fixtures/age/vk");
 const AGE_PROOF: &[u8] = include_bytes!("../../../fixtures/age/proof");
 const AGE_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/age/public_inputs");
 
+
 // Extract the issuer secp256k1 key (x || y) from any fixture's public inputs
 // (fields 1..65, low byte of each 32-byte field).
 fn pubkey_from(env: &Env, public_inputs: &[u8]) -> BytesN<64> {
