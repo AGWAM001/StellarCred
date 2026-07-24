@@ -64,6 +64,7 @@ function VerifyInner() {
   const [expiry, setExpiry] = useState("90 days");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [urlError, setUrlError] = useState("");
   const [done, setDone] = useState(false);
   const [plaidBalance, setPlaidBalance] = useState<number | null>(null);
   const [plaidAccounts, setPlaidAccounts] = useState<{ name: string; available: number }[]>([]);
@@ -128,7 +129,18 @@ function VerifyInner() {
     if (returnUrl && address) {
       // Resolve against the current origin so relative ("/verifier") and
       // absolute ("https://app.xyz/deposit") return URLs both work.
-      const dest = new URL(returnUrl, window.location.origin);
+      let dest;
+      try {
+        dest = new URL(returnUrl, window.location.origin);
+        // Require https for external URLs (same-origin may use relative paths)
+        if (dest.protocol !== "https:" && dest.origin !== window.location.origin) {
+          setUrlError("Invalid return_url: only https URLs are allowed");
+          return;
+        }
+      } catch {
+        setUrlError("Invalid return_url: could not parse URL");
+        return;
+      }
       dest.searchParams.set("sc_verified", "true");
       dest.searchParams.set("sc_wallet", address);
       if (dest.origin === window.location.origin) {
@@ -145,7 +157,18 @@ function VerifyInner() {
   // Display label for the "Returning to …" message: path for same-origin
   // (relative) return URLs, hostname for absolute external ones.
   let returnLabel = "";
+  let returnUrlIsValid = false;
   if (returnUrl) {
+    try {
+      const u = new URL(returnUrl, window.location.origin);
+      if (u.protocol === "https:" || u.origin === window.location.origin) {
+        returnUrlIsValid = true;
+      }
+    } catch {
+      // invalid — will be shown as urlError
+    }
+  }
+  if (returnUrl && returnUrlIsValid) {
     if (returnUrl.startsWith("/")) {
       returnLabel = returnUrl;
     } else {
@@ -237,10 +260,10 @@ function VerifyInner() {
                 <IconCheck size={24} color="var(--accent)" stroke={2.5} />
               </span>
               <div style={{ fontWeight: 500 }}>
-                {returnUrl ? "Verified" : "Credential saved"}
+                {returnUrlIsValid ? "Verified" : "Credential saved"}
               </div>
               <div className="muted" style={{ fontSize: "0.85rem", marginTop: "0.3rem" }}>
-                {returnUrl
+                {returnUrlIsValid
                   ? `Returning to ${returnLabel}…`
                   : "Credential saved — redirecting to your wallet…"}
               </div>
@@ -250,7 +273,10 @@ function VerifyInner() {
               <label className="field-label">Credential type</label>
               {locked && (
                 <p className="faint" style={{ fontSize: "0.8125rem", margin: "0.4rem 0 0" }}>
-                  A protocol requested the <strong style={{ color: "var(--accent)" }}>{requiredClaim}</strong> credential.
+                  {returnUrlIsValid
+                    ? <>Requested by <strong style={{ color: "var(--accent)" }}>{returnLabel}</strong> &mdash; the <strong style={{ color: "var(--accent)" }}>{requiredClaim}</strong> credential</>
+                    : <>A protocol requested the <strong style={{ color: "var(--accent)" }}>{requiredClaim}</strong> credential.</>
+                  }
                 </p>
               )}
               <div className="stack" style={{ gap: "0.5rem", marginTop: "0.5rem", marginBottom: "1.25rem" }}>
@@ -426,9 +452,9 @@ function VerifyInner() {
                 )}
               </button>
 
-              {error && (
+              {(error || urlError) && (
                 <p style={{ marginTop: "0.75rem", fontSize: "0.8125rem", color: "var(--danger)" }}>
-                  {error}
+                  {error || urlError}
                 </p>
               )}
 
