@@ -5,8 +5,8 @@ use credential_verifier::{CredentialVerifier, CredentialVerifierClient};
 use issuer_registry::{IssuerRegistry, IssuerRegistryClient};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Ledger as _},
-    vec, Address, BytesN, Bytes, Env,
+    testutils::{Address as _, Events as _, Ledger as _},
+    vec, Address, BytesN, Bytes, Env, IntoVal,
 };
 
 // Real UltraHonk artifacts (kyc_proof circuit, Noir beta.9 + bb 0.87.0), so
@@ -53,6 +53,7 @@ fn u8_slice_to_vec_u32(env: &Env, slice: &[u8]) -> Vec<u32> {
 
 struct Harness {
     registry: ProofRegistryClient<'static>,
+    registry_id: Address,
     issuer: Address,
 }
 
@@ -77,6 +78,7 @@ fn deploy(env: &Env) -> Harness {
     let pr_id = env.register(ProofRegistry, (v_id, ir_id));
     Harness {
         registry: ProofRegistryClient::new(env, &pr_id),
+        registry_id: pr_id,
         issuer,
     }
 }
@@ -215,6 +217,69 @@ fn revoke_clears_proof() {
     submit(&env, &h, &holder, 1000);
     h.registry.revoke_proof(&holder, &symbol_short!("kyc"));
     assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+}
+
+#[test]
+fn issuer_revoke_invalidates_proof() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(h.registry.check_claim(&holder, &symbol_short!("kyc"), &None));
+
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!h.registry.check_claim(&holder, &symbol_short!("kyc"), &None));
+    // Expiry data preserved for audit even though proof is no longer valid.
+    let (_valid, _at, expiry) = h.registry.is_verified(&holder, &symbol_short!("kyc"));
+    assert_eq!(expiry, 1000);
+}
+
+#[test]
+fn issuer_revoke_rejects_wrong_issuer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    let res = h.registry.try_revoke(&stranger, &holder, &symbol_short!("kyc"));
+    assert!(res.is_err());
+    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+}
+
+#[test]
+fn issuer_revoke_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
+            (
+                h.registry_id.clone(),
+                (symbol_short!("revoked"),).into_val(&env),
+                (
+                    holder.clone(),
+                    symbol_short!("kyc"),
+                    h.issuer.clone(),
+                    env.ledger().timestamp()
+                )
+                    .into_val(&env),
+            ),
+        ],
+    );
 }
 
 // ── check_claim / threshold tests ────────────────────────────────────────────

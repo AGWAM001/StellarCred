@@ -58,6 +58,8 @@ pub struct ProofRecord {
     /// value that was committed to in the proof's public inputs. None for types
     /// with no numeric threshold (kyc, jurisdiction).
     pub threshold: Option<u64>,
+    /// Set by the registered issuer via `revoke`. Expiry data is kept for audit.
+    pub revoked: bool,
 }
 
 /// A single proof submission inside a batch. Mirrors the individual parameters
@@ -95,6 +97,8 @@ pub enum Error {
     BatchTooLarge = 6,
     /// The batch must contain at least one submission.
     BatchEmpty = 7,
+    /// Attempted to revoke a proof that does not exist.
+    ProofNotFound = 8,
 }
 
 #[contract]
@@ -158,6 +162,7 @@ impl ProofRegistry {
             verified_at: env.ledger().timestamp(),
             expiry,
             threshold: Self::extract_threshold(&credential_type, &public_inputs),
+            revoked: false,
         };
         env.storage().persistent().set(&key, &record);
         env.storage()
@@ -218,6 +223,7 @@ impl ProofRegistry {
                 verified_at: now,
                 expiry: sub.expiry,
                 threshold: Self::extract_threshold(&sub.credential_type, &public_inputs_bytes),
+                revoked: false,
             };
             env.storage().persistent().set(&key, &record);
             env.storage()
@@ -242,7 +248,7 @@ impl ProofRegistry {
             .get::<_, ProofRecord>(&DataKey::Proof(holder, credential_type))
         {
             Some(r) => {
-                let valid = r.expiry > env.ledger().timestamp();
+                let valid = !r.revoked && r.expiry > env.ledger().timestamp();
                 (valid, r.verified_at, r.expiry)
             }
             None => (false, 0, 0),
@@ -265,7 +271,7 @@ impl ProofRegistry {
             .get::<_, ProofRecord>(&DataKey::Proof(holder, credential_type))
         {
             Some(r) => {
-                if r.expiry <= env.ledger().timestamp() {
+                if r.revoked || r.expiry <= env.ledger().timestamp() {
                     return false;
                 }
                 match min_threshold {
@@ -283,6 +289,34 @@ impl ProofRegistry {
         env.storage()
             .persistent()
             .remove(&DataKey::Proof(holder, credential_type));
+    }
+
+    /// Invalidate a holder's cached proof. Only the registered issuer for
+    /// `credential_type` may call this (e.g. when KYC status changes).
+    pub fn revoke(env: Env, issuer: Address, holder: Address, credential_type: Symbol) {
+        issuer.require_auth();
+
+        let registry = IssuerClient::new(&env, &Self::issuer_registry(&env));
+        if !registry.is_valid_issuer(&issuer, &credential_type) {
+            panic_with_error!(&env, Error::IssuerNotTrusted);
+        }
+
+        let key = DataKey::Proof(holder.clone(), credential_type.clone());
+        let mut record: ProofRecord = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::ProofNotFound));
+        record.revoked = true;
+        env.storage().persistent().set(&key, &record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+
+        env.events().publish(
+            (symbol_short!("revoked"),),
+            (holder, credential_type, issuer, env.ledger().timestamp()),
+        );
     }
 
     pub fn verifier_address(env: Env) -> Address {

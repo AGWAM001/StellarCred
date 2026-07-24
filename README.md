@@ -220,6 +220,12 @@ cd frontend && pnpm install && pnpm dev
 
 ---
 
+## Deployments
+
+A public record of deployed contract IDs on testnet and mainnet, along with instructions to verify the bytecode integrity from source, is maintained in [DEPLOYMENTS.md](DEPLOYMENTS.md).
+
+---
+
 ## Run it end to end (testnet)
 
 One-time toolchain (macOS):
@@ -271,6 +277,27 @@ call `register_issuer` on the existing IssuerRegistry with the new public key.
 
 > In-browser proving uses cross-origin isolation (COOP/COEP headers in
 > `next.config.mjs`) for multithreading, falling back to single-threaded.
+
+---
+
+## Run it end to end (mainnet)
+
+Deploy and wire the contracts on the Stellar Mainnet:
+
+1. **Prepare a funded mainnet identity:**
+   Import your funded mainnet deployment account into the Stellar CLI:
+   ```bash
+   stellar keys import deployer --private-key <your-secret-key>
+   ```
+
+2. **Deploy, wire, and register VKs:**
+   Run the mainnet deployment script (providing your private issuer key in the environment for registration):
+   ```bash
+   ISSUER_PRIVATE_KEY=<hex> SOURCE=deployer ./scripts/deploy-mainnet.sh
+   ```
+
+3. **Configure the frontend:**
+   Copy the printed environment variables to your production environment configuration (e.g., `frontend/.env.local` for local production builds).
 
 ---
 
