@@ -49,8 +49,8 @@ function VerifyInner() {
   // so the witness route can use them at prove time instead of hardcoded values.
   const minThresholdParam = searchParams.get("min_threshold") ?? undefined;
   const claimParamsFromUrl = {
-    threshold_years: searchParams.get("threshold_years") ?? minThresholdParam ?? undefined,
-    threshold: searchParams.get("threshold") ?? minThresholdParam ?? undefined,
+    threshold_years: searchParams.get("threshold_years") ?? (claimParam === "age" ? minThresholdParam : undefined),
+    threshold: searchParams.get("threshold") ?? (claimParam === "funds" || claimParam === "income" ? minThresholdParam : undefined),
     restricted: searchParams.get("restricted")?.split(",").filter(Boolean) ?? undefined,
   };
 
@@ -217,7 +217,10 @@ function VerifyInner() {
       const res = await fetch("/api/issue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          returnUrl: returnUrl ?? undefined,
+        }),
       });
       // 202 means Persona identity verification is required — redirect user.
       if (res.status === 202) {
