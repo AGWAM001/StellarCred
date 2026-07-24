@@ -356,6 +356,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "revoked"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "threshold"
                     },
                     "val": "void"

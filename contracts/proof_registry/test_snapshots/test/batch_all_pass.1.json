@@ -5559,6 +5559,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "revoked"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "threshold"
                     },
                     "val": {
@@ -5614,6 +5622,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "revoked"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "threshold"
                     },
                     "val": {
@@ -5665,6 +5681,14 @@
                     },
                     "val": {
                       "u64": "9999"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "revoked"
+                    },
+                    "val": {
+                      "bool": false
                     }
                   },
                   {
