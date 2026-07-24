@@ -221,7 +221,7 @@ impl ProofRegistry {
     // value-based `publish` API, we maintain consistency with other modules to avoid 
     // introducing architectural mismatch.
     #[allow(deprecated)]
-    pub fn submit_proofs_batch(env: Env, holder: Address, submissions: Vec<ProofSubmission>) {
+    pub fn submit_proofs(env: Env, holder: Address, submissions: Vec<ProofSubmission>) -> Vec<bool> {
         holder.require_auth();
 
         let len = submissions.len();
@@ -292,6 +292,12 @@ impl ProofRegistry {
                 record.expiry,
             );
         }
+
+        let mut results = Vec::new(&env);
+        for _ in 0..len {
+            results.push_back(true);
+        }
+        results
     }
 
     /// Returns `(is_currently_valid, verified_at, expiry)`. `is_currently_valid`

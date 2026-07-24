@@ -395,7 +395,7 @@ fn age_threshold_stored_and_checked() {
     assert!(!registry.check_claim(&holder, &symbol_short!("age"), &Some(21)));
 }
 
-// ── submit_proofs_batch tests ─────────────────────────────────────────────────
+// ── submit_proofs tests ─────────────────────────────────────────────────
 
 /// Helper: build a ProofSubmission for the kyc fixture.
 fn kyc_submission(env: &Env, issuer: &Address, expiry: u64) -> ProofSubmission {
@@ -495,7 +495,7 @@ fn batch_all_pass() {
         },
     ];
 
-    h.registry.submit_proofs_batch(&holder, &submissions);
+    h.registry.submit_proofs(&holder, &submissions);
 
     assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
     assert!(h.registry.is_verified(&holder, &symbol_short!("funds")).0);
@@ -534,7 +534,7 @@ fn batch_one_fail_reverts_all() {
         },
     ];
 
-    let res = h.registry.try_submit_proofs_batch(&holder, &submissions);
+    let res = h.registry.try_submit_proofs(&holder, &submissions);
     assert!(res.is_err());
 
     // The valid kyc proof must NOT have been stored because the batch reverted.
@@ -591,7 +591,7 @@ fn batch_max_size_boundary_accepts_five() {
     ];
 
     // Must not panic — 5 distinct types is within the allowed maximum.
-    registry.submit_proofs_batch(&holder, &submissions);
+    registry.submit_proofs(&holder, &submissions);
     assert!(registry.is_verified(&holder, &types[0]).0);
     assert!(registry.is_verified(&holder, &types[4]).0);
 }
@@ -630,7 +630,7 @@ fn batch_exceeds_max_size_is_rejected() {
         sub,
     ];
 
-    let res = registry.try_submit_proofs_batch(&holder, &submissions);
+    let res = registry.try_submit_proofs(&holder, &submissions);
     assert!(res.is_err());
 }
 
@@ -647,7 +647,7 @@ fn batch_empty_is_rejected() {
     let holder = Address::generate(&env);
 
     let submissions: Vec<ProofSubmission> = Vec::new(&env);
-    let res = registry.try_submit_proofs_batch(&holder, &submissions);
+    let res = registry.try_submit_proofs(&holder, &submissions);
     assert!(res.is_err());
 }
 
@@ -663,7 +663,7 @@ fn batch_duplicate_credential_type_is_rejected() {
     // Two identical kyc entries — second would silently overwrite the first.
     let submissions = vec![&env, sub.clone(), sub];
 
-    let res = h.registry.try_submit_proofs_batch(&holder, &submissions);
+    let res = h.registry.try_submit_proofs(&holder, &submissions);
     assert!(res.is_err());
 }
 
