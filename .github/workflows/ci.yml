@@ -34,6 +34,90 @@ jobs:
       - name: Run tests
         run: cargo test
 
+  circuits:
+    name: Circuit compile
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: circuits
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Noir toolchain
+        run: |
+          curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+          noirup -v 1.0.0-beta.9
+
+      - name: Compile circuits
+        run: |
+          export PATH="$HOME/.nargo/bin:$PATH"
+          for dir in commit kyc_proof age_proof income_proof jurisdiction_proof funds_proof; do
+            echo "=== $dir ==="
+            (cd "$dir" && nargo compile)
+          done
+
+      - name: Check staged artifacts are current
+        run: |
+          export PATH="$HOME/.nargo/bin:$HOME/.bb/bin:$PATH"
+
+          # Install bb at pinned version
+          curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/barretenberg-v0.87.0/barretenberg/install.sh | bash
+
+          type_of() {
+            case "$1" in
+              kyc_proof) echo kyc ;;
+              age_proof) echo age ;;
+              income_proof) echo income ;;
+              jurisdiction_proof) echo jurisdiction ;;
+              funds_proof) echo funds ;;
+              *) echo "$1" ;;
+            esac
+          }
+
+          FAILED=0
+          VK_TMP="/tmp/vk_check"
+          rm -rf "$VK_TMP"
+
+          for dir in kyc_proof age_proof income_proof jurisdiction_proof funds_proof; do
+            type=$(type_of "$dir")
+            json="$dir/target/${dir}.json"
+            out="$VK_TMP/$type"
+            echo "=== Re-deriving VK for $type ==="
+
+            mkdir -p "$out"
+            bb write_vk --scheme ultra_honk --oracle_hash keccak \
+              --bytecode_path "$json" \
+              --output_path "$out" --output_format bytes_and_fields
+
+            # bb may nest the vk under a subdirectory
+            if [ -f "$out/vk/vk" ]; then
+              actual="$out/vk/vk"
+            elif [ -f "$out/vk" ]; then
+              actual="$out/vk"
+            else
+              actual=$(find "$out" -type f 2>/dev/null | head -1)
+            fi
+
+            if [ ! -f "$actual" ]; then
+              echo "::error::bb did not produce a VK for $type (expected one file under $out)"
+              FAILED=1
+              continue
+            fi
+
+            fixture="../fixtures/$type/vk"
+            if diff -q "$actual" "$fixture" >/dev/null 2>&1; then
+              echo "  OK — matches fixtures/$type/vk"
+            else
+              echo "::error::VK mismatch for $type (fixtures/$type/vk differs from freshly compiled circuit)"
+              echo "Run circuits/scripts/build.sh locally to regenerate staged artifacts"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
+
   frontend:
     name: Frontend typecheck & build
     runs-on: ubuntu-latest
