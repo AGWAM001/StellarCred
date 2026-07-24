@@ -150,6 +150,12 @@ impl ProofRegistry {
     /// Verify a proof and, if valid, cache it for `holder` until `expiry`
     /// (ledger timestamp, seconds). The holder authorizes their own submission.
     /// `issuer_id` must be registered and trusted for `credential_type`.
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
+    // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
+    // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
+    // value-based `publish` API, we maintain consistency with other modules to avoid 
+    // introducing architectural mismatch.
+    #[allow(deprecated)]
     pub fn submit_proof(
         env: Env,
         holder: Address,
@@ -192,17 +198,21 @@ impl ProofRegistry {
         env.storage()
             .persistent()
             .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+
+        // Emit an event matching the event emission shape in the batch-proof path.
+        env.events().publish(
+            (symbol_short!("proof"), symbol_short!("verified")),
+            record.expiry,
+        );
     }
 
-    /// Verify and store multiple proofs in a single atomic transaction.
-    ///
-    /// Accepts up to [`MAX_BATCH_SIZE`] (5) submissions. The holder authorises
-    /// the whole batch with a single signature. If **any** proof fails
-    /// verification — or any issuer check fails — the entire call reverts and
-    /// nothing is stored.
-    ///
-    /// One event is emitted per successfully verified credential, with the same
-    /// shape as the single-proof path, so existing listeners need no changes.
+    /// One event is emitted per successfully verified credential, matching
+    /// the event emission shape in the single-proof path.
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
+    // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
+    // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
+    // value-based `publish` API, we maintain consistency with other modules to avoid 
+    // introducing architectural mismatch.
     #[allow(deprecated)]
     pub fn submit_proofs_batch(env: Env, holder: Address, submissions: Vec<ProofSubmission>) {
         holder.require_auth();
@@ -222,8 +232,7 @@ impl ProofRegistry {
 
         let now = env.ledger().timestamp();
 
-        for i in 0..len {
-            let sub = submissions.get(i).unwrap();
+        for sub in submissions.iter() {
             let public_inputs_bytes = vec_u32_to_bytes(&env, &sub.public_inputs);
 
             // Step 1: issuer must be registered and trusted for this type.

@@ -7,8 +7,8 @@ use credential_verifier::{CredentialVerifier, CredentialVerifierClient};
 use issuer_registry::{IssuerRegistry, IssuerRegistryClient};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Ledger as _},
-    vec, Address, BytesN, Bytes, Env,
+    testutils::{Address as _, Ledger as _, MockAuth, MockAuthInvoke},
+    vec, Address, BytesN, Bytes, Env, IntoVal,
 };
 
 // Real UltraHonk artifacts (kyc_proof circuit, Noir beta.9 + bb 0.87.0), so
@@ -618,7 +618,32 @@ fn admin_transfer_works() {
     let real_wasm = get_test_wasm(&env);
     let new_wasm_hash = env.deployer().upload_contract_wasm(real_wasm);
     
-    h.registry.upgrade(&new_wasm_hash);
+    // 1. Verify old admin (h.admin) can no longer upgrade:
+    let res = h.registry
+        .mock_auths(&[MockAuth {
+            address: &h.admin,
+            invoke: &MockAuthInvoke {
+                contract: &h.registry.address,
+                fn_name: "upgrade",
+                args: (&new_wasm_hash,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_upgrade(&new_wasm_hash);
+    assert!(res.is_err());
+
+    // 2. Verify new admin can successfully upgrade:
+    h.registry
+        .mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &h.registry.address,
+                fn_name: "upgrade",
+                args: (&new_wasm_hash,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .upgrade(&new_wasm_hash);
 }
 
 #[test]
