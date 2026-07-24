@@ -541,10 +541,12 @@ fn batch_max_size_boundary_accepts_five() {
     let ir_id = env.register(IssuerRegistry, (admin.clone(),));
     let ir = IssuerRegistryClient::new(&env, &ir_id);
     let issuer = Address::generate(&env);
-    // Register issuer for all 5 types.
-    for t in types.iter() {
-        ir.register_issuer(&issuer, &pubkey_from(&env, PUBLIC_INPUTS), &vec![&env, t.clone()]);
-    }
+    // Register issuer for all 5 types in a single call (repeated calls overwrite).
+    ir.register_issuer(
+        &issuer,
+        &pubkey_from(&env, PUBLIC_INPUTS),
+        &vec![&env, types[0].clone(), types[1].clone(), types[2].clone(), types[3].clone(), types[4].clone()],
+    );
 
     let v_id = env.register(CredentialVerifier, (admin,));
     let vc = CredentialVerifierClient::new(&env, &v_id);
@@ -572,6 +574,7 @@ fn batch_max_size_boundary_accepts_five() {
     assert!(registry.is_verified(&holder, &types[0]).0);
     assert!(registry.is_verified(&holder, &types[4]).0);
 }
+
 
 
 /// Six submissions must be rejected with BatchTooLarge.
