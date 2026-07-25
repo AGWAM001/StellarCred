@@ -224,8 +224,10 @@ export async function getClaims(wallet: string): Promise<Claim[]> {
 
 /**
  * Build a StellarCred verification URL to redirect users to. After the user
- * verifies, StellarCred sends them back to `returnUrl` with `sc_verified=true`
- * and `sc_wallet=<address>` appended as query params.
+ * verifies, StellarCred sends them back to `returnUrl` with `sc_verified=true`,
+ * `sc_wallet=<address>`, and `sc_claims=<comma-separated-types>` appended as
+ * query params. `sc_claims` contains only the claim types issued in the current
+ * session (not all-time claims).
  *
  * Pass `claimParams` to customize thresholds for parameterised claims:
  *
