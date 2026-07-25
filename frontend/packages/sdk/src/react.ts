@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { StellarCred } from "./index";
-
-export type ClaimType = "kyc" | "age" | "jurisdiction" | "income" | "funds";
+import {
+  createClaimGate,
+  type ClaimGate,
+  type ClaimGateState,
+} from "./core";
+import type { ClaimType } from "./index";
 
 interface UseStellarCredOptions {
   claims?: ClaimType[];
@@ -15,66 +18,51 @@ interface UseStellarCredResult {
   refetch: () => void;
 }
 
+const EMPTY_STATE: ClaimGateState = {
+  claims: null,
+  loading: true,
+  error: null,
+};
+
+/**
+ * React hook for checking StellarCred claims.
+ *
+ * Re-implemented on top of the framework-agnostic `createClaimGate` core to
+ * prove the core is sufficient for any framework. No behavior change versus
+ * the previous implementation.
+ */
 export function useStellarCred(
   wallet: string | null,
   options?: UseStellarCredOptions
 ): UseStellarCredResult {
-  const [claims, setClaims] = useState<Partial<Record<ClaimType, boolean>> | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const mountedRef = useRef(true);
+  const [state, setState] = useState<ClaimGateState>(EMPTY_STATE);
+  const gateRef = useRef<ClaimGate | null>(null);
 
-  const fetchClaims = useCallback(async () => {
-    if (!wallet) {
-      setClaims(null);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const typesToCheck = options?.claims || ["kyc", "age", "jurisdiction", "income", "funds"];
-      const results: Partial<Record<ClaimType, boolean>> = {};
-
-      await Promise.all(
-        typesToCheck.map(async (claimType) => {
-          try {
-            const hasClaim = await StellarCred.hasClaim(wallet, claimType);
-            if (mountedRef.current) {
-              results[claimType] = hasClaim;
-            }
-          } catch {
-            if (mountedRef.current) {
-              results[claimType] = false;
-            }
-          }
-        })
-      );
-
-      if (mountedRef.current) {
-        setClaims(results);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err : new Error("Failed to check claims"));
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [wallet, JSON.stringify(options?.claims)]);
+  const refetch = useCallback(() => {
+    gateRef.current?.refetch();
+  }, []);
 
   useEffect(() => {
-    mountedRef.current = true;
-    fetchClaims();
+    const gate = createClaimGate({
+      wallet,
+      claims: options?.claims,
+      minThresholds: options?.minThresholds,
+    });
+    gateRef.current = gate;
+
+    const unsub = gate.subscribe(setState);
+
     return () => {
-      mountedRef.current = false;
+      unsub();
+      gate.destroy();
     };
-  }, [fetchClaims]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet, JSON.stringify(options?.claims), JSON.stringify(options?.minThresholds)]);
 
-  return { claims, loading, error, refetch: fetchClaims };
+  return {
+    claims: state.claims,
+    loading: state.loading,
+    error: state.error,
+    refetch,
+  };
 }
-

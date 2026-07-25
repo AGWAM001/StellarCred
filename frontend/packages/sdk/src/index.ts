@@ -259,3 +259,10 @@ export function buildVerifyUrl(options: {
 
 export const StellarCred = { configure, hasClaim, getClaims, buildVerifyUrl, CLAIM_TYPES };
 export default StellarCred;
+
+// Framework-agnostic core — for use outside React (Vue, Svelte, vanilla).
+export { createClaimGate } from "./core";
+export type { ClaimGateConfig, ClaimGateState, ClaimGateListener, ClaimGate } from "./core";
+
+// React hook — re-implemented on top of createClaimGate.
+export { useStellarCred } from "./react";
