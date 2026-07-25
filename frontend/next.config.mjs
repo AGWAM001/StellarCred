@@ -71,8 +71,18 @@ const nextConfig = {
         headers: [
           {
             key: "Content-Security-Policy",
-            value:
-              "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';",
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'wasm-unsafe-eval'",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data:",
+              // contracts.ts ("use client") calls getAccount / prepareTransaction /
+              // sendTransaction against the Soroban RPC from the browser — must be
+              // allowed here or proof submission and on-chain verification break.
+              `connect-src 'self' https://soroban-testnet.stellar.org https://soroban-mainnet.stellar.org${
+                process.env.NEXT_PUBLIC_RPC_URL ? " " + process.env.NEXT_PUBLIC_RPC_URL : ""
+              }`,
+            ].join("; ") + ";",
           },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -92,6 +102,7 @@ const nextConfig = {
           },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS" },
           { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization" },
+          { key: "Vary", value: "Origin" },
         ],
       },
     ];
