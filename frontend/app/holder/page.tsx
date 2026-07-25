@@ -43,7 +43,8 @@ import {
 import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
 import { usePreviewMode } from "@/lib/wallet-context";
 import CopyButton from "@/components/CopyButton";
-import { ProofProgress, type ProgressStep, type StepStatus } from "@/components/ProofProgress";
+import { useToast } from "@/components/Toast";
+
 // Parse "90 days", "30 days" etc from the credential's expiry string.
 function credTtlSecs(cred: Credential): number {
   const match = cred.expiry?.match(/(\d+)/);
@@ -409,9 +410,11 @@ function ProofFlow({
   // elapsed time for the proving stage
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
+    toast.info(`Generating proof for ${cred.title}…`);
     (async () => {
       try {
         setStage("witness");
@@ -439,20 +442,28 @@ function ProofFlow({
 
         setProof(result);
         setStage("generated");
+        toast.success(`Proof generated for ${cred.title}`);
       } catch (e) {
         clearInterval(timerRef.current!);
-        if (!cancelled) setError(parseContractError((e as Error).message));
+        if (!cancelled) {
+          const parsed = parseContractError((e as Error).message);
+          setError(parsed);
+          setStage("error");
+          toast.error(`Proof generation failed: ${parsed.friendly}`);
+        }
       }
     })();
     return () => {
       cancelled = true;
       clearInterval(timerRef.current!);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cred]);
 
   async function onSubmit() {
     if (!proof) return;
     setStage("submitting");
+    toast.info(`Submitting proof for ${cred.title} to Stellar…`);
     try {
       const hash = await submitProof({
         holder,
@@ -465,8 +476,12 @@ function ProofFlow({
       setTxHash(hash);
       onProved(hash);
       setStage("confirmed");
+      toast.success(`Proof confirmed on-chain for ${cred.title}`, { txHash: hash });
     } catch (e) {
-      setError(parseContractError((e as Error).message));
+      const parsed = parseContractError((e as Error).message);
+      setError(parsed);
+      setStage("error");
+      toast.error(`Submission failed: ${parsed.friendly}`);
     }
   }
 
@@ -676,6 +691,7 @@ function BatchProofFlow({
   const [txHash, setTxHash] = useState("");
   const [batchError, setBatchError] = useState<ContractError | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  const toast = useToast();
   const generatedProofs = useRef<Array<{ proof: Uint8Array; publicInputs: Uint8Array } | null>>(
     creds.map(() => null),
   );
@@ -689,6 +705,7 @@ function BatchProofFlow({
   // Generate proofs for all credentials in sequence.
   useEffect(() => {
     let cancelled = false;
+    toast.info(`Generating ${creds.length} proofs…`);
 
     (async () => {
       for (let i = 0; i < creds.length; i++) {
@@ -713,7 +730,9 @@ function BatchProofFlow({
             return next;
           });
           setBatchStage("error");
-          setBatchError(parseContractError((e as Error).message));
+          const parsed = parseContractError((e as Error).message);
+          setBatchError(parsed);
+          toast.error(`Proof generation failed for ${cred.title}: ${parsed.friendly}`);
           return;
         }
 
@@ -748,7 +767,9 @@ function BatchProofFlow({
             return next;
           });
           setBatchStage("error");
-          setBatchError(parseContractError((e as Error).message));
+          const parsed = parseContractError((e as Error).message);
+          setBatchError(parsed);
+          toast.error(`Proof generation failed for ${cred.title}: ${parsed.friendly}`);
           return;
         }
 
@@ -776,6 +797,7 @@ function BatchProofFlow({
 
   useEffect(() => {
     if (!allReady) return;
+    toast.success(`Generated ${creds.length} proofs`);
     setBatchStage("submitting");
 
     const currentCreds = credsRef.current;
@@ -791,16 +813,21 @@ function BatchProofFlow({
       };
     });
 
+    toast.info(`Submitting ${currentCreds.length} proofs to Stellar…`);
     submitProofsBatch({ holder: currentHolder, submissions })
       .then((hash) => {
         setTxHash(hash);
         setBatchStage("confirmed");
         onProved(hash, currentCreds.map((c) => c.commitment));
+        toast.success(`All ${currentCreds.length} proofs confirmed on-chain`, { txHash: hash });
       })
       .catch((e) => {
-        setBatchError(parseContractError((e as Error).message));
+        const parsed = parseContractError((e as Error).message);
+        setBatchError(parsed);
         setBatchStage("error");
+        toast.error(`Batch submission failed: ${parsed.friendly}`);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allReady, onProved]);
 
   const isSubmitting = batchStage === "submitting";
