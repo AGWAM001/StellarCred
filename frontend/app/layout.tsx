@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { SiteNav } from "@/components/SiteNav";
+import { NetworkBanner } from "@/components/NetworkBanner";
 import { WalletProvider } from "@/lib/wallet-context";
 import { ToastProvider } from "@/components/Toast";
 import "./globals.css";
@@ -36,6 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ToastProvider>
           <WalletProvider>
             <SiteNav />
+            <NetworkBanner />
             <main className="container">{children}</main>
             <footer className="site-footer">
               <div className="site-footer-inner">
