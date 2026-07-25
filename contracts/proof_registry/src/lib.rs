@@ -287,11 +287,12 @@ impl ProofRegistry {
         holder.require_auth();
         // Remove each known credential type. This is a best-effort removal;
         // types without a stored proof are a no-op thanks to the SDK.
+        // "jurisdiction" is >9 chars so must use Symbol::new instead of symbol_short!.
         let types = [
             symbol_short!("kyc"),
             symbol_short!("age"),
             symbol_short!("income"),
-            symbol_short!("jurisdiction"),
+            Symbol::new(&env, "jurisdiction"),
             symbol_short!("funds"),
         ];
         for t in types {
@@ -399,9 +400,9 @@ impl ProofRegistry {
             || *credential_type == symbol_short!("funds")
         {
             base + 1 // threshold
-        } else if *credential_type == symbol_short!("jurisdiction") {
-            base + 8 // restricted list
         } else {
+            // TODO: add jurisdiction handling (73 fields = base + 8) when
+            // extending the aggregate_proof circuit to N>2 credential types.
             base
         }
     }

@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 7,
+    "address": 6,
     "nonce": 0,
     "mux_id": 0
   },
@@ -59,10 +59,9 @@
       ]
     ],
     [],
-    [],
     [
       [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
         {
           "function": {
             "contract_fn": {
@@ -70,7 +69,7 @@
               "function_name": "submit_proof",
               "args": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -85,7 +84,7 @@
                   "bytes": "289538cac0e6b6b0e600b7d321883060ab0046854d95a0d1a501c11bc5d2499a000000000000000000000000000000000000000000000000000000000000003e000000000000000000000000000000000000000000000000000000000000004800000000000000000000000000000000000000000000000000000000000000e9000000000000000000000000000000000000000000000000000000000000008b0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000007800000000000000000000000000000000000000000000000000000000000000c2000000000000000000000000000000000000000000000000000000000000005b00000000000000000000000000000000000000000000000000000000000000a6000000000000000000000000000000000000000000000000000000000000003e0000000000000000000000000000000000000000000000000000000000000044000000000000000000000000000000000000000000000000000000000000002b000000000000000000000000000000000000000000000000000000000000004f00000000000000000000000000000000000000000000000000000000000000e8000000000000000000000000000000000000000000000000000000000000009c000000000000000000000000000000000000000000000000000000000000005b000000000000000000000000000000000000000000000000000000000000005900000000000000000000000000000000000000000000000000000000000000a500000000000000000000000000000000000000000000000000000000000000280000000000000000000000000000000000000000000000000000000000000053000000000000000000000000000000000000000000000000000000000000007d000000000000000000000000000000000000000000000000000000000000005a00000000000000000000000000000000000000000000000000000000000000e8000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000e400000000000000000000000000000000000000000000000000000000000000770000000000000000000000000000000000000000000000000000000000000011000000000000000000000000000000000000000000000000000000000000003b00000000000000000000000000000000000000000000000000000000000000c40000000000000000000000000000000000000000000000000000000000000048000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000fb000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000d900000000000000000000000000000000000000000000000000000000000000c4000000000000000000000000000000000000000000000000000000000000005800000000000000000000000000000000000000000000000000000000000000670000000000000000000000000000000000000000000000000000000000000075000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000a800000000000000000000000000000000000000000000000000000000000000f900000000000000000000000000000000000000000000000000000000000000ea00000000000000000000000000000000000000000000000000000000000000c300000000000000000000000000000000000000000000000000000000000000bc000000000000000000000000000000000000000000000000000000000000002f0000000000000000000000000000000000000000000000000000000000000017000000000000000000000000000000000000000000000000000000000000000d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a80000000000000000000000000000000000000000000000000000000000000058000000000000000000000000000000000000000000000000000000000000007d00000000000000000000000000000000000000000000000000000000000000d5000000000000000000000000000000000000000000000000000000000000003800000000000000000000000000000000000000000000000000000000000000be00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000090000000000000000000000000000000000000000000000000000000000000007800000000000000000000000000000000000000000000000000000000000000d300000000000000000000000000000000000000000000000000000000000000f400000000000000000000000000000000000000000000000000000000000000aa0000000000000000000000000000000000000000000000000000000000000037000000000000000000000000000000000000000000000000000000000000006100000000000000000000000000000000000000000000000000000000000000e30000000000000000000000000000000000000000000000000000000000000065"
                 },
                 {
-                  "u64": "1000000"
+                  "u64": "1000"
                 }
               ]
             }
@@ -94,42 +93,18 @@
         }
       ]
     ],
+    [],
     [
       [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
         {
           "function": {
             "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
-              "function_name": "deposit",
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+              "function_name": "revoke_all",
               "args": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                },
-                {
-                  "i128": "100"
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
-              "function_name": "withdraw",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                },
-                {
-                  "i128": "40"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 }
               ]
             }
@@ -352,59 +327,6 @@
             "contract_data": {
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "Proof"
-                  },
-                  {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                  },
-                  {
-                    "symbol": "kyc"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "expiry"
-                    },
-                    "val": {
-                      "u64": "1000000"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "threshold"
-                    },
-                    "val": "void"
-                  },
-                  {
-                    "key": {
-                      "symbol": "verified_at"
-                    },
-                    "val": {
-                      "u64": "0"
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 1555200
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
               "key": "ledger_key_contract_instance",
               "durability": "persistent",
               "val": {
@@ -454,69 +376,6 @@
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
               "key": {
-                "vec": [
-                  {
-                    "symbol": "Balance"
-                  },
-                  {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "i128": "60"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 2073600
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
-              "key": "ledger_key_contract_instance",
-              "durability": "persistent",
-              "val": {
-                "contract_instance": {
-                  "executable": {
-                    "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-                  },
-                  "storage": [
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "Registry"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
-              "key": {
                 "ledger_key_nonce": {
                   "nonce": "1033654523790656264"
                 }
@@ -535,27 +394,7 @@
           "data": {
             "contract_data": {
               "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "2032731177588607455"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "4837995959683129791"

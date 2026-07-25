@@ -356,6 +356,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "threshold"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "verified_at"
                     },
                     "val": {

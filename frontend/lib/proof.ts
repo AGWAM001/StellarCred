@@ -162,5 +162,6 @@ export async function generateAggregateProof(
   inputs: AggregateInput,
 ): Promise<GeneratedProof> {
   const witness = await computeAggregateWitness(inputs);
-  return proveWithBackend("aggregate", witness);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return proveWithBackend("aggregate" as any, witness);
 }

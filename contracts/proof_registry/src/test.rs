@@ -293,7 +293,6 @@ fn age_threshold_stored_and_checked() {
 /// Build synthetic aggregate public inputs for KYC + age (133 fields × 32 bytes).
 /// Layout: [kyc(65 fields) | age(67 fields) | num_credentials(1 field)]
 fn build_aggregate_public_inputs(env: &Env) -> Bytes {
-    // Use the KYC and age fixtures as source for the inner public inputs.
     let kyc = KYC_PUBLIC_INPUTS; // 65 × 32 = 2080 bytes
     let age = AGE_PUBLIC_INPUTS; // 67 × 32 = 2144 bytes
 
@@ -301,11 +300,13 @@ fn build_aggregate_public_inputs(env: &Env) -> Bytes {
     let mut num = [0u8; 32];
     num[24..32].copy_from_slice(&2u64.to_be_bytes());
 
-    let mut buf = Vec::with_capacity(kyc.len() + age.len() + 32);
-    buf.extend_from_slice(kyc);
-    buf.extend_from_slice(age);
-    buf.extend_from_slice(&num);
-    Bytes::from_slice(env, &buf)
+    // Pre-allocated array large enough: 65*32 + 67*32 + 32 = 4256 bytes
+    let total = kyc.len() + age.len() + 32;
+    let mut buf = [0u8; 4256];
+    buf[..kyc.len()].copy_from_slice(kyc);
+    buf[kyc.len()..kyc.len() + age.len()].copy_from_slice(age);
+    buf[kyc.len() + age.len()..kyc.len() + age.len() + 32].copy_from_slice(&num);
+    Bytes::from_slice(env, &buf[..total])
 }
 
 /// Build an aggregate harness with issuers registered for both kyc and age,
@@ -483,16 +484,21 @@ fn revoke_all_clears_multiple_types() {
 fn aggregate_pubkey_match_at_offset() {
     let env = Env::default();
 
-    // Build public inputs: [padding(65 fields) | kyc_fields(65 fields)]
+    // Build public inputs: [padding(65 fields) | kyc_fields(65 fields) |
+    //                       num_credentials(1 field)]
     // The KYC pubkey should be at start_field=66 (after the 65 padding fields).
-    let padding = vec![0u8; 65 * 32];
-    let mut agg = Vec::from(padding);
-    agg.extend_from_slice(KYC_PUBLIC_INPUTS);
-    // num_credentials = 2
+    let padding = [0u8; 65 * 32];
     let mut num = [0u8; 32];
     num[24..32].copy_from_slice(&2u64.to_be_bytes());
-    agg.extend_from_slice(&num);
-    let agg_bytes = Bytes::from_slice(&env, &agg);
+
+    let total = padding.len() + KYC_PUBLIC_INPUTS.len() + 32;
+    let mut agg = [0u8; 4256];
+    agg[..padding.len()].copy_from_slice(&padding);
+    agg[padding.len()..padding.len() + KYC_PUBLIC_INPUTS.len()]
+        .copy_from_slice(KYC_PUBLIC_INPUTS);
+    agg[padding.len() + KYC_PUBLIC_INPUTS.len()..padding.len() + KYC_PUBLIC_INPUTS.len() + 32]
+        .copy_from_slice(&num);
+    let agg_bytes = Bytes::from_slice(&env, &agg[..total]);
 
     let expected = pubkey_from(&env, KYC_PUBLIC_INPUTS, 1);
     assert!(ProofRegistry::aggregate_pubkey_match(
