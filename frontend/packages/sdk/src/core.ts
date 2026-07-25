@@ -10,7 +10,7 @@
 //   gate.subscribe((state) => console.log(state));
 //   // later: gate.destroy();
 
-import { StellarCred, type ClaimType, type ClaimOptions } from "./index";
+import { StellarCred, type ClaimType } from "./index";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ export interface ClaimGate {
 }
 
 const DEFAULT_CLAIMS: ClaimType[] = [
-  "kyc", "age", "jurisdiction", "income", "funds", "accreditation",
+  "kyc", "age", "jurisdiction", "income", "funds",
 ];
 
 // ── Implementation ───────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ export function createClaimGate(config: ClaimGateConfig): ClaimGate {
         try {
           const ok = await StellarCred.hasClaim(wallet, claimType, {
             minThreshold: thresholds[claimType],
-          } satisfies ClaimOptions);
+          });
           if (!destroyed) results[claimType] = ok;
         } catch {
           if (!destroyed) results[claimType] = false;
