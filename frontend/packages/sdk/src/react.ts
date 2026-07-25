@@ -1,10 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  createClaimGate,
-  type ClaimGate,
-  type ClaimGateState,
-} from "./core";
-import type { ClaimType } from "./index";
+import { StellarCred, type ClaimType } from "./index";
 
 interface UseStellarCredOptions {
   claims?: ClaimType[];
@@ -38,9 +33,9 @@ export function useStellarCred(
   const [state, setState] = useState<ClaimGateState>(EMPTY_STATE);
   const gateRef = useRef<ClaimGate | null>(null);
 
-  const refetch = useCallback(() => {
-    gateRef.current?.refetch();
-  }, []);
+    try {
+      const typesToCheck = options?.claims || ["kyc", "age", "jurisdiction", "income", "funds", "accreditation"];
+      const results: Partial<Record<ClaimType, boolean>> = {};
 
   useEffect(() => {
     const gate = createClaimGate({
