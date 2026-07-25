@@ -76,6 +76,26 @@ export class TimeoutError extends Error {
 export const CLAIM_TYPES = ["kyc", "age", "income", "jurisdiction", "funds", "accreditation"] as const;
 export type ClaimType = (typeof CLAIM_TYPES)[number];
 
+/**
+ * Options accepted by {@link hasClaim} and {@link getClaims}.
+ *
+ * Currently only threshold-based claims use this; binary claims (e.g. `kyc`)
+ * ignore the option. The on-chain `check_claim` enforces that the stored
+ * threshold is at least `minThreshold`, so a proof generated with a higher
+ * threshold always satisfies a lower `minThreshold`.
+ */
+export interface ClaimOptions {
+  /**
+   * Minimum acceptable threshold for parameterised claims:
+   *   - `age`         → minimum age in years
+   *   - `income`      → minimum annual income (whole units)
+   *   - `funds`       → minimum liquid balance (whole units)
+   *   - `accreditation` → minimum net-worth / income requirement (whole units)
+   * Ignored for binary claims (`kyc`, `jurisdiction`).
+   */
+  minThreshold?: number;
+}
+
 export interface Claim {
   /** Credential type — one of CLAIM_TYPES. */
   type: string;
@@ -179,7 +199,7 @@ async function readCheckClaim(
 export async function hasClaim(
   wallet: string,
   claimType: string,
-  opts?: { minThreshold?: number },
+  opts?: ClaimOptions,
 ): Promise<boolean> {
   if (opts?.minThreshold !== undefined) {
     return readCheckClaim(wallet, claimType, opts.minThreshold);

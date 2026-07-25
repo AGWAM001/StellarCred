@@ -148,6 +148,31 @@ const url = StellarCred.buildVerifyUrl({
 | `income` | Annual income exceeds threshold | `threshold` (USD) |
 | `jurisdiction` | Country is not in a restricted list | `restricted` (country codes) |
 | `funds` | Liquid balance exceeds threshold | `threshold` (USD) |
+| `accreditation` | Holder meets an accredited-investor threshold | `threshold` (USD) |
+
+## Types
+
+The package exports its public types so you can type your own wrappers without
+duplicating the union. They appear in `dist/index.d.ts` after `pnpm build` and
+are available from `@stellarcred/sdk` directly.
+
+```ts
+import type { ClaimType, ClaimOptions } from "@stellarcred/sdk";
+
+// `ClaimType` is exactly the credential union published with the SDK.
+// `ClaimOptions.minThreshold` is the value passed to `hasClaim`'s on-chain
+// `check_claim` check.
+function gate(wallet: string, claim: ClaimType, opts?: ClaimOptions) {
+  return StellarCred.hasClaim(wallet, claim, opts);
+}
+```
+
+| Export | Kind | Description |
+|---|---|---|
+| `ClaimType` | `"kyc" \| "age" \| "income" \| "jurisdiction" \| "funds" \| "accreditation"` | The credential types StellarCred supports. Mirrors the on-chain `CLAIM_TYPES` constant. |
+| `ClaimOptions` | `{ minThreshold?: number }` | Optional settings for `hasClaim`. Only `minThreshold` is currently supported; it is forwarded to the on-chain `check_claim` for parameterised claim types and ignored for binary claims (`kyc`, `jurisdiction`). |
+| `Claim` | `{ type: string; verifiedAt: number; expiry: number }` | Shape returned by `getClaims`. |
+| `CLAIM_TYPES` | `readonly ClaimType[]` | The runtime constant. Use `as const` strings for compile-time narrowing. |
 
 ## Full integration example
 
