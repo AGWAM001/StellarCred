@@ -1,12 +1,14 @@
 #![cfg(test)]
 
+extern crate std;
+
 use super::*;
 use credential_verifier::{CredentialVerifier, CredentialVerifierClient};
 use issuer_registry::{IssuerRegistry, IssuerRegistryClient};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Ledger as _},
-    vec, Address, BytesN, Bytes, Env,
+    testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
+    vec, Address, BytesN, Bytes, Env, IntoVal,
 };
 
 // Real UltraHonk artifacts from existing circuits, used to test helper logic.
@@ -18,9 +20,10 @@ const AGE_VK: &[u8] = include_bytes!("../../../fixtures/age/vk");
 const AGE_PROOF: &[u8] = include_bytes!("../../../fixtures/age/proof");
 const AGE_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/age/public_inputs");
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
 
-fn pubkey_from(env: &Env, public_inputs: &[u8], start_field: u32) -> BytesN<64> {
+// Extract the issuer secp256k1 key (x || y) from any fixture's public inputs
+// (fields 1..65, low byte of each 32-byte field).
+fn pubkey_from(env: &Env, public_inputs: &[u8]) -> BytesN<64> {
     let mut arr = [0u8; 64];
     for i in 0..64usize {
         arr[i] = public_inputs[(start_field as usize + i) * 32 + 31];
@@ -32,9 +35,37 @@ fn demo_pubkey(env: &Env) -> BytesN<64> {
     pubkey_from(env, KYC_PUBLIC_INPUTS, 1)
 }
 
+fn u8_slice_to_vec_u32(env: &Env, slice: &[u8]) -> Vec<u32> {
+    let mut vec = Vec::new(env);
+    for i in (0..slice.len()).step_by(4) {
+        if i + 4 <= slice.len() {
+            let mut chunk = [0u8; 4];
+            chunk.copy_from_slice(&slice[i..i+4]);
+            vec.push_back(u32::from_be_bytes(chunk));
+        }
+    }
+    vec
+}
+
+fn get_test_wasm(env: &Env) -> Bytes {
+    let paths = [
+        "target/wasm32v1-none/release/proof_registry.wasm",
+        "../../target/wasm32v1-none/release/proof_registry.wasm",
+        "../target/wasm32v1-none/release/proof_registry.wasm",
+    ];
+    for path in paths.iter() {
+        if let Ok(wasm) = std::fs::read(path) {
+            return Bytes::from_slice(env, &wasm);
+        }
+    }
+    panic!("Could not find target/wasm32v1-none/release/proof_registry.wasm. Please run 'cargo build --target wasm32v1-none --release' first.");
+}
+
 struct Harness {
     registry: ProofRegistryClient<'static>,
+    registry_id: Address,
     issuer: Address,
+    admin: Address,
 }
 
 fn deploy(env: &Env) -> Harness {
@@ -51,14 +82,16 @@ fn deploy(env: &Env) -> Harness {
     );
 
     // CredentialVerifier with the kyc VK.
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(env, &v_id)
         .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, KYC_VK));
 
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin.clone(), v_id, ir_id));
     Harness {
         registry: ProofRegistryClient::new(env, &pr_id),
+        registry_id: pr_id,
         issuer,
+        admin,
     }
 }
 
@@ -118,10 +151,10 @@ fn rejects_wrong_issuer_key() {
         &BytesN::from_array(&env, &[3u8; 64]),
         &vec![&env, symbol_short!("kyc")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, KYC_VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+        .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
 
     let holder = Address::generate(&env);
@@ -199,6 +232,69 @@ fn revoke_clears_proof() {
     assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
 }
 
+#[test]
+fn issuer_revoke_invalidates_proof() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(h.registry.check_claim(&holder, &symbol_short!("kyc"), &None));
+
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!h.registry.check_claim(&holder, &symbol_short!("kyc"), &None));
+    // Expiry data preserved for audit even though proof is no longer valid.
+    let (_valid, _at, expiry) = h.registry.is_verified(&holder, &symbol_short!("kyc"));
+    assert_eq!(expiry, 1000);
+}
+
+#[test]
+fn issuer_revoke_rejects_wrong_issuer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    let res = h.registry.try_revoke(&stranger, &holder, &symbol_short!("kyc"));
+    assert!(res.is_err());
+    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+}
+
+#[test]
+fn issuer_revoke_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
+            (
+                h.registry_id.clone(),
+                (symbol_short!("revoked"),).into_val(&env),
+                (
+                    holder.clone(),
+                    symbol_short!("kyc"),
+                    h.issuer.clone(),
+                    env.ledger().timestamp()
+                )
+                    .into_val(&env),
+            ),
+        ],
+    );
+}
+
 // ── check_claim / threshold tests ────────────────────────────────────────────
 
 #[test]
@@ -226,13 +322,10 @@ fn funds_threshold_stored_and_checked() {
         &pubkey_from(&env, include_bytes!("../../../fixtures/funds/public_inputs"), 1),
         &vec![&env, symbol_short!("funds")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(
-            &symbol_short!("funds"),
-            &Bytes::from_slice(&env, include_bytes!("../../../fixtures/funds/vk")),
-        );
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+        .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
@@ -265,10 +358,10 @@ fn age_threshold_stored_and_checked() {
         &pubkey_from(&env, AGE_PUBLIC_INPUTS, 1),
         &vec![&env, symbol_short!("age")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, AGE_VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
@@ -286,229 +379,355 @@ fn age_threshold_stored_and_checked() {
     assert!(!registry.check_claim(&holder, &symbol_short!("age"), &Some(21)));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Aggregate proof tests
-// ═══════════════════════════════════════════════════════════════════════════════
+// ── submit_proofs_batch tests ─────────────────────────────────────────────────
 
-/// Build synthetic aggregate public inputs for KYC + age (133 fields × 32 bytes).
-/// Layout: [kyc(65 fields) | age(67 fields) | num_credentials(1 field)]
-fn build_aggregate_public_inputs(env: &Env) -> Bytes {
-    // Use the KYC and age fixtures as source for the inner public inputs.
-    let kyc = KYC_PUBLIC_INPUTS; // 65 × 32 = 2080 bytes
-    let age = AGE_PUBLIC_INPUTS; // 67 × 32 = 2144 bytes
-
-    // num_credentials = 2, encoded as a 32-byte big-endian field (u64 in last 8 bytes).
-    let mut num = [0u8; 32];
-    num[24..32].copy_from_slice(&2u64.to_be_bytes());
-
-    let mut buf = Vec::with_capacity(kyc.len() + age.len() + 32);
-    buf.extend_from_slice(kyc);
-    buf.extend_from_slice(age);
-    buf.extend_from_slice(&num);
-    Bytes::from_slice(env, &buf)
-}
-
-/// Build an aggregate harness with issuers registered for both kyc and age,
-/// and VKs set for kyc, age, and aggregate. Uses the *single* kyc VK as a
-/// stand-in for the aggregate VK so the `verify_proof` call doesn't panic with
-/// VkNotSet. The test still validates the aggregate-specific logic (pubkey
-/// matching, threshold extraction, and atomic multi-claim storage) because the
-/// inner kyc proof bytes will cause VerificationFailed — which is expected and
-/// distinct from the aggregate helpers.
-struct AggregateHarness {
-    registry: ProofRegistryClient<'static>,
-    issuer_kyc: Address,
-    issuer_age: Address,
-}
-
-fn deploy_aggregate(env: &Env) -> AggregateHarness {
-    let admin = Address::generate(env);
-
-    // IssuerRegistry — register two distinct issuers.
-    let ir_id = env.register(IssuerRegistry, (admin.clone(),));
-    let ir = IssuerRegistryClient::new(env, &ir_id);
-
-    let issuer_kyc = Address::generate(env);
-    let kyc_pk = pubkey_from(env, KYC_PUBLIC_INPUTS, 1);
-    ir.register_issuer(&issuer_kyc, &kyc_pk, &vec![env, symbol_short!("kyc")]);
-
-    let issuer_age = Address::generate(env);
-    let age_pk = pubkey_from(env, AGE_PUBLIC_INPUTS, 1);
-    ir.register_issuer(&issuer_age, &age_pk, &vec![env, symbol_short!("age")]);
-
-    // CredentialVerifier — set VKs for kyc, age, and aggregate.
-    let v_id = env.register(CredentialVerifier, (admin,));
-    let vc = CredentialVerifierClient::new(env, &v_id);
-    vc.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, KYC_VK));
-    vc.set_vk(&symbol_short!("age"), &Bytes::from_slice(env, AGE_VK));
-    // Use the kyc VK as a stand-in for aggregate — the aggregate proof fixture
-    // will have its own VK once generated by circuits/scripts/build.sh.
-    vc.set_vk(&symbol_short!("aggregate"), &Bytes::from_slice(env, KYC_VK));
-
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
-    AggregateHarness {
-        registry: ProofRegistryClient::new(env, &pr_id),
-        issuer_kyc,
-        issuer_age,
+/// Helper: build a ProofSubmission for the kyc fixture.
+fn kyc_submission(env: &Env, issuer: &Address, expiry: u64) -> ProofSubmission {
+    ProofSubmission {
+        credential_type: symbol_short!("kyc"),
+        proof: Bytes::from_slice(env, PROOF),
+        public_inputs: u8_slice_to_vec_u32(env, PUBLIC_INPUTS),
+        issuer_id: issuer.clone(),
+        expiry,
     }
 }
 
-#[test]
-fn aggregate_rejects_untrusted_kyc_issuer() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let h = deploy_aggregate(&env);
-    let holder = Address::generate(&env);
-    let stranger = Address::generate(&env); // not registered
-    let public_inputs = build_aggregate_public_inputs(&env);
-
-    let res = h.registry.try_submit_aggregate_proof(
-        &holder,
-        &vec![&env, stranger, h.issuer_age.clone()],
-        &vec![&env, symbol_short!("kyc"), symbol_short!("age")],
-        &Bytes::from_slice(&env, KYC_PROOF),
-        &public_inputs,
-        &1000,
-    );
-    assert!(res.is_err());
+/// Deploy a harness that registers a single issuer for all three credential
+/// types (kyc, funds, age) with the correct keys, and registers all three VKs
+/// in the verifier. Used by batch tests that need multiple credential types.
+struct MultiHarness {
+    registry: ProofRegistryClient<'static>,
+    kyc_issuer: Address,
+    funds_issuer: Address,
+    age_issuer: Address,
+    admin: Address,
 }
 
-#[test]
-fn aggregate_rejects_untrusted_age_issuer() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let h = deploy_aggregate(&env);
-    let holder = Address::generate(&env);
-    let stranger = Address::generate(&env); // not registered
-    let public_inputs = build_aggregate_public_inputs(&env);
+fn deploy_multi(env: &Env) -> MultiHarness {
+    let admin = Address::generate(env);
+    let ir_id = env.register(IssuerRegistry, (admin.clone(),));
+    let ir = IssuerRegistryClient::new(env, &ir_id);
 
-    let res = h.registry.try_submit_aggregate_proof(
-        &holder,
-        &vec![&env, h.issuer_kyc.clone(), stranger],
-        &vec![&env, symbol_short!("kyc"), symbol_short!("age")],
-        &Bytes::from_slice(&env, KYC_PROOF),
-        &public_inputs,
-        &1000,
+    let kyc_issuer = Address::generate(env);
+    ir.register_issuer(
+        &kyc_issuer,
+        &pubkey_from(env, PUBLIC_INPUTS),
+        &vec![env, symbol_short!("kyc")],
     );
-    assert!(res.is_err());
+
+    let funds_issuer = Address::generate(env);
+    ir.register_issuer(
+        &funds_issuer,
+        &pubkey_from(env, FUNDS_PUBLIC_INPUTS),
+        &vec![env, symbol_short!("funds")],
+    );
+
+    let age_issuer = Address::generate(env);
+    ir.register_issuer(
+        &age_issuer,
+        &pubkey_from(env, AGE_PUBLIC_INPUTS),
+        &vec![env, symbol_short!("age")],
+    );
+
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
+    let vc = CredentialVerifierClient::new(env, &v_id);
+    vc.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, VK));
+    vc.set_vk(&symbol_short!("funds"), &Bytes::from_slice(env, FUNDS_VK));
+    vc.set_vk(&symbol_short!("age"), &Bytes::from_slice(env, AGE_VK));
+
+    let pr_id = env.register(ProofRegistry, (admin.clone(), v_id, ir_id));
+    MultiHarness {
+        registry: ProofRegistryClient::new(env, &pr_id),
+        kyc_issuer,
+        funds_issuer,
+        age_issuer,
+        admin,
+    }
 }
 
+/// All proofs in the batch are valid — every credential should be stored.
 #[test]
-fn aggregate_rejects_key_mismatch() {
+fn batch_all_pass() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    let h = deploy_multi(&env);
+    let holder = Address::generate(&env);
+
+    let submissions = vec![
+        &env,
+        ProofSubmission {
+            credential_type: symbol_short!("kyc"),
+            proof: Bytes::from_slice(&env, PROOF),
+            public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS),
+            issuer_id: h.kyc_issuer.clone(),
+            expiry: 9999,
+        },
+        ProofSubmission {
+            credential_type: symbol_short!("funds"),
+            proof: Bytes::from_slice(&env, FUNDS_PROOF),
+            public_inputs: u8_slice_to_vec_u32(&env, FUNDS_PUBLIC_INPUTS),
+            issuer_id: h.funds_issuer.clone(),
+            expiry: 9999,
+        },
+        ProofSubmission {
+            credential_type: symbol_short!("age"),
+            proof: Bytes::from_slice(&env, AGE_PROOF),
+            public_inputs: u8_slice_to_vec_u32(&env, AGE_PUBLIC_INPUTS),
+            issuer_id: h.age_issuer.clone(),
+            expiry: 9999,
+        },
+    ];
+
+    h.registry.submit_proofs_batch(&holder, &submissions);
+
+    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(h.registry.is_verified(&holder, &symbol_short!("funds")).0);
+    assert!(h.registry.is_verified(&holder, &symbol_short!("age")).0);
+}
+
+/// If one proof in the batch is invalid, the entire call reverts.
+/// Nothing should be stored for any credential.
+#[test]
+fn batch_one_fail_reverts_all() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    let h = deploy_multi(&env);
+    let holder = Address::generate(&env);
+
+    // Corrupt the funds proof so it will fail verification.
+    let mut bad_funds = FUNDS_PROOF.to_vec();
+    bad_funds[5000] ^= 0xff;
+
+    let submissions = vec![
+        &env,
+        ProofSubmission {
+            credential_type: symbol_short!("kyc"),
+            proof: Bytes::from_slice(&env, PROOF),
+            public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS),
+            issuer_id: h.kyc_issuer.clone(),
+            expiry: 9999,
+        },
+        ProofSubmission {
+            credential_type: symbol_short!("funds"),
+            proof: Bytes::from_slice(&env, &bad_funds),
+            public_inputs: u8_slice_to_vec_u32(&env, FUNDS_PUBLIC_INPUTS),
+            issuer_id: h.funds_issuer.clone(),
+            expiry: 9999,
+        },
+    ];
+
+    let res = h.registry.try_submit_proofs_batch(&holder, &submissions);
+    assert!(res.is_err());
+
+    // The valid kyc proof must NOT have been stored because the batch reverted.
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("funds")).0);
+}
+
+/// Exactly MAX_BATCH_SIZE (5) submissions — should succeed.
+/// Uses 5 distinct credential types to satisfy the duplicate-type guard.
+#[test]
+fn batch_max_size_boundary_accepts_five() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    // Five distinct symbols — same kyc proof/VK reused for all of them.
+    let types = [
+        symbol_short!("kyc"),
+        symbol_short!("funds"),
+        symbol_short!("age"),
+        symbol_short!("income"),
+        symbol_short!("juris"),
+    ];
+
     let admin = Address::generate(&env);
-
-    // Register an issuer with a DIFFERENT key than the KYC proof's pubkey.
     let ir_id = env.register(IssuerRegistry, (admin.clone(),));
     let ir = IssuerRegistryClient::new(&env, &ir_id);
-    let issuer_kyc = Address::generate(&env);
+    let issuer = Address::generate(&env);
+    // Register issuer for all 5 types in a single call (repeated calls overwrite).
     ir.register_issuer(
-        &issuer_kyc,
-        &BytesN::from_array(&env, &[7u8; 64]), // wrong key
-        &vec![&env, symbol_short!("kyc")],
+        &issuer,
+        &pubkey_from(&env, PUBLIC_INPUTS),
+        &vec![&env, types[0].clone(), types[1].clone(), types[2].clone(), types[3].clone(), types[4].clone()],
     );
 
-    // Correct age issuer.
-    let issuer_age = Address::generate(&env);
-    let age_pk = pubkey_from(&env, AGE_PUBLIC_INPUTS, 1);
-    ir.register_issuer(&issuer_age, &age_pk, &vec![&env, symbol_short!("age")]);
-
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     let vc = CredentialVerifierClient::new(&env, &v_id);
-    vc.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, KYC_VK));
-    vc.set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, AGE_VK));
-    vc.set_vk(&symbol_short!("aggregate"), &Bytes::from_slice(&env, KYC_VK));
+    // Register the kyc VK under all 5 type symbols.
+    for t in types.iter() {
+        vc.set_vk(t, &Bytes::from_slice(&env, VK));
+    }
 
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
-    let public_inputs = build_aggregate_public_inputs(&env);
 
-    let res = registry.try_submit_aggregate_proof(
-        &holder,
-        &vec![&env, issuer_kyc.clone(), issuer_age.clone()],
-        &vec![&env, symbol_short!("kyc"), symbol_short!("age")],
-        &Bytes::from_slice(&env, KYC_PROOF),
-        &public_inputs,
-        &1000,
-    );
-    assert!(res.is_err());
+    // Build a batch of exactly 5 submissions, each with a unique type.
+    let submissions = vec![
+        &env,
+        ProofSubmission { credential_type: types[0].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[1].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[2].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[3].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[4].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+    ];
+
+    // Must not panic — 5 distinct types is within the allowed maximum.
+    registry.submit_proofs_batch(&holder, &submissions);
+    assert!(registry.is_verified(&holder, &types[0]).0);
+    assert!(registry.is_verified(&holder, &types[4]).0);
 }
 
-/// Test that the revoke_all function clears proofs for all credential types
-/// that were previously submitted.
+
+
+/// Six submissions must be rejected with BatchTooLarge.
 #[test]
-fn revoke_all_clears_multiple_types() {
+fn batch_exceeds_max_size_is_rejected() {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
-
-    // Set up issuer + verifier so submit_proof passes for kyc.
     let ir_id = env.register(IssuerRegistry, (admin.clone(),));
     let ir = IssuerRegistryClient::new(&env, &ir_id);
     let issuer = Address::generate(&env);
     ir.register_issuer(
         &issuer,
-        &pubkey_from(&env, KYC_PUBLIC_INPUTS, 1),
+        &pubkey_from(&env, PUBLIC_INPUTS),
         &vec![&env, symbol_short!("kyc")],
     );
-
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, KYC_VK));
-
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+        .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
-    // Submit a kyc proof.
-    registry.submit_proof(
-        &holder,
-        &issuer,
-        &symbol_short!("kyc"),
-        &Bytes::from_slice(&env, KYC_PROOF),
-        &Bytes::from_slice(&env, KYC_PUBLIC_INPUTS),
-        &1000,
-    );
-    assert!(registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    let sub = kyc_submission(&env, &issuer, 9999);
+    let submissions = vec![
+        &env,
+        sub.clone(),
+        sub.clone(),
+        sub.clone(),
+        sub.clone(),
+        sub.clone(),
+        sub,
+    ];
 
-    // Revoke all and confirm kyc is gone.
-    registry.revoke_all(&holder);
-    assert!(!registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    let res = registry.try_submit_proofs_batch(&holder, &submissions);
+    assert!(res.is_err());
 }
 
-/// Test that aggregate_pubkey_match correctly validates a pubkey at an offset.
+/// An empty batch must be rejected with BatchEmpty.
 #[test]
-fn aggregate_pubkey_match_at_offset() {
+fn batch_empty_is_rejected() {
     let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let ir_id = env.register(IssuerRegistry, (admin.clone(),));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
+    let registry = ProofRegistryClient::new(&env, &pr_id);
+    let holder = Address::generate(&env);
 
-    // Build public inputs: [padding(65 fields) | kyc_fields(65 fields)]
-    // The KYC pubkey should be at start_field=66 (after the 65 padding fields).
-    let padding = vec![0u8; 65 * 32];
-    let mut agg = Vec::from(padding);
-    agg.extend_from_slice(KYC_PUBLIC_INPUTS);
-    // num_credentials = 2
-    let mut num = [0u8; 32];
-    num[24..32].copy_from_slice(&2u64.to_be_bytes());
-    agg.extend_from_slice(&num);
-    let agg_bytes = Bytes::from_slice(&env, &agg);
-
-    let expected = pubkey_from(&env, KYC_PUBLIC_INPUTS, 1);
-    assert!(ProofRegistry::aggregate_pubkey_match(
-        &agg_bytes,
-        66, // 65 padding + pubkey at field 1 within KYC block
-        &expected
-    ));
+    let submissions: Vec<ProofSubmission> = Vec::new(&env);
+    let res = registry.try_submit_proofs_batch(&holder, &submissions);
+    assert!(res.is_err());
 }
 
-/// Test that num_credentials extraction works from the last field.
+/// A batch with two entries sharing the same credential_type must be rejected.
 #[test]
-fn read_num_credentials_from_aggregate() {
+fn batch_duplicate_credential_type_is_rejected() {
     let env = Env::default();
-    let public_inputs = build_aggregate_public_inputs(&env);
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
 
-    // Last field (index 132) should contain 2.
-    let num = ProofRegistry::read_u64_field(&public_inputs, AGG_FIELD_NUM_CREDENTIALS);
-    assert_eq!(num, 2);
+    let sub = kyc_submission(&env, &h.issuer, 9999);
+    // Two identical kyc entries — second would silently overwrite the first.
+    let submissions = vec![&env, sub.clone(), sub];
+
+    let res = h.registry.try_submit_proofs_batch(&holder, &submissions);
+    assert!(res.is_err());
+}
+
+#[test]
+fn upgrade_by_admin_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    
+    let real_wasm = get_test_wasm(&env);
+    let new_wasm_hash = env.deployer().upload_contract_wasm(real_wasm);
+    
+    h.registry.upgrade(&new_wasm_hash);
+}
+
+#[test]
+fn upgrade_by_non_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    
+    let real_wasm = get_test_wasm(&env);
+    let new_wasm_hash = env.deployer().upload_contract_wasm(real_wasm);
+    
+    let res = h.registry
+        .mock_auths(&[])
+        .try_upgrade(&new_wasm_hash);
+    assert!(res.is_err());
+}
+
+#[test]
+fn admin_transfer_works() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    
+    let new_admin = Address::generate(&env);
+    
+    h.registry.set_admin(&new_admin);
+    assert_eq!(h.registry.admin(), new_admin);
+    
+    let real_wasm = get_test_wasm(&env);
+    let new_wasm_hash = env.deployer().upload_contract_wasm(real_wasm);
+    
+    // 1. Verify old admin (h.admin) can no longer upgrade:
+    let res = h.registry
+        .mock_auths(&[MockAuth {
+            address: &h.admin,
+            invoke: &MockAuthInvoke {
+                contract: &h.registry.address,
+                fn_name: "upgrade",
+                args: (&new_wasm_hash,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_upgrade(&new_wasm_hash);
+    assert!(res.is_err());
+
+    // 2. Verify new admin can successfully upgrade:
+    h.registry
+        .mock_auths(&[MockAuth {
+            address: &new_admin,
+            invoke: &MockAuthInvoke {
+                contract: &h.registry.address,
+                fn_name: "upgrade",
+                args: (&new_wasm_hash,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .upgrade(&new_wasm_hash);
+}
+
+#[test]
+fn set_admin_by_non_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let new_admin = Address::generate(&env);
+    let res = h.registry
+        .mock_auths(&[])
+        .try_set_admin(&new_admin);
+    assert!(res.is_err());
 }

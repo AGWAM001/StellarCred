@@ -9,10 +9,14 @@
 //! On `submit_proof` the registry (1) checks the named issuer is registered and
 //! trusted for the credential type via IssuerRegistry, (2) forwards the proof to
 //! CredentialVerifier, and only caches the result if both pass.
+//!
+//! `submit_proofs_batch` accepts up to 5 `ProofSubmission` entries and verifies
+//! and stores all of them atomically: if any single proof fails the entire call
+//! reverts, saving the holder from multiple wallet confirmations and fee payments.
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
-    symbol_short, vec, Address, Bytes, BytesN, Env, Symbol, Vec,
+    symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec,
 };
 
 // Persistent-entry lifetime management (~5s ledgers).
@@ -20,21 +24,8 @@ const DAY_IN_LEDGERS: u32 = 17280;
 const PROOF_BUMP_THRESHOLD: u32 = DAY_IN_LEDGERS;
 const PROOF_TTL: u32 = 90 * DAY_IN_LEDGERS;
 
-// ── Aggregate proof public-input layout (N=2: KYC + age) ────────────────────
-// The aggregate_proof circuit packs N credential public inputs sequentially,
-// followed by num_credentials as the last field.
-//
-// KYC (65 fields): commitment(1) + issuer_x(32) + issuer_y(32)
-// Age  (67 fields): commitment(1) + issuer_x(32) + issuer_y(32) +
-//                    current_date(1) + threshold_years(1)
-//
-// Field indices (0-based) within public_inputs:
-const AGG_FIELD_KYC_START: u32 = 0;      // KYC commitment
-const AGG_FIELD_KYC_PUBKEY: u32 = 1;     // KYC issuer_x[0] at byte offset 32
-const AGG_FIELD_AGE_START: u32 = 65;     // age commitment
-const AGG_FIELD_AGE_PUBKEY: u32 = 66;    // age issuer_x[0]
-const AGG_FIELD_AGE_THRESHOLD: u32 = 131; // age threshold_years = AGG_FIELD_AGE_START(65) + 1(commitment) + 32(issuer_x) + 32(issuer_y) + 1(current_date) = 131
-const AGG_FIELD_NUM_CREDENTIALS: u32 = 132; // num_credentials (last field)
+/// Maximum number of submissions accepted by `submit_proofs_batch`.
+const MAX_BATCH_SIZE: u32 = 5;
 
 /// Typed client for the deployed CredentialVerifier contract. Declared as an
 /// interface (not a crate dependency) so this contract links only the client,
@@ -67,10 +58,25 @@ pub struct ProofRecord {
     /// value that was committed to in the proof's public inputs. None for types
     /// with no numeric threshold (kyc, jurisdiction).
     pub threshold: Option<u64>,
+    /// Set by the registered issuer via `revoke`. Expiry data is kept for audit.
+    pub revoked: bool,
+}
+
+/// A single proof submission inside a batch. Mirrors the individual parameters
+/// of `submit_proof` but grouped into a struct so they can be passed as a `Vec`.
+#[contracttype]
+#[derive(Clone)]
+pub struct ProofSubmission {
+    pub credential_type: Symbol,
+    pub proof: Bytes,
+    pub public_inputs: Vec<u32>,
+    pub issuer_id: Address,
+    pub expiry: u64,
 }
 
 #[contracttype]
 pub enum DataKey {
+    Admin,
     Verifier,
     IssuerRegistry,
     /// Cached verification, keyed by (holder, credential_type).
@@ -88,27 +94,74 @@ pub enum Error {
     /// The public key the proof was made against does not match the registered
     /// issuer's key.
     IssuerKeyMismatch = 5,
-    /// The aggregate proof's num_credentials field doesn't match the expected
-    /// count or the inner public inputs are too short.
-    AggregateLayoutInvalid = 6,
+    ProofNotFound = 6,
+    /// The batch contains more than `MAX_BATCH_SIZE` submissions.
+    BatchTooLarge = 7,
+    /// The batch must contain at least one submission.
+    BatchEmpty = 8,
+    /// Two or more submissions in the batch share the same `credential_type`;
+    /// only the last write would survive, so the batch is rejected outright.
+    DuplicateCredentialType = 9,
 }
 
 #[contract]
 pub struct ProofRegistry;
 
+fn vec_u32_to_bytes(env: &Env, vec: &Vec<u32>) -> Bytes {
+    let mut bytes = Bytes::new(env);
+    for val in vec.iter() {
+        bytes.append(&Bytes::from_array(env, &val.to_be_bytes()));
+    }
+    bytes
+}
+
 #[contractimpl]
 impl ProofRegistry {
-    /// `verifier` and `issuer_registry` are the deployed contract addresses.
-    pub fn __constructor(env: Env, verifier: Address, issuer_registry: Address) {
+    /// `admin`, `verifier` and `issuer_registry` are the deployed contract addresses.
+    pub fn __constructor(env: Env, admin: Address, verifier: Address, issuer_registry: Address) {
+        env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Verifier, &verifier);
         env.storage()
             .instance()
             .set(&DataKey::IssuerRegistry, &issuer_registry);
     }
 
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    pub fn set_admin(env: Env, new_admin: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+    }
+
+    pub fn admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized))
+    }
+
     /// Verify a proof and, if valid, cache it for `holder` until `expiry`
     /// (ledger timestamp, seconds). The holder authorizes their own submission.
     /// `issuer_id` must be registered and trusted for `credential_type`.
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
+    // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
+    // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
+    // value-based `publish` API, we maintain consistency with other modules to avoid 
+    // introducing architectural mismatch.
+    #[allow(deprecated)]
     pub fn submit_proof(
         env: Env,
         holder: Address,
@@ -147,8 +200,100 @@ impl ProofRegistry {
             &credential_type,
             env.ledger().timestamp(),
             expiry,
-            Self::extract_threshold(&credential_type, &public_inputs),
+            threshold: Self::extract_threshold(&env, &credential_type, &public_inputs),
+            revoked: false,
+        };
+        env.storage().persistent().set(&key, &record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+
+        // Emit an event matching the event emission shape in the batch-proof path.
+        env.events().publish(
+            (symbol_short!("proof"), symbol_short!("verified")),
+            record.expiry,
         );
+    }
+
+    /// One event is emitted per successfully verified credential, matching
+    /// the event emission shape in the single-proof path.
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
+    // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
+    // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
+    // value-based `publish` API, we maintain consistency with other modules to avoid 
+    // introducing architectural mismatch.
+    #[allow(deprecated)]
+    pub fn submit_proofs_batch(env: Env, holder: Address, submissions: Vec<ProofSubmission>) {
+        holder.require_auth();
+
+        let len = submissions.len();
+        if len == 0 {
+            panic_with_error!(&env, Error::BatchEmpty);
+        }
+        if len > MAX_BATCH_SIZE {
+            panic_with_error!(&env, Error::BatchTooLarge);
+        }
+
+        // Guard: reject batches with duplicate credential_type entries.
+        // The contract writes DataKey::Proof(holder, type) so duplicates would
+        // silently overwrite each other (last-write-wins), misleading the caller.
+        // MAX_BATCH_SIZE is 5, so O(n²) is fine here.
+        for i in 0..len {
+            for j in (i + 1)..len {
+                if submissions.get(i).unwrap().credential_type
+                    == submissions.get(j).unwrap().credential_type
+                {
+                    panic_with_error!(&env, Error::DuplicateCredentialType);
+                }
+            }
+        }
+
+        let issuer_registry_addr = Self::issuer_registry(&env);
+        let verifier_addr = Self::verifier(&env);
+        let registry = IssuerClient::new(&env, &issuer_registry_addr);
+        let verifier = VerifierClient::new(&env, &verifier_addr);
+
+        let now = env.ledger().timestamp();
+
+        for sub in submissions.iter() {
+            let public_inputs_bytes = vec_u32_to_bytes(&env, &sub.public_inputs);
+
+            // Step 1: issuer must be registered and trusted for this type.
+            if !registry.is_valid_issuer(&sub.issuer_id, &sub.credential_type) {
+                panic_with_error!(&env, Error::IssuerNotTrusted);
+            }
+
+            // Step 2: the public key embedded in the proof must match the
+            // on-chain registered key for the claimed issuer.
+            let expected = registry.get_issuer_pubkey(&sub.issuer_id);
+            if !Self::public_inputs_match_pubkey(&public_inputs_bytes, &expected) {
+                panic_with_error!(&env, Error::IssuerKeyMismatch);
+            }
+
+            // Step 3: the proof must verify against the registered VK.
+            if !verifier.verify_proof(&sub.credential_type, &sub.proof, &public_inputs_bytes) {
+                panic_with_error!(&env, Error::VerificationFailed);
+            }
+
+            let key = DataKey::Proof(holder.clone(), sub.credential_type.clone());
+            let record = ProofRecord {
+                verified_at: now,
+                expiry: sub.expiry,
+                threshold: Self::extract_threshold(&env, &sub.credential_type, &public_inputs_bytes),
+                revoked: false,
+            };
+            env.storage().persistent().set(&key, &record);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+
+            // Emit one event per credential, matching the shape callers already
+            // expect from the single-proof path.
+            env.events().publish(
+                (symbol_short!("proof"), symbol_short!("verified")),
+                record.expiry,
+            );
+        }
     }
 
     /// Returns `(is_currently_valid, verified_at, expiry)`. `is_currently_valid`
@@ -160,7 +305,7 @@ impl ProofRegistry {
             .get::<_, ProofRecord>(&DataKey::Proof(holder, credential_type))
         {
             Some(r) => {
-                let valid = r.expiry > env.ledger().timestamp();
+                let valid = !r.revoked && r.expiry > env.ledger().timestamp();
                 (valid, r.verified_at, r.expiry)
             }
             None => (false, 0, 0),
@@ -183,7 +328,7 @@ impl ProofRegistry {
             .get::<_, ProofRecord>(&DataKey::Proof(holder, credential_type))
         {
             Some(r) => {
-                if r.expiry <= env.ledger().timestamp() {
+                if r.revoked || r.expiry <= env.ledger().timestamp() {
                     return false;
                 }
                 match min_threshold {
@@ -281,24 +426,32 @@ impl ProofRegistry {
             .remove(&DataKey::Proof(holder, credential_type));
     }
 
-    /// Revoke ALL cached proofs for a holder — useful after an aggregate proof
-    /// is submitted and the holder wants a clean slate.
-    pub fn revoke_all(env: Env, holder: Address) {
-        holder.require_auth();
-        // Remove each known credential type. This is a best-effort removal;
-        // types without a stored proof are a no-op thanks to the SDK.
-        let types = [
-            symbol_short!("kyc"),
-            symbol_short!("age"),
-            symbol_short!("income"),
-            symbol_short!("jurisdiction"),
-            symbol_short!("funds"),
-        ];
-        for t in types {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::Proof(holder.clone(), t));
+    /// Invalidate a holder's cached proof. Only the registered issuer for
+    /// `credential_type` may call this (e.g. when KYC status changes).
+    pub fn revoke(env: Env, issuer: Address, holder: Address, credential_type: Symbol) {
+        issuer.require_auth();
+
+        let registry = IssuerClient::new(&env, &Self::issuer_registry(&env));
+        if !registry.is_valid_issuer(&issuer, &credential_type) {
+            panic_with_error!(&env, Error::IssuerNotTrusted);
         }
+
+        let key = DataKey::Proof(holder.clone(), credential_type.clone());
+        let mut record: ProofRecord = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::ProofNotFound));
+        record.revoked = true;
+        env.storage().persistent().set(&key, &record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+
+        env.events().publish(
+            (symbol_short!("revoked"),),
+            (holder, credential_type, issuer, env.ledger().timestamp()),
+        );
     }
 
     pub fn verifier_address(env: Env) -> Address {
@@ -316,12 +469,13 @@ impl ProofRegistry {
     ///   income:     field 65 = threshold
     ///   funds:      field 65 = threshold
     ///   kyc:        (no extra fields)
-    fn extract_threshold(credential_type: &Symbol, public_inputs: &Bytes) -> Option<u64> {
+    fn extract_threshold(env: &Env, credential_type: &Symbol, public_inputs: &Bytes) -> Option<u64> {
         if *credential_type == symbol_short!("age") {
             // field 66, bytes 2112-2143, u64 in last 8 bytes
             Some(Self::read_u64_field(public_inputs, 66))
         } else if *credential_type == symbol_short!("income")
             || *credential_type == symbol_short!("funds")
+            || *credential_type == Symbol::new(env, "accreditation")
         {
             // field 65, bytes 2080-2111, u64 in last 8 bytes
             Some(Self::read_u64_field(public_inputs, 65))

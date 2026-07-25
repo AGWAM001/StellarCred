@@ -61,6 +61,7 @@ const CLAIMS: [string, string, string][] = [
   ["income", "Income ≥ threshold", "Financial data provider"],
   ["jurisdiction", "Country not restricted", "KYC provider"],
   ["funds", "Balance ≥ threshold", "Plaid / bank attestation"],
+  ["accreditation", "Net worth ≥ threshold", "Financial institution"],
 ];
 
 const ADDRESSES: [string, string][] = [
