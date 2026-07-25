@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { IconBook2, IconCode } from "@tabler/icons-react";
+import { IconBook2, IconCode, IconMenu2, IconX } from "@tabler/icons-react";
 
 const LINKS = [
   { href: "/holder",   label: "Wallet" },
@@ -34,8 +35,12 @@ function ShieldIcon() {
 
 export function SiteNav() {
   const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => setMenuOpen(false), [pathname]);
+
   return (
-    <header className="nav">
+    <header className={`nav${menuOpen ? " menu-open" : ""}`}>
       <div className="nav-inner">
         <Link href="/" className="brand">
           <span className="brand-icon">
@@ -43,6 +48,16 @@ export function SiteNav() {
           </span>
           StellarCred
         </Link>
+
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-label="Toggle menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((o) => !o)}
+        >
+          {menuOpen ? <IconX size={18} stroke={1.8} /> : <IconMenu2 size={18} stroke={1.8} />}
+        </button>
 
         <nav className="nav-links">
           {LINKS.map((l) => (
@@ -56,18 +71,7 @@ export function SiteNav() {
           ))}
         </nav>
 
-        <div
-          className="nav-right"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.25rem",
-            padding: "0.25rem",
-            borderRadius: "999px",
-            border: "1px solid var(--border)",
-            background: "rgba(255,255,255,0.02)",
-          }}
-        >
+        <div className="nav-right">
           <Link
             href="/docs"
             className={`seg-link${pathname.startsWith("/docs") ? " active" : ""}`}
