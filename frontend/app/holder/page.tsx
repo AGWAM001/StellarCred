@@ -498,14 +498,14 @@ function ProofFlow({
 
   const steps: ProgressStep[] = [
     {
-      label: "Loading circuit",
-      status: getStatus("circuit"),
-      error: (error && stage === "circuit") ? error.friendly : undefined,
-    },
-    {
       label: "Computing witness",
       status: getStatus("witness"),
       error: (error && stage === "witness") ? error.friendly : undefined,
+    },
+    {
+      label: "Loading circuit",
+      status: getStatus("circuit"),
+      error: (error && stage === "circuit") ? error.friendly : undefined,
     },
     {
       label: "Generating proof" + (stage === "proof" && !error ? ` (${elapsed}s)` : ""),
