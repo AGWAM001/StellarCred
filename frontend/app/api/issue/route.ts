@@ -1,96 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-// Resolved by webpack at build time — avoids process.cwd() which is unreliable
-// in Next.js server routes (can return "/" depending on how the server starts).
-import commitCircuit from "../../../public/circuits/commit.json";
+import { IssuerClient, CREDENTIAL_TYPES, type CredentialType, type ClaimParams } from "@stellarcred/issuer";
 import { logger, stripSensitiveFields } from "../../../lib/logger";
 
 // Server-side only — never shipped to the browser.
 // Set ISSUER_PRIVATE_KEY in .env.local to the 64-char hex secp256k1 private
 // key whose public key was registered in IssuerRegistry. The registered pubkey
 // and the signing key must match or ProofRegistry will reject every proof.
-const DEMO_SK = process.env.ISSUER_PRIVATE_KEY
-  ? Buffer.from(process.env.ISSUER_PRIVATE_KEY, "hex")
-  : sha256(new TextEncoder().encode("stellarcred-demo-issuer"));
+// Falls back to a deterministic demo key so the app runs without one set —
+// this fallback is intentionally app-specific and not part of @stellarcred/issuer.
+const DEMO_SK_HEX =
+  process.env.ISSUER_PRIVATE_KEY ??
+  Buffer.from(sha256(new TextEncoder().encode("stellarcred-demo-issuer"))).toString("hex");
 
-function be32(v: bigint): Uint8Array {
-  const b = new Uint8Array(32);
-  for (let i = 31; i >= 0; i--) {
-    b[i] = Number(v & 255n);
-    v >>= 8n;
-  }
-  return b;
-}
-
-function randomField(): string {
-  // 31 bytes = 248 bits, always fits in BN254 scalar field.
-  return "0x" + randomBytes(31).toString("hex");
-}
-
-// Derive the circuit `value` (preimage) for a credential type from the shared
-// verification attributes. One Persona/KYC response carries everything needed
-// for every requested type, so each type just reads the field it cares about.
-function attributeToValue(type: string, attributes: Record<string, string>): string {
-  switch (type) {
-    case "kyc":
-      // Binary claim — no attribute to commit, just a fresh random secret.
-      return randomField();
-    case "age": {
-      const dob = attributes.date_of_birth;
-      if (!dob) throw new Error("age credential requires attributes.date_of_birth");
-      const days = Math.floor(new Date(dob).getTime() / 86_400_000);
-      if (!Number.isFinite(days)) throw new Error("Invalid date_of_birth");
-      return String(days);
-    }
-    case "income": {
-      const income = parseInt(attributes.income ?? "", 10);
-      if (!Number.isFinite(income)) throw new Error("income credential requires attributes.income");
-      return String(income);
-    }
-    case "jurisdiction": {
-      const country = parseInt(attributes.country_code ?? "", 10);
-      if (!Number.isFinite(country)) throw new Error("jurisdiction credential requires attributes.country_code");
-      return String(country);
-    }
-    case "funds": {
-      const balance = parseInt(attributes.balance ?? "", 10);
-      if (!Number.isFinite(balance)) throw new Error("funds credential requires attributes.balance");
-      return String(balance);
-    }
-    case "accreditation": {
-      const netWorth = parseInt(attributes.net_worth ?? "", 10);
-      if (!Number.isFinite(netWorth)) throw new Error("accreditation credential requires attributes.net_worth");
-      return String(netWorth);
-    }
-    default:
-      throw new Error(`Unknown credential type: ${type}`);
-  }
-}
-
-async function poseidonCommit(value: string, salt: string): Promise<string> {
-  const { Noir } = await import("@noir-lang/noir_js");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const noir = new Noir(commitCircuit as any);
-  const { returnValue } = await noir.execute({ value, salt });
-  return String(returnValue);
-}
-
-function issuerPublicKey(): { x: number[]; y: number[] } {
-  const p = secp256k1.getPublicKey(DEMO_SK, false); // 0x04 || x || y
-  return { x: Array.from(p.slice(1, 33)), y: Array.from(p.slice(33, 65)) };
-}
-
-function signCommitment(commitment: string): {
-  sig: number[];
-  issuerX: number[];
-  issuerY: number[];
-} {
-  const sig = secp256k1.sign(be32(BigInt(commitment)), DEMO_SK, { prehash: false });
-  const { x, y } = issuerPublicKey();
-  return { sig: Array.from(sig), issuerX: x, issuerY: y };
-}
+const issuer = new IssuerClient({ privateKey: DEMO_SK_HEX });
 
 // ---------------------------------------------------------------------------
 // Persona identity verification relay
@@ -243,82 +167,9 @@ async function verifyWithPlaid(): Promise<{ ok: boolean; balance?: number; error
   return { ok: true, balance: verifiedBalance };
 }
 
-const VALID_TYPES = ["kyc", "age", "income", "jurisdiction", "funds", "accreditation"];
-
-const TYPE_TITLE: Record<string, string> = {
-  kyc: "KYC Complete",
-  age: "Age Verified",
-  income: "Accredited (Income)",
-  jurisdiction: "Jurisdiction Eligible",
-  funds: "Proof of Funds",
-  accreditation: "Accredited Investor (Net Worth)",
-};
-
-function buildClaimLabel(type: string, claimParams?: ClaimParams): string {
-  switch (type) {
-    case "age":
-      return `age ≥ ${claimParams?.threshold_years ?? "18"}`;
-    case "income": {
-      const t = Number(claimParams?.threshold ?? "200000");
-      return `income > $${t.toLocaleString("en-US")}`;
-    }
-    case "funds": {
-      const t = Number(claimParams?.threshold ?? "10000");
-      return `balance > $${t.toLocaleString("en-US")}`;
-    }
-    case "accreditation": {
-      const t = Number(claimParams?.threshold ?? "1000000");
-      return `net worth ≥ $${t.toLocaleString("en-US")}`;
-    }
-    case "jurisdiction":
-      return "country not restricted";
-    case "kyc":
-    default:
-      return "identity verified";
-  }
-}
-
-interface ClaimParams {
-  threshold_years?: string;
-  threshold?: string;
-  restricted?: string[];
-}
-
-interface IssueParams {
-  type: string;
-  holder: string;
-  issuerId: string;
-  issuerName: string;
-  expiry: string;
-  attributes: Record<string, string>;
-  claimParams?: ClaimParams;
-}
-
-// Build one complete, independent credential for a single type. Each gets its
-// own preimage/salt/commitment/signature — they share nothing but the issuer.
-async function buildCredential({ type, holder, issuerId, issuerName, expiry, attributes, claimParams }: IssueParams) {
-  const value = attributeToValue(type, attributes);
-  const salt = randomField();
-  const commitment = await poseidonCommit(value, salt);
-  const { sig, issuerX, issuerY } = signCommitment(commitment);
-  return {
-    type,
-    title: TYPE_TITLE[type],
-    claim: buildClaimLabel(type, claimParams),
-    issuer: issuerName,
-    issuerId,
-    holder,
-    value,
-    salt,
-    commitment,
-    sig,
-    issuerPubX: issuerX,
-    issuerPubY: issuerY,
-    issuedAt: Math.floor(Date.now() / 1000),
-    expiry,
-    ...(claimParams && Object.values(claimParams).some((v) => v !== undefined) ? { claimParams } : {}),
-  };
-}
+// readonly CredentialType[] widened to string[] so .includes() accepts any
+// user-supplied string during validation, before it's known to be valid.
+const VALID_TYPES: readonly string[] = CREDENTIAL_TYPES;
 
 export async function POST(req: NextRequest) {
   const requestId = randomBytes(16).toString("hex");
@@ -548,7 +399,15 @@ export async function POST(req: NextRequest) {
         walletAddress,
         requestId,
       }));
-      const credential = await buildCredential({ type, holder, issuerId, issuerName, expiry, attributes, claimParams });
+      const credential = await issuer.issue({
+        type: type as CredentialType,
+        holder,
+        issuerId,
+        issuerName,
+        expiry,
+        attribute: attributes,
+        claimParams,
+      });
       credentials.push(credential);
       logger.info(stripSensitiveFields({
         event: "signing_success",
