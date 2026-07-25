@@ -40,6 +40,7 @@ export class WalletConnectError extends Error {
   kind: WalletErrorKind;
   constructor(kind: WalletErrorKind, message: string) {
     super(message);
+    this.name = "WalletConnectError";
     this.kind = kind;
   }
 }
