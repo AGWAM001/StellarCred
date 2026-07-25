@@ -60,7 +60,7 @@ stellar contract invoke \
   --pubkey "$ISSUER_PUBKEY" \
   --credential_types '["kyc","age","income","jurisdiction","funds"]'
 
-for type in kyc age income jurisdiction funds; do
+for type in kyc age income jurisdiction funds aggregate; do
   vk="fixtures/$type/vk"
   [ -f "$vk" ] || { echo "skip $type (no VK — run circuits/scripts/build.sh)"; continue; }
   echo "Registering $type verification key..."

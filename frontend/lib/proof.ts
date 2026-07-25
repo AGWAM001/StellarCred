@@ -116,3 +116,51 @@ export async function generateProof(
   const witness = await computeWitness(type, credential);
   return proveWithBackend(type, witness);
 }
+
+// ── Aggregate proof generation ───────────────────────────────────────────────
+// For the N=2 PoC (KYC + age), this generates a single aggregate proof that
+// proves both credentials in one circuit. The inner credentials must have been
+// issued by the same or compatible issuers with matching public keys.
+
+export interface AggregateInput {
+  kyc: Record<string, unknown>;
+  age: Record<string, unknown>;
+}
+
+export async function computeAggregateWitness(
+  inputs: AggregateInput,
+): Promise<Uint8Array> {
+  // Build the merged credential object with prefixed keys matching the aggregate
+  // circuit's parameter names (kyc_secret, age_date_of_birth, etc.).
+  const aggregateCredential = {
+    kyc_secret: inputs.kyc.value ?? inputs.kyc.secret,
+    kyc_salt: inputs.kyc.salt,
+    kyc_sig: inputs.kyc.sig,
+    age_date_of_birth: inputs.age.date_of_birth ?? inputs.age.value,
+    age_salt: inputs.age.salt,
+    age_sig: inputs.age.sig,
+  };
+
+  const res = await fetch("/api/witness", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "aggregate", credential: aggregateCredential }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`Aggregate witness generation failed: ${msg}`);
+  }
+  const { witness: hex } = (await res.json()) as { witness: string };
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+export async function generateAggregateProof(
+  inputs: AggregateInput,
+): Promise<GeneratedProof> {
+  const witness = await computeAggregateWitness(inputs);
+  return proveWithBackend("aggregate", witness);
+}
