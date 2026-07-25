@@ -12,6 +12,7 @@ import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { saveCredential, TYPE_META, type Credential } from "@/lib/credential";
 import type { CredentialType } from "@/lib/stellar";
+import { useToast } from "@/components/Toast";
 
 const TYPES = Object.entries(TYPE_META) as [
   CredentialType,
@@ -34,6 +35,7 @@ function VerifyInner() {
   const router = useRouter();
   const { address } = useWallet();
   const searchParams = useSearchParams();
+  const toast = useToast();
 
   // When a protocol redirects here it can specify where to send the user back
   // (return_url) and exactly which claim it requires (claim). A required claim
@@ -151,9 +153,16 @@ function VerifyInner() {
         credentials.forEach((c) => saveCredential(c));
 
         setDone(true);
+        toast.success(
+          credentials.length > 1 ? "Credentials issued successfully" : "Credential issued successfully",
+        );
         setTimeout(redirectAfterIssue, 1500);
       })
-      .catch((e) => setError((e as Error).message))
+      .catch((e) => {
+        const message = (e as Error).message;
+        setError(message);
+        toast.error(`Credential issuance failed: ${message}`);
+      })
       .finally(() => setBusy(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [personaInquiryId, address]);
@@ -237,9 +246,14 @@ function VerifyInner() {
       const { credentials } = (await res.json()) as { credentials: Credential[] };
       credentials.forEach((c) => saveCredential(c));
       setDone(true);
+      toast.success(
+        credentials.length > 1 ? "Credentials issued successfully" : "Credential issued successfully",
+      );
       setTimeout(redirectAfterIssue, 1500);
     } catch (e) {
-      setError((e as Error).message);
+      const message = (e as Error).message;
+      setError(message);
+      toast.error(`Credential issuance failed: ${message}`);
     } finally {
       setBusy(false);
     }

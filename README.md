@@ -71,6 +71,12 @@ proof once and caches the result; every protocol afterwards reads
 
 ---
 
+## Architecture & Overview
+
+For a detailed architectural description with diagrams, see the [Architecture Documentation](docs/ARCHITECTURE.md).
+
+---
+
 ## Repository layout
 
 ```
