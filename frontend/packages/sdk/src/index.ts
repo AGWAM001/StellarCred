@@ -60,8 +60,17 @@ export function configure(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// Types
+// Types and Errors
 // ---------------------------------------------------------------------------
+
+/** Error thrown when watchClaim times out. */
+export class TimeoutError extends Error {
+  constructor(message = "Timeout waiting for claim") {
+    super(message);
+    this.name = "TimeoutError";
+  }
+}
+
 
 /** The credential types StellarCred supports. Matches the contract Symbols. */
 export const CLAIM_TYPES = ["kyc", "age", "income", "jurisdiction", "funds", "accreditation"] as const;
@@ -241,9 +250,120 @@ export function buildVerifyUrl(options: {
   return url.toString();
 }
 
+/**
+ * Options for `watchClaim`.
+ */
+export interface WatchClaimOptions {
+  /** How often to poll in milliseconds (default: 3000) */
+  pollMs?: number;
+  /** How long to wait before timing out in milliseconds (default: 120000) */
+  timeoutMs?: number;
+  /** For parameterised claims (e.g. age, funds), minimum threshold to require */
+  minThreshold?: number;
+}
+
+export interface WatchClaimCallbackOptions extends WatchClaimOptions {
+  /** Callback fired whenever the verification status changes from false to true or vice-versa */
+  onChange: (verified: boolean) => void;
+}
+
+/**
+ * Polls for a claim to become verified.
+ * 
+ * In Promise form (without `onChange`), it resolves `true` when the claim is verified,
+ * or rejects with `TimeoutError` after `timeoutMs`.
+ */
+export function watchClaim(
+  wallet: string,
+  claimType: string,
+  opts?: WatchClaimOptions,
+): Promise<boolean>;
+
+/**
+ * Polls for a claim to become verified.
+ * 
+ * In Callback form (with `onChange`), it fires the callback whenever the status changes
+ * (e.g. from false to true). Returns a `stop` function to cancel polling.
+ */
+export function watchClaim(
+  wallet: string,
+  claimType: string,
+  opts: WatchClaimCallbackOptions,
+): () => void;
+
+export function watchClaim(
+  wallet: string,
+  claimType: string,
+  opts?: WatchClaimOptions | WatchClaimCallbackOptions,
+): Promise<boolean> | (() => void) {
+  const pollMs = opts?.pollMs ?? 3000;
+  const timeoutMs = opts?.timeoutMs ?? 120000;
+  const minThreshold = opts?.minThreshold;
+  const onChange = (opts as WatchClaimCallbackOptions)?.onChange;
+
+  let intervalId: ReturnType<typeof setInterval>;
+  let timeoutId: ReturnType<typeof setTimeout>;
+  let isStopped = false;
+  let lastState = false;
+  // Ensure we don't have overlapping polls if `hasClaim` is slow
+  let isPolling = false;
+
+  const stop = () => {
+    isStopped = true;
+    clearInterval(intervalId);
+    clearTimeout(timeoutId);
+  };
+
+  if (onChange) {
+    const poll = async () => {
+      if (isStopped || isPolling) return;
+      isPolling = true;
+      try {
+        const verified = await hasClaim(wallet, claimType, { minThreshold });
+        if (isStopped) return;
+        if (verified !== lastState) {
+          lastState = verified;
+          onChange(verified);
+        }
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    intervalId = setInterval(poll, pollMs);
+    timeoutId = setTimeout(stop, timeoutMs);
+    poll(); // Initial check
+    return stop;
+  } else {
+    return new Promise((resolve, reject) => {
+      const poll = async () => {
+        if (isStopped || isPolling) return;
+        isPolling = true;
+        try {
+          const verified = await hasClaim(wallet, claimType, { minThreshold });
+          if (isStopped) return;
+          if (verified) {
+            stop();
+            resolve(true);
+          }
+        } finally {
+          isPolling = false;
+        }
+      };
+
+      intervalId = setInterval(poll, pollMs);
+      timeoutId = setTimeout(() => {
+        stop();
+        reject(new TimeoutError());
+      }, timeoutMs);
+      poll(); // Initial check
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Namespace export (StellarCred.hasClaim / StellarCred.getClaims / etc.)
 // ---------------------------------------------------------------------------
 
-export const StellarCred = { configure, hasClaim, getClaims, buildVerifyUrl, CLAIM_TYPES };
+export const StellarCred = { configure, hasClaim, getClaims, buildVerifyUrl, watchClaim, CLAIM_TYPES, TimeoutError };
 export default StellarCred;

@@ -74,6 +74,38 @@ const claims = await StellarCred.getClaims(wallet);
 // [{ type: "kyc", verifiedAt: 1719000000, expiry: 1726776000 }, ...]
 ```
 
+### `watchClaim(wallet, claimType, opts?)`
+
+A polling helper that checks `hasClaim` on an interval. It either resolves a Promise or fires a callback when the claim is verified. Works with `minThreshold` for parameterised claims.
+
+**Promise form** — resolves `true` when verified, or rejects with `TimeoutError` after a timeout:
+
+```ts
+try {
+  await StellarCred.watchClaim(wallet, 'kyc', { 
+    pollMs: 3000, 
+    timeoutMs: 120_000 
+  });
+  console.log("Verified!");
+} catch (err) {
+  console.error("Timeout waiting for verification");
+}
+```
+
+**Callback form** — fires `onChange` whenever the status changes. Returns a `stop()` function to cancel polling:
+
+```ts
+const stop = StellarCred.watchClaim(wallet, 'funds', {
+  minThreshold: 50000,
+  pollMs: 3000,
+  timeoutMs: 120_000,
+  onChange: (verified) => console.log('verified:', verified),
+});
+
+// Cancel polling manually (e.g. on component unmount)
+// stop();
+```
+
 ### `buildVerifyUrl(options)`
 
 Builds a StellarCred verification URL to redirect users to. After verifying, StellarCred returns the user to `returnUrl` with `?sc_verified=true&sc_wallet=<address>` appended.
