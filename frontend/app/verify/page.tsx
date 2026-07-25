@@ -152,7 +152,7 @@ function VerifyInner() {
       })
       .then(({ credentials }) => {
         credentials.forEach((c) => saveCredential(c));
-        justIssuedClaims.current = credentials.map((c) => c.type);
+        justIssuedClaims.current = credentials.map((c) => c.type).filter((t) => VALID_CLAIMS.includes(t as CredentialType));
 
         setDone(true);
         toast.success(
@@ -250,7 +250,7 @@ function VerifyInner() {
       }
       const { credentials } = (await res.json()) as { credentials: Credential[] };
       credentials.forEach((c) => saveCredential(c));
-      justIssuedClaims.current = credentials.map((c) => c.type);
+      justIssuedClaims.current = credentials.map((c) => c.type).filter((t) => VALID_CLAIMS.includes(t as CredentialType));
       setDone(true);
       toast.success(
         credentials.length > 1 ? "Credentials issued successfully" : "Credential issued successfully",
