@@ -32,7 +32,7 @@ const MAX_BATCH_SIZE: u32 = 5;
 /// never the verifier's exported wasm symbols.
 #[contractclient(name = "VerifierClient")]
 pub trait VerifierInterface {
-    fn verify_proof(env: Env, credential_type: Symbol, proof: Bytes, public_inputs: Bytes) -> bool;
+    fn verify_proof(env: Env, credential_type: Symbol, proof: Bytes, public_inputs: Bytes, vk_version: Option<u32>) -> bool;
 }
 
 /// Typed client for the deployed IssuerRegistry contract.
@@ -60,6 +60,9 @@ pub struct ProofRecord {
     pub threshold: Option<u64>,
     /// Set by the registered issuer via `revoke`. Expiry data is kept for audit.
     pub revoked: bool,
+    /// VK version that was used to verify this proof. Preserved so that old
+    /// proofs remain valid even after the circuit is upgraded to a new version.
+    pub vk_version: u32,
 }
 
 /// A single proof submission inside a batch. Mirrors the individual parameters
@@ -72,6 +75,9 @@ pub struct ProofSubmission {
     pub public_inputs: Vec<u32>,
     pub issuer_id: Address,
     pub expiry: u64,
+    /// VK version to use for verification. `None` defaults to the latest
+    /// registered version (recommended for new submissions).
+    pub vk_version: Option<u32>,
 }
 
 #[contracttype]
@@ -156,6 +162,9 @@ impl ProofRegistry {
     /// Verify a proof and, if valid, cache it for `holder` until `expiry`
     /// (ledger timestamp, seconds). The holder authorizes their own submission.
     /// `issuer_id` must be registered and trusted for `credential_type`.
+    ///
+    /// `vk_version` selects which circuit VK the proof was generated against.
+    /// Pass `None` to use the latest registered version (the common case).
     // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
     // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
     // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
@@ -169,6 +178,7 @@ impl ProofRegistry {
         credential_type: Symbol,
         proof: Bytes,
         public_inputs: Bytes,
+        vk_version: Option<u32>,
         expiry: u64,
     ) {
         holder.require_auth();
@@ -190,16 +200,21 @@ impl ProofRegistry {
         // 3. The proof must verify against the registered VK for this type.
         //    VerifierClient panics with VkNotSet if no VK is registered for the type.
         let verifier = VerifierClient::new(&env, &Self::verifier(&env));
-        if !verifier.verify_proof(&credential_type, &proof, &public_inputs) {
+        if !verifier.verify_proof(&credential_type, &proof, &public_inputs, &vk_version) {
             panic_with_error!(&env, Error::VerificationFailed);
         }
 
         let key = DataKey::Proof(holder, credential_type.clone());
+        // When vk_version is None the CredentialVerifier resolves the latest
+        // version for us. We store 0 as a sentinel meaning "latest at
+        // submission time" so the record is self-describing.
+        let effective_version = vk_version.unwrap_or(0);
         let record = ProofRecord {
             verified_at: env.ledger().timestamp(),
             expiry,
             threshold: Self::extract_threshold(&env, &credential_type, &public_inputs),
             revoked: false,
+            vk_version: effective_version,
         };
         env.storage().persistent().set(&key, &record);
         env.storage()
@@ -269,16 +284,19 @@ impl ProofRegistry {
             }
 
             // Step 3: the proof must verify against the registered VK.
-            if !verifier.verify_proof(&sub.credential_type, &sub.proof, &public_inputs_bytes) {
+            if !verifier.verify_proof(&sub.credential_type, &sub.proof, &public_inputs_bytes, &sub.vk_version) {
                 panic_with_error!(&env, Error::VerificationFailed);
             }
 
             let key = DataKey::Proof(holder.clone(), sub.credential_type.clone());
+            // 0 is the sentinel for "latest at submission time" (see submit_proof).
+            let effective_version = sub.vk_version.unwrap_or(0);
             let record = ProofRecord {
                 verified_at: now,
                 expiry: sub.expiry,
                 threshold: Self::extract_threshold(&env, &sub.credential_type, &public_inputs_bytes),
                 revoked: false,
+                vk_version: effective_version,
             };
             env.storage().persistent().set(&key, &record);
             env.storage()

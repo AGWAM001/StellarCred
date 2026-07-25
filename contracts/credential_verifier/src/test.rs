@@ -23,11 +23,12 @@ fn verifies_kyc() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
-    c.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
     assert!(c.verify_proof(
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, fixture!("kyc", "proof")),
         &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
     ));
 }
 
@@ -36,11 +37,12 @@ fn verifies_age() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
-    c.set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, fixture!("age", "vk")));
+    c.set_vk(&symbol_short!("age"), &1u32, &Bytes::from_slice(&env, fixture!("age", "vk")));
     assert!(c.verify_proof(
         &symbol_short!("age"),
         &Bytes::from_slice(&env, fixture!("age", "proof")),
         &Bytes::from_slice(&env, fixture!("age", "public_inputs")),
+        &None,
     ));
 }
 
@@ -49,11 +51,12 @@ fn verifies_income() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
-    c.set_vk(&symbol_short!("income"), &Bytes::from_slice(&env, fixture!("income", "vk")));
+    c.set_vk(&symbol_short!("income"), &1u32, &Bytes::from_slice(&env, fixture!("income", "vk")));
     assert!(c.verify_proof(
         &symbol_short!("income"),
         &Bytes::from_slice(&env, fixture!("income", "proof")),
         &Bytes::from_slice(&env, fixture!("income", "public_inputs")),
+        &None,
     ));
 }
 
@@ -64,12 +67,14 @@ fn verifies_jurisdiction() {
     let c = setup(&env);
     c.set_vk(
         &Symbol::new(&env, "jurisdiction"),
+        &1u32,
         &Bytes::from_slice(&env, fixture!("jurisdiction", "vk")),
     );
     assert!(c.verify_proof(
         &Symbol::new(&env, "jurisdiction"),
         &Bytes::from_slice(&env, fixture!("jurisdiction", "proof")),
         &Bytes::from_slice(&env, fixture!("jurisdiction", "public_inputs")),
+        &None,
     ));
 }
 
@@ -78,7 +83,7 @@ fn rejects_tampered_proof() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
-    c.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
 
     let mut bad = fixture!("kyc", "proof").to_vec();
     bad[5000] ^= 0xff;
@@ -86,6 +91,7 @@ fn rejects_tampered_proof() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, &bad),
         &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
     ));
 }
 
@@ -94,11 +100,12 @@ fn rejects_wrong_length_proof() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
-    c.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
     assert!(!c.verify_proof(
         &symbol_short!("kyc"),
         &Bytes::from_array(&env, &[0u8; 16]),
         &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
     ));
 }
 
@@ -108,7 +115,7 @@ fn set_vk_rejects_garbage() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
-    c.set_vk(&symbol_short!("kyc"), &Bytes::from_array(&env, &[1, 2, 3]));
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_array(&env, &[1, 2, 3]));
 }
 
 #[test]
@@ -121,5 +128,152 @@ fn panics_without_vk() {
         &symbol_short!("age"),
         &Bytes::from_slice(&env, fixture!("kyc", "proof")),
         &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
     );
+}
+
+#[test]
+fn verifies_when_vk_set_and_inputs_present() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
+    ));
+}
+
+#[test]
+fn rejects_empty_proof() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert!(!c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_array(&env, &[0u8; 0]),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
+    ));
+}
+
+#[test]
+fn verifies_real_proof() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
+    ));
+}
+
+// ── VK versioning tests ────────────────────────────────────────────────────
+
+/// After registering VK version 2, old proofs verified against version 1 still
+/// pass because each version's VK is stored independently.
+#[test]
+fn old_proof_valid_after_upgrade() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+
+    // Register version 1 VK and verify a proof against it.
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(1u32),
+    ));
+
+    // Register version 2 VK (same fixture — in practice it would be different).
+    c.set_vk(&symbol_short!("kyc"), &2u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+
+    // Old proof against version 1 must still verify.
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(1u32),
+    ));
+
+    // New proof against version 2 (latest) also verifies.
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(2u32),
+    ));
+
+    // None defaults to latest (version 2).
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
+    ));
+
+    // get_latest_version returns 2.
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 2);
+}
+
+/// After deprecating version 1, new submissions against it must be rejected.
+#[test]
+#[should_panic]
+fn deprecated_version_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    c.set_vk(&symbol_short!("kyc"), &2u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+
+    // Version 2 still works before deprecation.
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(2u32),
+    ));
+
+    // Deprecate version 1.
+    c.deprecate_version(&symbol_short!("kyc"), &1u32);
+
+    // Attempting to verify against deprecated version 1 must panic.
+    c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(1u32),
+    );
+}
+
+/// Basic smoke test for `get_latest_version` — starts at 0, increments as
+/// higher versions are registered.
+#[test]
+fn get_latest_version_tracks_highest() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+
+    // Initially 0 — no VK registered.
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 0);
+
+    c.set_vk(&symbol_short!("kyc"), &3u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 3);
+
+    // Registering a lower version does not roll back the latest pointer.
+    c.set_vk(&symbol_short!("kyc"), &2u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 3);
+
+    // Registering a higher version updates the pointer.
+    c.set_vk(&symbol_short!("kyc"), &5u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 5);
 }

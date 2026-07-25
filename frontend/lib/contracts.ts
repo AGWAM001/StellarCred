@@ -81,8 +81,10 @@ export async function submitProof(params: {
   publicInputs: Uint8Array;
   /** Validity window in seconds from now. */
   ttlSecs: number;
+  /** VK version. Omit or pass undefined to use latest. */
+  vkVersion?: number;
 }): Promise<string> {
-  const { holder, issuerId, credentialType, proof, publicInputs, ttlSecs } = params;
+  const { holder, issuerId, credentialType, proof, publicInputs, ttlSecs, vkVersion } = params;
   if (!CONTRACTS.proofRegistry) {
     throw new Error(
       "ProofRegistry contract id not set. Deploy the contracts and fill NEXT_PUBLIC_PROOF_REGISTRY_ID.",
@@ -104,6 +106,9 @@ export async function submitProof(params: {
     nativeToScVal(credentialType, { type: "symbol" }),
     xdr.ScVal.scvBytes(Buffer.from(proof)),
     xdr.ScVal.scvBytes(Buffer.from(publicInputs)),
+    vkVersion != null
+      ? nativeToScVal(BigInt(vkVersion), { type: "u32" })
+      : nativeToScVal(null, { type: "void" }),
     nativeToScVal(BigInt(expiry), { type: "u64" }),
   );
 
@@ -171,6 +176,8 @@ export interface ProofSubmissionParams {
   publicInputs: Uint8Array;
   /** Validity window in seconds from now. */
   ttlSecs: number;
+  /** VK version. Omit or pass undefined to use latest. */
+  vkVersion?: number;
 }
 
 /**
@@ -242,6 +249,13 @@ export async function submitProofsBatch(params: {
       new xdr.ScMapEntry({
         key: xdr.ScVal.scvSymbol("public_inputs"),
         val: xdr.ScVal.scvVec(u32s.map((val) => xdr.ScVal.scvU32(val))),
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol("vk_version"),
+        val:
+          s.vkVersion != null
+            ? nativeToScVal(BigInt(s.vkVersion), { type: "u32" })
+            : nativeToScVal(null, { type: "void" }),
       }),
     ]);
   });
