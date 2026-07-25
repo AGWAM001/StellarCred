@@ -60,8 +60,17 @@ export function configure(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// Types
+// Types and Errors
 // ---------------------------------------------------------------------------
+
+/** Error thrown when watchClaim times out. */
+export class TimeoutError extends Error {
+  constructor(message = "Timeout waiting for claim") {
+    super(message);
+    this.name = "TimeoutError";
+  }
+}
+
 
 /** The credential types StellarCred supports. Matches the contract Symbols. */
 export const CLAIM_TYPES = ["kyc", "age", "income", "jurisdiction", "funds", "accreditation"] as const;
@@ -80,6 +89,8 @@ export interface Claim {
 // Low-level read: ProofRegistry.is_verified via simulation
 // ---------------------------------------------------------------------------
 
+import { Client as ProofRegistryClient } from "../../proof-registry/src/index.js";
+
 type StellarSDK = typeof import("@stellar/stellar-sdk");
 let _sdk: Promise<StellarSDK> | null = null;
 function getSdk(): Promise<StellarSDK> {
@@ -87,50 +98,36 @@ function getSdk(): Promise<StellarSDK> {
   return _sdk;
 }
 
-async function simulate<T>(wallet: string, op: unknown): Promise<T | null> {
+async function getClient(): Promise<ProofRegistryClient | null> {
   const { registryId, rpcUrl, networkPassphrase } = _config;
   if (!registryId) return null;
-
-  const { rpc, TransactionBuilder, BASE_FEE, scValToNative } = await getSdk();
-  const server = new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith("http://") });
-
-  let account;
-  try {
-    account = await server.getAccount(wallet);
-  } catch {
-    return null;
-  }
-
-  const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .addOperation(op as any)
-    .setTimeout(30)
-    .build();
-
-  const sim = await server.simulateTransaction(tx);
-  if (rpc.Api.isSimulationError(sim) || !sim.result) return null;
-  return scValToNative(sim.result.retval) as T;
+  const { rpc } = await getSdk();
+  return new ProofRegistryClient({
+    networkPassphrase,
+    contractId: registryId,
+    rpcUrl,
+    allowHttp: rpcUrl.startsWith("http://"),
+  });
 }
 
 async function readIsVerified(
   wallet: string,
   claimType: string,
 ): Promise<{ valid: boolean; verifiedAt: number; expiry: number } | null> {
-  const { registryId } = _config;
-  if (!registryId) return null;
+  const client = await getClient();
+  if (!client) return null;
 
-  const { Contract, Address, nativeToScVal } = await getSdk();
-  const contract = new Contract(registryId);
-  const op = contract.call(
-    "is_verified",
-    Address.fromString(wallet).toScVal(),
-    nativeToScVal(claimType, { type: "symbol" }),
-  );
-
-  const result = await simulate<[boolean, bigint | number, bigint | number]>(wallet, op);
-  if (!result) return null;
-  const [valid, verifiedAt, expiry] = result;
-  return { valid, verifiedAt: Number(verifiedAt), expiry: Number(expiry) };
+  try {
+    const { result } = await client.is_verified({
+      holder: wallet,
+      credential_type: claimType,
+    });
+    if (!result) return null;
+    const [valid, verifiedAt, expiry] = result;
+    return { valid, verifiedAt: Number(verifiedAt), expiry: Number(expiry) };
+  } catch {
+    return null;
+  }
 }
 
 async function readCheckClaim(
@@ -138,19 +135,19 @@ async function readCheckClaim(
   claimType: string,
   minThreshold: number,
 ): Promise<boolean> {
-  const { registryId } = _config;
-  if (!registryId) return false;
+  const client = await getClient();
+  if (!client) return false;
 
-  const { Contract, Address, nativeToScVal } = await getSdk();
-  const contract = new Contract(registryId);
-  const op = contract.call(
-    "check_claim",
-    Address.fromString(wallet).toScVal(),
-    nativeToScVal(claimType, { type: "symbol" }),
-    nativeToScVal(BigInt(minThreshold), { type: "u64" }),
-  );
-
-  return (await simulate<boolean>(wallet, op)) ?? false;
+  try {
+    const { result } = await client.check_claim({
+      holder: wallet,
+      credential_type: claimType,
+      min_threshold: BigInt(minThreshold),
+    });
+    return result ?? false;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -253,9 +250,120 @@ export function buildVerifyUrl(options: {
   return url.toString();
 }
 
+/**
+ * Options for `watchClaim`.
+ */
+export interface WatchClaimOptions {
+  /** How often to poll in milliseconds (default: 3000) */
+  pollMs?: number;
+  /** How long to wait before timing out in milliseconds (default: 120000) */
+  timeoutMs?: number;
+  /** For parameterised claims (e.g. age, funds), minimum threshold to require */
+  minThreshold?: number;
+}
+
+export interface WatchClaimCallbackOptions extends WatchClaimOptions {
+  /** Callback fired whenever the verification status changes from false to true or vice-versa */
+  onChange: (verified: boolean) => void;
+}
+
+/**
+ * Polls for a claim to become verified.
+ * 
+ * In Promise form (without `onChange`), it resolves `true` when the claim is verified,
+ * or rejects with `TimeoutError` after `timeoutMs`.
+ */
+export function watchClaim(
+  wallet: string,
+  claimType: string,
+  opts?: WatchClaimOptions,
+): Promise<boolean>;
+
+/**
+ * Polls for a claim to become verified.
+ * 
+ * In Callback form (with `onChange`), it fires the callback whenever the status changes
+ * (e.g. from false to true). Returns a `stop` function to cancel polling.
+ */
+export function watchClaim(
+  wallet: string,
+  claimType: string,
+  opts: WatchClaimCallbackOptions,
+): () => void;
+
+export function watchClaim(
+  wallet: string,
+  claimType: string,
+  opts?: WatchClaimOptions | WatchClaimCallbackOptions,
+): Promise<boolean> | (() => void) {
+  const pollMs = opts?.pollMs ?? 3000;
+  const timeoutMs = opts?.timeoutMs ?? 120000;
+  const minThreshold = opts?.minThreshold;
+  const onChange = (opts as WatchClaimCallbackOptions)?.onChange;
+
+  let intervalId: ReturnType<typeof setInterval>;
+  let timeoutId: ReturnType<typeof setTimeout>;
+  let isStopped = false;
+  let lastState = false;
+  // Ensure we don't have overlapping polls if `hasClaim` is slow
+  let isPolling = false;
+
+  const stop = () => {
+    isStopped = true;
+    clearInterval(intervalId);
+    clearTimeout(timeoutId);
+  };
+
+  if (onChange) {
+    const poll = async () => {
+      if (isStopped || isPolling) return;
+      isPolling = true;
+      try {
+        const verified = await hasClaim(wallet, claimType, { minThreshold });
+        if (isStopped) return;
+        if (verified !== lastState) {
+          lastState = verified;
+          onChange(verified);
+        }
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    intervalId = setInterval(poll, pollMs);
+    timeoutId = setTimeout(stop, timeoutMs);
+    poll(); // Initial check
+    return stop;
+  } else {
+    return new Promise((resolve, reject) => {
+      const poll = async () => {
+        if (isStopped || isPolling) return;
+        isPolling = true;
+        try {
+          const verified = await hasClaim(wallet, claimType, { minThreshold });
+          if (isStopped) return;
+          if (verified) {
+            stop();
+            resolve(true);
+          }
+        } finally {
+          isPolling = false;
+        }
+      };
+
+      intervalId = setInterval(poll, pollMs);
+      timeoutId = setTimeout(() => {
+        stop();
+        reject(new TimeoutError());
+      }, timeoutMs);
+      poll(); // Initial check
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Namespace export (StellarCred.hasClaim / StellarCred.getClaims / etc.)
 // ---------------------------------------------------------------------------
 
-export const StellarCred = { configure, hasClaim, getClaims, buildVerifyUrl, CLAIM_TYPES };
+export const StellarCred = { configure, hasClaim, getClaims, buildVerifyUrl, watchClaim, CLAIM_TYPES, TimeoutError };
 export default StellarCred;
