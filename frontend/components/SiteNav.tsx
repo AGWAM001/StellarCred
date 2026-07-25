@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { IconBook2, IconCode } from "@tabler/icons-react";
+import { ThemeToggle } from "./ThemeToggle";
 
 const LINKS = [
   { href: "/holder",   label: "Wallet" },
@@ -82,6 +83,7 @@ export function SiteNav() {
             <IconCode size={14} stroke={1.8} />
             Developers
           </Link>
+          <ThemeToggle />
         </div>
       </div>
     </header>
