@@ -6,6 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 // in Next.js server routes (can return "/" depending on how the server starts).
 import commitCircuit from "../../../public/circuits/commit.json";
 import { logger, stripSensitiveFields } from "../../../lib/logger";
+import { idempotencyGet, idempotencySet } from "../../../lib/idempotency";
 
 // Server-side only — never shipped to the browser.
 // Set ISSUER_PRIVATE_KEY in .env.local to the 64-char hex secp256k1 private
@@ -328,9 +329,45 @@ export async function POST(req: NextRequest) {
   let issuerId: string | undefined;
   let walletAddress: string | undefined;
 
-  const sendResponse = (response: NextResponse) => {
+  // ── Idempotency-Key support ────────────────────────────────────────────────
+  // A retried /api/issue request (network blip, double-click) can trigger
+  // duplicate signing/provider calls. Accept an Idempotency-Key header so
+  // identical retries return the cached original result without re-processing.
+  const idempotencyKey = req.headers.get("Idempotency-Key")?.trim() || undefined;
+  if (idempotencyKey) {
+    const cached = idempotencyGet(idempotencyKey);
+    if (cached) {
+      logger.info(stripSensitiveFields({
+        event: "idempotency_hit",
+        requestId,
+      }));
+      const headers = new Headers(cached.headers as Record<string, string>);
+      headers.set("x-request-id", requestId);
+      headers.set("X-Idempotent", "true");
+      return new NextResponse(cached.body, { status: cached.status, headers });
+    }
+  }
+
+  const sendResponse = async (response: NextResponse) => {
     const durationMs = Date.now() - startTime;
     response.headers.set("x-request-id", requestId);
+
+    // Cache this response under the idempotency key if provided.
+    if (idempotencyKey) {
+      try {
+        const cloned = response.clone();
+        const body = await cloned.text();
+        idempotencySet(idempotencyKey, {
+          status: response.status,
+          body,
+          headers: Object.fromEntries(response.headers.entries()),
+          createdAt: Date.now(),
+        });
+      } catch {
+        // If cloning fails (edge case), skip caching — don't break the response.
+      }
+    }
+
     for (const type of credentialTypes) {
       logger.info(stripSensitiveFields({
         event: "response_sent",
