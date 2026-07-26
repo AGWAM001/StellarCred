@@ -100,7 +100,8 @@ function attributeToValue(type: CredentialType, attribute: Record<string, string
       const dob = attribute.date_of_birth;
       if (!dob) throw new Error("age credential requires attribute.date_of_birth");
       const days = Math.floor(new Date(dob).getTime() / 86_400_000);
-      if (!Number.isFinite(days)) throw new Error("Invalid date_of_birth");
+      if (!Number.isFinite(days) || days < 0)
+        throw new Error("Invalid date_of_birth: must be on or after 1970-01-01");
       return String(days);
     }
     case "income": {
