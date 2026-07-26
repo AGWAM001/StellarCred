@@ -12,7 +12,7 @@ import { logger, stripSensitiveFields } from "../../../lib/logger";
 // Falls back to a deterministic demo key so the app runs without one set —
 // this fallback is intentionally app-specific and not part of @stellarcred/issuer.
 const DEMO_SK_HEX =
-  process.env.ISSUER_PRIVATE_KEY ??
+  process.env.ISSUER_PRIVATE_KEY ||
   Buffer.from(sha256(new TextEncoder().encode("stellarcred-demo-issuer"))).toString("hex");
 
 const issuer = new IssuerClient({ privateKey: DEMO_SK_HEX });
