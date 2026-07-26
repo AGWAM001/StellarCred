@@ -21,6 +21,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { Check } from "@/components/Check";
 import { ConfigBanner } from "@/components/ConfigBanner";
+import { ProofProgress, type ProgressStep, type StepStatus } from "@/components/ProofProgress";
 import { truncateHash } from "@/lib/format";
 import { EXPLORER_TX } from "@/lib/stellar";
 import { computeWitness, proveWithBackend } from "@/lib/proof";
@@ -389,7 +390,7 @@ function ImportPanel({ onImport, onCancel }: { onImport: (c: Credential) => void
 
 // ── ProofFlow ─────────────────────────────────────────────────────────────────
 
-type Stage = "witness" | "circuit" | "proof" | "generated" | "submitting" | "confirmed";
+type Stage = "witness" | "circuit" | "proof" | "generated" | "submitting" | "confirmed" | "error";
 
 function ProofFlow({
   cred,
