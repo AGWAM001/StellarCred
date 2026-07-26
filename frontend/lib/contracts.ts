@@ -320,7 +320,7 @@ export async function checkClaim(
 ): Promise<boolean> {
   if (!CONTRACTS.proofRegistry) return false;
 
-  const { rpc, Contract, TransactionBuilder, Address, nativeToScVal, scValToNative, BASE_FEE } =
+  const { rpc, Contract, TransactionBuilder, Address, nativeToScVal, scValToNative, xdr, BASE_FEE } =
     await sdk();
   const srv = await getServer();
 
@@ -334,7 +334,7 @@ export async function checkClaim(
       ? nativeToScVal(BigInt(minThreshold), { type: "u64" })
       : nativeToScVal(null, { type: "void" }),
     trustedIssuers !== undefined
-      ? nativeToScVal(trustedIssuers.map((a) => Address.fromString(a)))
+      ? xdr.ScVal.scvVec(trustedIssuers.map((a) => Address.fromString(a).toScVal()))
       : nativeToScVal(null, { type: "void" }),
   );
   const tx = new TransactionBuilder(account, {
@@ -364,7 +364,7 @@ export async function isVerified(
   const empty: VerificationStatus = { valid: false, verifiedAt: 0, expiry: 0 };
   if (!CONTRACTS.proofRegistry) return empty;
 
-  const { rpc, Contract, TransactionBuilder, Address, nativeToScVal, scValToNative, BASE_FEE } =
+  const { rpc, Contract, TransactionBuilder, Address, nativeToScVal, scValToNative, xdr, BASE_FEE } =
     await sdk();
   const srv = await getServer();
 
@@ -375,7 +375,7 @@ export async function isVerified(
     Address.fromString(holder).toScVal(),
     nativeToScVal(credentialType, { type: "symbol" }),
     trustedIssuers !== undefined
-      ? nativeToScVal(trustedIssuers.map((a) => Address.fromString(a)))
+      ? xdr.ScVal.scvVec(trustedIssuers.map((a) => Address.fromString(a).toScVal()))
       : nativeToScVal(null, { type: "void" }),
   );
   const tx = new TransactionBuilder(account, {

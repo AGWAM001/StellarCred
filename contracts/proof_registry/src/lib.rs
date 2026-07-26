@@ -62,8 +62,11 @@ pub struct ProofRecord {
     pub revoked: bool,
     /// The issuer that signed the credential this proof was verified against.
     /// Lets a protocol restrict which issuers it trusts per claim type via
-    /// `trusted_issuers` on `is_verified` / `check_claim`.
-    pub issuer: Address,
+    /// `trusted_issuers` on `is_verified` / `check_claim`. `Option` so that
+    /// records written before this field existed still deserialize cleanly
+    /// (a missing map key decodes to `None`, not a trap) — `issuer_is_trusted`
+    /// treats `None` as unrestricted rather than rejecting them outright.
+    pub issuer: Option<Address>,
 }
 
 /// A single proof submission inside a batch. Mirrors the individual parameters
@@ -204,7 +207,7 @@ impl ProofRegistry {
             expiry,
             threshold: Self::extract_threshold(&env, &credential_type, &public_inputs),
             revoked: false,
-            issuer: issuer_id,
+            issuer: Some(issuer_id),
         };
         env.storage().persistent().set(&key, &record);
         env.storage()
@@ -284,7 +287,7 @@ impl ProofRegistry {
                 expiry: sub.expiry,
                 threshold: Self::extract_threshold(&env, &sub.credential_type, &public_inputs_bytes),
                 revoked: false,
-                issuer: sub.issuer_id.clone(),
+                issuer: Some(sub.issuer_id.clone()),
             };
             env.storage().persistent().set(&key, &record);
             env.storage()
@@ -368,11 +371,16 @@ impl ProofRegistry {
 
     /// `None` trusts any registered issuer (unchanged default behaviour). `Some`
     /// (including an empty list) requires `issuer` to be a member — an empty
-    /// list therefore rejects every issuer.
-    fn issuer_is_trusted(trusted_issuers: &Option<Vec<Address>>, issuer: &Address) -> bool {
+    /// list therefore rejects every issuer. `issuer` itself is `None` only for
+    /// records written before the field existed; those are treated as
+    /// unrestricted rather than rejected, since there's no issuer to check.
+    fn issuer_is_trusted(trusted_issuers: &Option<Vec<Address>>, issuer: &Option<Address>) -> bool {
         match trusted_issuers {
             None => true,
-            Some(list) => list.contains(issuer),
+            Some(list) => match issuer {
+                None => true,
+                Some(addr) => list.contains(addr),
+            },
         }
     }
 
