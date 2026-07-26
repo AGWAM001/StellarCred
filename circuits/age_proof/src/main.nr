@@ -20,6 +20,8 @@ fn main(
     threshold_years: pub u64,
 ) {
     assert(Poseidon2::hash([date_of_birth as Field, salt], 2) == commitment);
-    assert(verify_signature(issuer_x, issuer_y, sig, commitment.to_be_bytes()));
+    let z: [u8; 32] = commitment.to_be_bytes();
+    assert(verify_signature(issuer_x, issuer_y, sig, z));
+    assert(threshold_years <= 200);
     assert(current_date >= date_of_birth + threshold_years * 365);
 }
