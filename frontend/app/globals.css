@@ -4,6 +4,7 @@
    =========================================================================== */
 
 :root {
+  color-scheme: dark;
   /* Backgrounds */
   --bg: #05050a;
   --bg-raised: #0b0b12;
@@ -34,7 +35,8 @@
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-card: 0 0 0 1px var(--border), 0 4px 24px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 0 1px rgba(62, 207, 142, 0.25), 0 0 40px rgba(62, 207, 142, 0.08);
+  --shadow-glow:
+    0 0 0 1px rgba(62, 207, 142, 0.25), 0 0 40px rgba(62, 207, 142, 0.08);
 
   /* Shape */
   --radius-xs: 6px;
@@ -45,6 +47,37 @@
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --maxw: 1200px;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f9f9f8;
+  --bg-raised: #ffffff;
+  --bg-soft: #f4f4f3;   
+  --input: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f3f3f1;
+  --text: #111110;
+  --muted: #6f6e6b;
+  --faint: #a8a49e;
+  --border: #e5e3de;
+  --border-strong: #c8c6c1;
+  --accent: #1a7a4a;
+  --accent-dim: #135c37;
+  --accent-soft: rgba(26, 122, 74, 0.06);  /* Light green surface tint */
+  --accent-glow: rgba(26, 122, 74, 0.12);
+}
+:root .sun-icon {
+  display: block;
+}
+:root .moon-icon {
+  display: none;
+}
+
+:root[data-theme="light"] .sun-icon {
+  display: none;
+}
+:root[data-theme="light"] .moon-icon {
+  display: block;
 }
 
 * {
@@ -61,11 +94,15 @@ body {
   background-color: var(--bg);
   /* Radial green glow at top + dot grid */
   background-image:
-    radial-gradient(ellipse 90% 55% at 50% -5%,
+    radial-gradient(
+      ellipse 90% 55% at 50% -5%,
       rgba(62, 207, 142, 0.07) 0%,
-      transparent 70%),
+      transparent 70%
+    ),
     radial-gradient(circle, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 100% 100%, 28px 28px;
+  background-size:
+    100% 100%,
+    28px 28px;
   background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-body), system-ui, sans-serif;
@@ -334,7 +371,9 @@ p {
   color: var(--muted);
   padding: 0.45rem 0.75rem;
   border-radius: var(--radius-sm);
-  transition: color 0.15s var(--ease), background 0.15s var(--ease);
+  transition:
+    color 0.15s var(--ease),
+    background 0.15s var(--ease);
   letter-spacing: -0.01em;
 }
 
@@ -421,7 +460,9 @@ p {
   color: var(--muted);
   padding: 0.4rem 0.8rem;
   border-radius: 999px;
-  transition: color 0.15s var(--ease), background 0.15s var(--ease);
+  transition:
+    color 0.15s var(--ease),
+    background 0.15s var(--ease);
 }
 
 .seg-link:hover {
@@ -445,17 +486,24 @@ p {
 
 /* Subtle top-edge shimmer */
 .card::before {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 60%);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    transparent 60%
+  );
   pointer-events: none;
 }
 
 .card-link {
-  transition: border-color 0.2s var(--ease), background 0.2s var(--ease),
-    box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
+  transition:
+    border-color 0.2s var(--ease),
+    background 0.2s var(--ease),
+    box-shadow 0.2s var(--ease),
+    transform 0.2s var(--ease);
 }
 
 .card-link:hover {
@@ -467,15 +515,20 @@ p {
 
 /* Clickable protocol card */
 .protocol-card {
-  transition: border-color 0.2s var(--ease), background 0.2s var(--ease),
-    box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
+  transition:
+    border-color 0.2s var(--ease),
+    background 0.2s var(--ease),
+    box-shadow 0.2s var(--ease),
+    transform 0.2s var(--ease);
 }
 
 .protocol-card:hover {
   border-color: rgba(62, 207, 142, 0.35);
   background: var(--card-hover);
   transform: translateY(-3px);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(62, 207, 142, 0.1);
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(62, 207, 142, 0.1);
 }
 
 .protocol-card:active {
@@ -533,7 +586,9 @@ p {
 .btn-primary:hover:not(:disabled) {
   background: #52e3a4;
   border-color: #52e3a4;
-  box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.2), 0 2px 12px rgba(62, 207, 142, 0.25);
+  box-shadow:
+    0 0 0 3px rgba(62, 207, 142, 0.2),
+    0 2px 12px rgba(62, 207, 142, 0.25);
 }
 
 .btn-secondary {
@@ -591,7 +646,9 @@ textarea {
   padding: 0.625rem 0.8rem;
   font-family: var(--font-mono), monospace;
   font-size: 0.8125rem;
-  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  transition:
+    border-color 0.15s var(--ease),
+    box-shadow 0.15s var(--ease);
   appearance: none;
 }
 
@@ -789,7 +846,7 @@ textarea:focus {
   overflow: hidden;
 }
 
-.bar>i {
+.bar > i {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
@@ -837,7 +894,6 @@ textarea:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   *,
   *::before,
   *::after {
@@ -968,7 +1024,9 @@ textarea:focus {
   color: var(--faint);
   cursor: pointer;
   border-radius: 4px;
-  transition: color 0.15s var(--ease), background 0.15s var(--ease);
+  transition:
+    color 0.15s var(--ease),
+    background 0.15s var(--ease);
 }
 
 .toast-close:hover {

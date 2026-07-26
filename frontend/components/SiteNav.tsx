@@ -4,12 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { IconBook2, IconCode, IconMenu2, IconX } from "@tabler/icons-react";
+import { ThemeToggle } from "./ThemeToggle";
 
 const LINKS = [
-  { href: "/holder",   label: "Wallet" },
-  { href: "/verify",   label: "Verify" },
-  { href: "/issuer",   label: "Issuer" },
-  { href: "/apps",     label: "Apps" },
+  { href: "/holder", label: "Wallet" },
+  { href: "/verify", label: "Verify" },
+  { href: "/issuer", label: "Issuer" },
+  { href: "/apps", label: "Apps" },
 ];
 
 function ShieldIcon() {
@@ -110,6 +111,7 @@ export function SiteNav() {
             <IconCode size={14} stroke={1.8} />
             Developers
           </Link>
+          <ThemeToggle />
         </div>
       </div>
     </header>
