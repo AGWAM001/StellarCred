@@ -8,12 +8,11 @@ import kycCircuit from "../../../public/circuits/kyc.json";
 import accreditationCircuit from "../../../public/circuits/accreditation.json";
 import employmentCircuit from "../../../public/circuits/employment.json";
 
-// Default claim params — used when a credential has no protocol-specific values.
+// Default claim params -- used when a credential has no protocol-specific values.
 const DEFAULT_THRESHOLD_YEARS = "18";
 const DEFAULT_INCOME_THRESHOLD = "200000";
 const DEFAULT_FUNDS_THRESHOLD = "10000";
 const DEFAULT_ACCREDITATION_THRESHOLD = "1000000";
-const DEFAULT_EMPLOYMENT_SENIORITY = "3";
 const DEFAULT_RESTRICTED = ["840", "364", "408", "0", "0", "0", "0", "0"];
 
 const RESTRICTED_LEN = 8;
@@ -29,7 +28,6 @@ interface ClaimParams {
   threshold_years?: string;
   threshold?: string;
   restricted?: string[];
-  seniority?: string;
 }
 
 function buildInputs(type: string, cred: Record<string, unknown>): InputMap {
@@ -88,12 +86,16 @@ function buildInputs(type: string, cred: Record<string, unknown>): InputMap {
       };
     case "employment":
       return {
+        // employment_status is the binary "is employed" tag; seniority is the
+        // specific tenure the issuer committed to. Both must come from the
+        // stored credential (issuer-signed) -- NOT from request params -- so the
+        // holder can't claim a seniority they weren't actually issued.
         employment_status: value,
-        seniority: params.seniority ?? DEFAULT_EMPLOYMENT_SENIORITY,
+        seniority: String(cred.seniority ?? "0"),
         salt,
         ...sigInputs,
         commitment,
-        min_seniority: params.threshold ?? DEFAULT_EMPLOYMENT_SENIORITY,
+        min_seniority: params.threshold ?? String(cred.seniority ?? "3"),
       };
     case "kyc":
     default:

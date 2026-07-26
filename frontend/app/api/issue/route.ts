@@ -5,6 +5,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 // Resolved by webpack at build time — avoids process.cwd() which is unreliable
 // in Next.js server routes (can return "/" depending on how the server starts).
 import commitCircuit from "../../../public/circuits/commit.json";
+import commit3Circuit from "../../../public/circuits/commit3.json";
 import { logger, stripSensitiveFields } from "../../../lib/logger";
 
 // Server-side only — never shipped to the browser.
@@ -77,8 +78,10 @@ function attributeToValue(
       return String(netWorth);
     }
     case "employment": {
-      // Binary "is employed" claim — value is a small status tag, not user input.
-      // The issuer only signs non-zero tags, and the circuit constrains status != 0.
+      // Binary "is employed" claim — the circuit constrains status != 0 so
+      // the issuer only ever signs non-zero tags. Seniority is read separately
+      // from attributes.seniority in buildCredential() because it is a second
+      // preimage value for the 3-arity Poseidon2 commitment.
       return "1";
     }
     default:
@@ -91,6 +94,22 @@ async function poseidonCommit(value: string, salt: string): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const noir = new Noir(commitCircuit as any);
   const { returnValue } = await noir.execute({ value, salt });
+  return String(returnValue);
+}
+
+// 3-arity Poseidon2 commitment for employment: hash([status, seniority, salt]).
+// Including seniority in the preimage is what binds the issuer's signature to
+// the holder's specific tenure — otherwise a holder could self-select any
+// seniority >= min_seniority and still satisfy the circuit constraint.
+async function poseidonCommit3(
+  status: string,
+  seniority: string,
+  salt: string,
+): Promise<string> {
+  const { Noir } = await import("@noir-lang/noir_js");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const noir = new Noir(commit3Circuit as any);
+  const { returnValue } = await noir.execute({ status, seniority, salt });
   return String(returnValue);
 }
 
@@ -371,8 +390,19 @@ async function buildCredential({
 }: IssueParams) {
   const value = attributeToValue(type, attributes);
   const salt = randomField();
-  const commitment = await poseidonCommit(value, salt);
+  // Employment uses a 3-arity commitment that also binds the holder's
+  // specific seniority. The seniority comes from attributes (set by the
+  // issuer page) and is stored on the credential so the witness route can
+  // rebuild the preimage when generating a proof.
+  const commitment =
+    type === "employment"
+      ? await poseidonCommit3(value, attributes.seniority ?? "0", salt)
+      : await poseidonCommit(value, salt);
   const { sig, issuerX, issuerY } = signCommitment(commitment);
+  const employmentExtra =
+    type === "employment" && attributes.seniority
+      ? { seniority: attributes.seniority }
+      : {};
   return {
     type,
     title: TYPE_TITLE[type],
@@ -388,6 +418,7 @@ async function buildCredential({
     issuerPubY: issuerY,
     issuedAt: Math.floor(Date.now() / 1000),
     expiry,
+    ...employmentExtra,
     ...(claimParams && Object.values(claimParams).some((v) => v !== undefined)
       ? { claimParams }
       : {}),
@@ -478,6 +509,8 @@ export async function POST(req: NextRequest) {
     else if (body.type === "income") attributes.income ??= body.attribute;
     else if (body.type === "jurisdiction")
       attributes.country_code ??= body.attribute;
+    else if (body.type === "employment")
+      attributes.seniority ??= body.attribute;
   }
 
   if (credentialTypes.length === 0) {

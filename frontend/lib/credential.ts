@@ -23,6 +23,12 @@ export interface Credential {
   issuerPubY: number[];
   issuedAt: number;
   expiry: string;
+  /**
+   * Issuer-attested tenure (years), set on `employment` credentials so the
+   * holder can prove `seniority >= min_seniority` against the issuer's signed
+   * commitment. Required for employment; absent for other types.
+   */
+  seniority?: string;
   /** Protocol-specific proof parameters (e.g. age threshold, restricted list). */
   claimParams?: ClaimParams;
   /** Unix timestamp (seconds) when the proof was last successfully submitted. */

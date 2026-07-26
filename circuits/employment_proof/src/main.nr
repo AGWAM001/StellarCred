@@ -6,9 +6,10 @@
 // Unlocks income-linked lending, professional gating, and DAO contributor
 // verification.
 //
-// employment_status is a small u64 tag (e.g. 1 = employed, 0 = unemployed);
-// the actual employer / role stays off-chain in the issuer's records, only
-// the commitment (Poseidon2([employment_status, salt])) ever appears on-chain.
+// The commitment is Poseidon2::hash([employment_status, seniority, salt], 3),
+// so the issuer's signature binds BOTH the "is employed" tag AND the
+// holder's specific tenure. The min_seniority public input is just the
+// threshold the verifier asks about; it is not part of the commitment.
 
 use dep::poseidon::poseidon2::Poseidon2;
 use std::ecdsa_secp256k1::verify_signature;
@@ -25,7 +26,15 @@ fn main(
     issuer_y: pub [u8; 32],
     min_seniority: pub u64,
 ) {
-    assert(Poseidon2::hash([employment_status as Field, salt], 2) == commitment);
+    // The issuer's signature covers a commitment that includes both the
+    // employment status AND the holder's tenure, so the seniority claim is
+    // backed by the issuer, not self-asserted.
+    assert(
+        Poseidon2::hash(
+            [employment_status as Field, seniority as Field, salt],
+            3,
+        ) == commitment,
+    );
     let z: [u8; 32] = commitment.to_be_bytes();
     assert(verify_signature(issuer_x, issuer_y, sig, z));
     // The status tag must be > 0 (i.e. the holder is "employed"); issuers are
