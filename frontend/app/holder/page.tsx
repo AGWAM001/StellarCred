@@ -390,7 +390,7 @@ function ImportPanel({ onImport, onCancel }: { onImport: (c: Credential) => void
 
 // ── ProofFlow ─────────────────────────────────────────────────────────────────
 
-type Stage = "witness" | "circuit" | "proof" | "generated" | "submitting" | "confirmed" | "error";
+type Stage = "witness" | "circuit" | "proof" | "generated" | "submitting" | "confirmed";
 
 function ProofFlow({
   cred,
@@ -449,7 +449,6 @@ function ProofFlow({
         if (!cancelled) {
           const parsed = parseContractError((e as Error).message);
           setError(parsed);
-          setStage("error");
           toast.error(`Proof generation failed: ${parsed.friendly}`);
         }
       }
@@ -481,7 +480,6 @@ function ProofFlow({
     } catch (e) {
       const parsed = parseContractError((e as Error).message);
       setError(parsed);
-      setStage("error");
       toast.error(`Submission failed: ${parsed.friendly}`);
     }
   }
