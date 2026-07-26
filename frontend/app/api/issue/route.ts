@@ -3,9 +3,6 @@ import { randomBytes } from "crypto";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { IssuerClient, CREDENTIAL_TYPES, type CredentialType, type ClaimParams } from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
-// Resolved by webpack at build time — avoids process.cwd() which is unreliable
-// in Next.js server routes (can return "/" depending on how the server starts).
-import commitCircuit from "../../../public/circuits/commit.json";
 import { logger, stripSensitiveFields } from "../../../lib/logger";
 
 // Server-side only — never shipped to the browser.
@@ -23,85 +20,13 @@ const SIM_ACCOUNT =
   process.env.NEXT_PUBLIC_ISSUER_ADDRESS ??
   "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
-function be32(v: bigint): Uint8Array {
-  const b = new Uint8Array(32);
-  for (let i = 31; i >= 0; i--) {
-    b[i] = Number(v & 255n);
-    v >>= 8n;
-  }
-  return b;
-}
-
-function randomField(): string {
-  // 31 bytes = 248 bits, always fits in BN254 scalar field.
-  return "0x" + randomBytes(31).toString("hex");
-}
-
-// Derive the circuit `value` (preimage) for a credential type from the shared
-// verification attributes. One Persona/KYC response carries everything needed
-// for every requested type, so each type just reads the field it cares about.
-function attributeToValue(type: string, attributes: Record<string, string>): string {
-  switch (type) {
-    case "kyc":
-      // Binary claim — no attribute to commit, just a fresh random secret.
-      return randomField();
-    case "age": {
-      const dob = attributes.date_of_birth;
-      if (!dob) throw new Error("age credential requires attributes.date_of_birth");
-      const days = Math.floor(new Date(dob).getTime() / 86_400_000);
-      if (!Number.isFinite(days)) throw new Error("Invalid date_of_birth");
-      return String(days);
-    }
-    case "income": {
-      const income = parseInt(attributes.income ?? "", 10);
-      if (!Number.isFinite(income)) throw new Error("income credential requires attributes.income");
-      return String(income);
-    }
-    case "jurisdiction": {
-      const country = parseInt(attributes.country_code ?? "", 10);
-      if (!Number.isFinite(country)) throw new Error("jurisdiction credential requires attributes.country_code");
-      return String(country);
-    }
-    case "funds": {
-      const balance = parseInt(attributes.balance ?? "", 10);
-      if (!Number.isFinite(balance)) throw new Error("funds credential requires attributes.balance");
-      return String(balance);
-    }
-    case "accreditation": {
-      const netWorth = parseInt(attributes.net_worth ?? "", 10);
-      if (!Number.isFinite(netWorth)) throw new Error("accreditation credential requires attributes.net_worth");
-      return String(netWorth);
-    }
-    default:
-      throw new Error(`Unknown credential type: ${type}`);
-  }
-}
-
-async function poseidonCommit(value: string, salt: string): Promise<string> {
-  const { Noir } = await import("@noir-lang/noir_js");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const noir = new Noir(commitCircuit as any);
-  const { returnValue } = await noir.execute({ value, salt });
-  return String(returnValue);
-}
-
-function issuerPublicKey(): { x: number[]; y: number[]; bytes: Buffer } {
-  const p = secp256k1.getPublicKey(DEMO_SK, false); // 0x04 || x || y
-  return {
-    x: Array.from(p.slice(1, 33)),
-    y: Array.from(p.slice(33, 65)),
-    bytes: Buffer.from(p.slice(1, 65)),
-  };
-}
-
-function signCommitment(commitment: string): {
-  sig: number[];
-  issuerX: number[];
-  issuerY: number[];
-} {
-  const sig = secp256k1.sign(be32(BigInt(commitment)), DEMO_SK, { prehash: false });
-  const { x, y } = issuerPublicKey();
-  return { sig: Array.from(sig), issuerX: x, issuerY: y };
+// The server's own public key (x || y, 64 bytes) — derived from the same key
+// `issuer` signs with, via the package's publicKey(), not re-derived locally.
+// Used to confirm the selected issuerId's on-chain registered key actually
+// matches this server's signing key before issuing.
+function localIssuerPubkeyBytes(): Buffer {
+  const { x, y } = issuer.publicKey();
+  return Buffer.from([...x, ...y]);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +295,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    const { bytes: localKey } = issuerPublicKey();
+    const localKey = localIssuerPubkeyBytes();
     if (!Buffer.from(registered).equals(localKey)) {
       return NextResponse.json(
         {
