@@ -24,10 +24,19 @@ echo "$DEPLOY_OUTPUT"
 
 # Extract values from output
 ISSUER_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "NEXT_PUBLIC_ISSUER_ADDRESS=" | cut -d '=' -f 2)
+[ -z "$ISSUER_ADDRESS" ] && { echo "ERROR: failed to extract ISSUER_ADDRESS from deploy output" >&2; exit 1; }
+
 ISSUER_REGISTRY_ID=$(echo "$DEPLOY_OUTPUT" | grep "NEXT_PUBLIC_ISSUER_REGISTRY_ID=" | cut -d '=' -f 2)
+[ -z "$ISSUER_REGISTRY_ID" ] && { echo "ERROR: failed to extract ISSUER_REGISTRY_ID from deploy output" >&2; exit 1; }
+
 CREDENTIAL_VERIFIER_ID=$(echo "$DEPLOY_OUTPUT" | grep "NEXT_PUBLIC_CREDENTIAL_VERIFIER_ID=" | cut -d '=' -f 2)
+[ -z "$CREDENTIAL_VERIFIER_ID" ] && { echo "ERROR: failed to extract CREDENTIAL_VERIFIER_ID from deploy output" >&2; exit 1; }
+
 PROOF_REGISTRY_ID=$(echo "$DEPLOY_OUTPUT" | grep "NEXT_PUBLIC_PROOF_REGISTRY_ID=" | cut -d '=' -f 2)
+[ -z "$PROOF_REGISTRY_ID" ] && { echo "ERROR: failed to extract PROOF_REGISTRY_ID from deploy output" >&2; exit 1; }
+
 GATED_POOL_ID=$(echo "$DEPLOY_OUTPUT" | grep "NEXT_PUBLIC_GATED_POOL_ID=" | cut -d '=' -f 2)
+[ -z "$GATED_POOL_ID" ] && { echo "ERROR: failed to extract GATED_POOL_ID from deploy output" >&2; exit 1; }
 
 ENV_FILE="frontend/.env.local"
 
