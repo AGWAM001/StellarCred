@@ -147,7 +147,7 @@ function signCommitment(
 ): { sig: number[]; issuerX: number[]; issuerY: number[] } {
   const sig = secp256k1.sign(be32(BigInt(commitment)), privateKey, { prehash: false });
   const { x, y } = issuerPublicKey(privateKey);
-  return { sig: Array.from(sig), issuerX: x, issuerY: y };
+  return { sig: Array.from(sig.toCompactRawBytes()), issuerX: x, issuerY: y };
 }
 
 const TYPE_TITLE: Record<CredentialType, string> = {
