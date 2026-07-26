@@ -60,9 +60,22 @@ pub struct ProofRecord {
     pub threshold: Option<u64>,
     /// Set by the registered issuer via `revoke`. Expiry data is kept for audit.
     pub revoked: bool,
-    /// VK version that was used to verify this proof. Preserved so that old
-    /// proofs remain valid even after the circuit is upgraded to a new version.
-    pub vk_version: u32,
+    /// The issuer that signed the credential this proof was verified against.
+    /// Lets a protocol restrict which issuers it trusts per claim type via
+    /// `trusted_issuers` on `is_verified` / `check_claim`.
+    ///
+    /// `Option` so `issuer` can be explicitly absent within an
+    /// already-current-shape record (e.g. one written by a future migration
+    /// that can't recover the original issuer) — `issuer_is_trusted` then
+    /// fails closed and rejects it under an active `trusted_issuers` filter,
+    /// since there's no issuer to check against (a filterless caller is
+    /// unaffected either way). This does NOT, by itself, make a record
+    /// written before this field existed readable: Soroban's struct decoding
+    /// requires the stored map's entry count to exactly match the current
+    /// struct's field count, so those records still fail to deserialize (see
+    /// `legacy_record_missing_issuer_key_fails_to_read` in test.rs). A real
+    /// migration is required before redeploying over existing stored proofs.
+    pub issuer: Option<Address>,
 }
 
 /// A single proof submission inside a batch. Mirrors the individual parameters
@@ -214,7 +227,7 @@ impl ProofRegistry {
             expiry,
             threshold: Self::extract_threshold(&env, &credential_type, &public_inputs),
             revoked: false,
-            vk_version: effective_version,
+            issuer: Some(issuer_id),
         };
         env.storage().persistent().set(&key, &record);
         env.storage()
@@ -296,7 +309,7 @@ impl ProofRegistry {
                 expiry: sub.expiry,
                 threshold: Self::extract_threshold(&env, &sub.credential_type, &public_inputs_bytes),
                 revoked: false,
-                vk_version: effective_version,
+                issuer: Some(sub.issuer_id.clone()),
             };
             env.storage().persistent().set(&key, &record);
             env.storage()
@@ -314,14 +327,28 @@ impl ProofRegistry {
 
     /// Returns `(is_currently_valid, verified_at, expiry)`. `is_currently_valid`
     /// accounts for expiry against the current ledger time.
-    pub fn is_verified(env: Env, holder: Address, credential_type: Symbol) -> (bool, u64, u64) {
+    ///
+    /// `trusted_issuers`, if `Some`, restricts which issuer's proof is accepted:
+    /// the stored proof's issuer must be in the list, or this returns
+    /// `(false, verified_at, expiry)` even if the proof is otherwise valid —
+    /// timestamps are still returned for audit, matching the existing
+    /// revoked/expired behaviour. `None` accepts any registered issuer
+    /// (unchanged behaviour).
+    pub fn is_verified(
+        env: Env,
+        holder: Address,
+        credential_type: Symbol,
+        trusted_issuers: Option<Vec<Address>>,
+    ) -> (bool, u64, u64) {
         match env
             .storage()
             .persistent()
             .get::<_, ProofRecord>(&DataKey::Proof(holder, credential_type))
         {
             Some(r) => {
-                let valid = !r.revoked && r.expiry > env.ledger().timestamp();
+                let valid = !r.revoked
+                    && r.expiry > env.ledger().timestamp()
+                    && Self::issuer_is_trusted(&trusted_issuers, &r.issuer);
                 (valid, r.verified_at, r.expiry)
             }
             None => (false, 0, 0),
@@ -332,11 +359,16 @@ impl ProofRegistry {
     /// credential types (age, income, funds). A proof submitted with a threshold
     /// of 200_000 satisfies `min_threshold = 50_000` because it proves strictly
     /// more. For `kyc` and `jurisdiction`, pass `min_threshold = None`.
+    ///
+    /// `trusted_issuers`, if `Some`, restricts which issuer's proof is accepted
+    /// — see `is_verified`. `None` accepts any registered issuer (unchanged
+    /// behaviour).
     pub fn check_claim(
         env: Env,
         holder: Address,
         credential_type: Symbol,
         min_threshold: Option<u64>,
+        trusted_issuers: Option<Vec<Address>>,
     ) -> bool {
         match env
             .storage()
@@ -347,12 +379,33 @@ impl ProofRegistry {
                 if r.revoked || r.expiry <= env.ledger().timestamp() {
                     return false;
                 }
+                if !Self::issuer_is_trusted(&trusted_issuers, &r.issuer) {
+                    return false;
+                }
                 match min_threshold {
                     None => true,
                     Some(min) => r.threshold.unwrap_or(0) >= min,
                 }
             }
             None => false,
+        }
+    }
+
+    /// `None` trusts any registered issuer (unchanged default behaviour). `Some`
+    /// (including an empty list) requires `issuer` to be a member — an empty
+    /// list therefore rejects every issuer. `issuer` is only `None` for a
+    /// record explicitly written that way (no code path in this contract
+    /// does so today — see `ProofRecord::issuer`); under an active
+    /// `trusted_issuers` filter such a record fails closed (rejected), since
+    /// there's no issuer to check against. A `None` filter is unaffected
+    /// either way, matching unrestricted behaviour.
+    fn issuer_is_trusted(trusted_issuers: &Option<Vec<Address>>, issuer: &Option<Address>) -> bool {
+        match trusted_issuers {
+            None => true,
+            Some(list) => match issuer {
+                None => false,
+                Some(addr) => list.contains(addr),
+            },
         }
     }
 

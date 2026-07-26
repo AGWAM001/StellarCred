@@ -30,7 +30,6 @@ if (typeof window !== "undefined") {
   window.Buffer = window.Buffer || Buffer;
 }
 
-
 export const networks = {
   testnet: {
     networkPassphrase: "Test SDF Network ; September 2015",
@@ -69,6 +68,24 @@ export type DataKey = {tag: "Admin", values: void} | {tag: "Verifier", values: v
 
 export interface ProofRecord {
   expiry: u64;
+  /**
+ * The issuer that signed the credential this proof was verified against.
+ * Lets a protocol restrict which issuers it trusts per claim type via
+ * `trusted_issuers` on `is_verified` / `check_claim`.
+ * 
+ * `Option` so `issuer` can be explicitly absent within an
+ * already-current-shape record (e.g. one written by a future migration
+ * that can't recover the original issuer) — `issuer_is_trusted` then
+ * fails closed and rejects it under an active `trusted_issuers` filter,
+ * since there's no issuer to check against (a filterless caller is
+ * unaffected either way). This does NOT, by itself, make a record
+ * written before this field existed readable: Soroban's struct decoding
+ * requires the stored map's entry count to exactly match the current
+ * struct's field count, so those records still fail to deserialize (see
+ * `legacy_record_missing_issuer_key_fails_to_read` in test.rs). A real
+ * migration is required before redeploying over existing stored proofs.
+ */
+issuer: Option<string>;
   /**
  * Set by the registered issuer via `revoke`. Expiry data is kept for audit.
  */
@@ -134,15 +151,26 @@ export interface Client {
    * credential types (age, income, funds). A proof submitted with a threshold
    * of 200_000 satisfies `min_threshold = 50_000` because it proves strictly
    * more. For `kyc` and `jurisdiction`, pass `min_threshold = None`.
+   * 
+   * `trusted_issuers`, if `Some`, restricts which issuer's proof is accepted
+   * — see `is_verified`. `None` accepts any registered issuer (unchanged
+   * behaviour).
    */
-  check_claim: ({holder, credential_type, min_threshold}: {holder: string, credential_type: string, min_threshold: Option<u64>}, options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
+  check_claim: ({holder, credential_type, min_threshold, trusted_issuers}: {holder: string, credential_type: string, min_threshold: Option<u64>, trusted_issuers: Option<Array<string>>}, options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
 
   /**
    * Construct and simulate a is_verified transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Returns `(is_currently_valid, verified_at, expiry)`. `is_currently_valid`
    * accounts for expiry against the current ledger time.
+   * 
+   * `trusted_issuers`, if `Some`, restricts which issuer's proof is accepted:
+   * the stored proof's issuer must be in the list, or this returns
+   * `(false, verified_at, expiry)` even if the proof is otherwise valid —
+   * timestamps are still returned for audit, matching the existing
+   * revoked/expired behaviour. `None` accepts any registered issuer
+   * (unchanged behaviour).
    */
-  is_verified: ({holder, credential_type}: {holder: string, credential_type: string}, options?: MethodOptions) => Promise<AssembledTransaction<readonly [boolean, u64, u64]>>
+  is_verified: ({holder, credential_type, trusted_issuers}: {holder: string, credential_type: string, trusted_issuers: Option<Array<string>>}, options?: MethodOptions) => Promise<AssembledTransaction<readonly [boolean, u64, u64]>>
 
   /**
    * Construct and simulate a revoke_proof transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -197,14 +225,14 @@ export class Client extends ContractClient {
     super(
       new ContractSpec([ "AAAABAAAAAAAAAAAAAAABUVycm9yAAAAAAAACQAAAAAAAAAOTm90SW5pdGlhbGl6ZWQAAAAAAAEAAAAAAAAAElZlcmlmaWNhdGlvbkZhaWxlZAAAAAAAAgAAAAAAAAANTm90QXV0aG9yaXplZAAAAAAAAAMAAAAAAAAAEElzc3Vlck5vdFRydXN0ZWQAAAAEAAAAVVRoZSBwdWJsaWMga2V5IHRoZSBwcm9vZiB3YXMgbWFkZSBhZ2FpbnN0IGRvZXMgbm90IG1hdGNoIHRoZSByZWdpc3RlcmVkCmlzc3VlcidzIGtleS4AAAAAAAARSXNzdWVyS2V5TWlzbWF0Y2gAAAAAAAAFAAAAAAAAAA1Qcm9vZk5vdEZvdW5kAAAAAAAABgAAADpUaGUgYmF0Y2ggY29udGFpbnMgbW9yZSB0aGFuIGBNQVhfQkFUQ0hfU0laRWAgc3VibWlzc2lvbnMuAAAAAAANQmF0Y2hUb29MYXJnZQAAAAAAAAcAAAAvVGhlIGJhdGNoIG11c3QgY29udGFpbiBhdCBsZWFzdCBvbmUgc3VibWlzc2lvbi4AAAAACkJhdGNoRW1wdHkAAAAAAAgAAACMVHdvIG9yIG1vcmUgc3VibWlzc2lvbnMgaW4gdGhlIGJhdGNoIHNoYXJlIHRoZSBzYW1lIGBjcmVkZW50aWFsX3R5cGVgOwpvbmx5IHRoZSBsYXN0IHdyaXRlIHdvdWxkIHN1cnZpdmUsIHNvIHRoZSBiYXRjaCBpcyByZWplY3RlZCBvdXRyaWdodC4AAAAXRHVwbGljYXRlQ3JlZGVudGlhbFR5cGUAAAAACQ==",
         "AAAAAgAAAAAAAAAAAAAAB0RhdGFLZXkAAAAABAAAAAAAAAAAAAAABUFkbWluAAAAAAAAAAAAAAAAAAAIVmVyaWZpZXIAAAAAAAAAAAAAAA5Jc3N1ZXJSZWdpc3RyeQAAAAAAAQAAADhDYWNoZWQgdmVyaWZpY2F0aW9uLCBrZXllZCBieSAoaG9sZGVyLCBjcmVkZW50aWFsX3R5cGUpLgAAAAVQcm9vZgAAAAAAAAIAAAATAAAAEQ==",
-        "AAAAAQAAAAAAAAAAAAAAC1Byb29mUmVjb3JkAAAAAAQAAAAAAAAABmV4cGlyeQAAAAAABgAAAElTZXQgYnkgdGhlIHJlZ2lzdGVyZWQgaXNzdWVyIHZpYSBgcmV2b2tlYC4gRXhwaXJ5IGRhdGEgaXMga2VwdCBmb3IgYXVkaXQuAAAAAAAAB3Jldm9rZWQAAAAAAQAAAL5Gb3IgcGFyYW1ldGVyaXNlZCBjcmVkZW50aWFsIHR5cGVzIChhZ2UsIGluY29tZSwgZnVuZHMpLCB0aGUgdGhyZXNob2xkCnZhbHVlIHRoYXQgd2FzIGNvbW1pdHRlZCB0byBpbiB0aGUgcHJvb2YncyBwdWJsaWMgaW5wdXRzLiBOb25lIGZvciB0eXBlcwp3aXRoIG5vIG51bWVyaWMgdGhyZXNob2xkIChreWMsIGp1cmlzZGljdGlvbikuAAAAAAAJdGhyZXNob2xkAAAAAAAD6AAAAAYAAAAAAAAAC3ZlcmlmaWVkX2F0AAAAAAY=",
+        "AAAAAQAAAAAAAAAAAAAAC1Byb29mUmVjb3JkAAAAAAUAAAAAAAAABmV4cGlyeQAAAAAABgAAA6JUaGUgaXNzdWVyIHRoYXQgc2lnbmVkIHRoZSBjcmVkZW50aWFsIHRoaXMgcHJvb2Ygd2FzIHZlcmlmaWVkIGFnYWluc3QuCkxldHMgYSBwcm90b2NvbCByZXN0cmljdCB3aGljaCBpc3N1ZXJzIGl0IHRydXN0cyBwZXIgY2xhaW0gdHlwZSB2aWEKYHRydXN0ZWRfaXNzdWVyc2Agb24gYGlzX3ZlcmlmaWVkYCAvIGBjaGVja19jbGFpbWAuCgpgT3B0aW9uYCBzbyBgaXNzdWVyYCBjYW4gYmUgZXhwbGljaXRseSBhYnNlbnQgd2l0aGluIGFuCmFscmVhZHktY3VycmVudC1zaGFwZSByZWNvcmQgKGUuZy4gb25lIHdyaXR0ZW4gYnkgYSBmdXR1cmUgbWlncmF0aW9uCnRoYXQgY2FuJ3QgcmVjb3ZlciB0aGUgb3JpZ2luYWwgaXNzdWVyKSDigJQgYGlzc3Vlcl9pc190cnVzdGVkYCB0aGVuCmZhaWxzIGNsb3NlZCBhbmQgcmVqZWN0cyBpdCB1bmRlciBhbiBhY3RpdmUgYHRydXN0ZWRfaXNzdWVyc2AgZmlsdGVyLApzaW5jZSB0aGVyZSdzIG5vIGlzc3VlciB0byBjaGVjayBhZ2FpbnN0IChhIGZpbHRlcmxlc3MgY2FsbGVyIGlzCnVuYWZmZWN0ZWQgZWl0aGVyIHdheSkuIFRoaXMgZG9lcyBOT1QsIGJ5IGl0c2VsZiwgbWFrZSBhIHJlY29yZAp3cml0dGVuIGJlZm9yZSB0aGlzIGZpZWxkIGV4aXN0ZWQgcmVhZGFibGU6IFNvcm9iYW4ncyBzdHJ1Y3QgZGVjb2RpbmcKcmVxdWlyZXMgdGhlIHN0b3JlZCBtYXAncyBlbnRyeSBjb3VudCB0byBleGFjdGx5IG1hdGNoIHRoZSBjdXJyZW50CnN0cnVjdCdzIGZpZWxkIGNvdW50LCBzbyB0aG9zZSByZWNvcmRzIHN0aWxsIGZhaWwgdG8gZGVzZXJpYWxpemUgKHNlZQpgbGVnYWN5X3JlY29yZF9taXNzaW5nX2lzc3Vlcl9rZXlfZmFpbHNfdG9fcmVhZGAgaW4gdGVzdC5ycykuIEEgcmVhbAptaWdyYXRpb24gaXMgcmVxdWlyZWQgYmVmb3JlIHJlZGVwbG95aW5nIG92ZXIgZXhpc3Rpbmcgc3RvcmVkIHByb29mcy4AAAAAAAZpc3N1ZXIAAAAAA+gAAAATAAAASVNldCBieSB0aGUgcmVnaXN0ZXJlZCBpc3N1ZXIgdmlhIGByZXZva2VgLiBFeHBpcnkgZGF0YSBpcyBrZXB0IGZvciBhdWRpdC4AAAAAAAAHcmV2b2tlZAAAAAABAAAAvkZvciBwYXJhbWV0ZXJpc2VkIGNyZWRlbnRpYWwgdHlwZXMgKGFnZSwgaW5jb21lLCBmdW5kcyksIHRoZSB0aHJlc2hvbGQKdmFsdWUgdGhhdCB3YXMgY29tbWl0dGVkIHRvIGluIHRoZSBwcm9vZidzIHB1YmxpYyBpbnB1dHMuIE5vbmUgZm9yIHR5cGVzCndpdGggbm8gbnVtZXJpYyB0aHJlc2hvbGQgKGt5YywganVyaXNkaWN0aW9uKS4AAAAAAAl0aHJlc2hvbGQAAAAAAAPoAAAABgAAAAAAAAALdmVyaWZpZWRfYXQAAAAABg==",
         "AAAAAAAAAAAAAAAFYWRtaW4AAAAAAAAAAAAAAQAAABM=",
         "AAAAAAAAAIJJbnZhbGlkYXRlIGEgaG9sZGVyJ3MgY2FjaGVkIHByb29mLiBPbmx5IHRoZSByZWdpc3RlcmVkIGlzc3VlciBmb3IKYGNyZWRlbnRpYWxfdHlwZWAgbWF5IGNhbGwgdGhpcyAoZS5nLiB3aGVuIEtZQyBzdGF0dXMgY2hhbmdlcykuAAAAAAAGcmV2b2tlAAAAAAADAAAAAAAAAAZpc3N1ZXIAAAAAABMAAAAAAAAABmhvbGRlcgAAAAAAEwAAAAAAAAAPY3JlZGVudGlhbF90eXBlAAAAABEAAAAA",
         "AAAAAAAAAAAAAAAHdXBncmFkZQAAAAABAAAAAAAAAA1uZXdfd2FzbV9oYXNoAAAAAAAD7gAAACAAAAAA",
         "AAAAAQAAAJlBIHNpbmdsZSBwcm9vZiBzdWJtaXNzaW9uIGluc2lkZSBhIGJhdGNoLiBNaXJyb3JzIHRoZSBpbmRpdmlkdWFsIHBhcmFtZXRlcnMKb2YgYHN1Ym1pdF9wcm9vZmAgYnV0IGdyb3VwZWQgaW50byBhIHN0cnVjdCBzbyB0aGV5IGNhbiBiZSBwYXNzZWQgYXMgYSBgVmVjYC4AAAAAAAAAAAAAD1Byb29mU3VibWlzc2lvbgAAAAAFAAAAAAAAAA9jcmVkZW50aWFsX3R5cGUAAAAAEQAAAAAAAAAGZXhwaXJ5AAAAAAAGAAAAAAAAAAlpc3N1ZXJfaWQAAAAAAAATAAAAAAAAAAVwcm9vZgAAAAAAAA4AAAAAAAAADXB1YmxpY19pbnB1dHMAAAAAAAPqAAAABA==",
         "AAAAAAAAAAAAAAAJc2V0X2FkbWluAAAAAAAAAQAAAAAAAAAJbmV3X2FkbWluAAAAAAAAEwAAAAA=",
-        "AAAAAAAAAR5MaWtlIGBpc192ZXJpZmllZGAgYnV0IGFsc28gZW5mb3JjZXMgYSBtaW5pbXVtIHRocmVzaG9sZCBmb3IgcGFyYW1ldGVyaXNlZApjcmVkZW50aWFsIHR5cGVzIChhZ2UsIGluY29tZSwgZnVuZHMpLiBBIHByb29mIHN1Ym1pdHRlZCB3aXRoIGEgdGhyZXNob2xkCm9mIDIwMF8wMDAgc2F0aXNmaWVzIGBtaW5fdGhyZXNob2xkID0gNTBfMDAwYCBiZWNhdXNlIGl0IHByb3ZlcyBzdHJpY3RseQptb3JlLiBGb3IgYGt5Y2AgYW5kIGBqdXJpc2RpY3Rpb25gLCBwYXNzIGBtaW5fdGhyZXNob2xkID0gTm9uZWAuAAAAAAALY2hlY2tfY2xhaW0AAAAAAwAAAAAAAAAGaG9sZGVyAAAAAAATAAAAAAAAAA9jcmVkZW50aWFsX3R5cGUAAAAAEQAAAAAAAAANbWluX3RocmVzaG9sZAAAAAAAA+gAAAAGAAAAAQAAAAE=",
-        "AAAAAAAAAH5SZXR1cm5zIGAoaXNfY3VycmVudGx5X3ZhbGlkLCB2ZXJpZmllZF9hdCwgZXhwaXJ5KWAuIGBpc19jdXJyZW50bHlfdmFsaWRgCmFjY291bnRzIGZvciBleHBpcnkgYWdhaW5zdCB0aGUgY3VycmVudCBsZWRnZXIgdGltZS4AAAAAAAtpc192ZXJpZmllZAAAAAACAAAAAAAAAAZob2xkZXIAAAAAABMAAAAAAAAAD2NyZWRlbnRpYWxfdHlwZQAAAAARAAAAAQAAA+0AAAADAAAAAQAAAAYAAAAG",
+        "AAAAAAAAAbtMaWtlIGBpc192ZXJpZmllZGAgYnV0IGFsc28gZW5mb3JjZXMgYSBtaW5pbXVtIHRocmVzaG9sZCBmb3IgcGFyYW1ldGVyaXNlZApjcmVkZW50aWFsIHR5cGVzIChhZ2UsIGluY29tZSwgZnVuZHMpLiBBIHByb29mIHN1Ym1pdHRlZCB3aXRoIGEgdGhyZXNob2xkCm9mIDIwMF8wMDAgc2F0aXNmaWVzIGBtaW5fdGhyZXNob2xkID0gNTBfMDAwYCBiZWNhdXNlIGl0IHByb3ZlcyBzdHJpY3RseQptb3JlLiBGb3IgYGt5Y2AgYW5kIGBqdXJpc2RpY3Rpb25gLCBwYXNzIGBtaW5fdGhyZXNob2xkID0gTm9uZWAuCgpgdHJ1c3RlZF9pc3N1ZXJzYCwgaWYgYFNvbWVgLCByZXN0cmljdHMgd2hpY2ggaXNzdWVyJ3MgcHJvb2YgaXMgYWNjZXB0ZWQK4oCUIHNlZSBgaXNfdmVyaWZpZWRgLiBgTm9uZWAgYWNjZXB0cyBhbnkgcmVnaXN0ZXJlZCBpc3N1ZXIgKHVuY2hhbmdlZApiZWhhdmlvdXIpLgAAAAALY2hlY2tfY2xhaW0AAAAABAAAAAAAAAAGaG9sZGVyAAAAAAATAAAAAAAAAA9jcmVkZW50aWFsX3R5cGUAAAAAEQAAAAAAAAANbWluX3RocmVzaG9sZAAAAAAAA+gAAAAGAAAAAAAAAA90cnVzdGVkX2lzc3VlcnMAAAAD6AAAA+oAAAATAAAAAQAAAAE=",
+        "AAAAAAAAAeZSZXR1cm5zIGAoaXNfY3VycmVudGx5X3ZhbGlkLCB2ZXJpZmllZF9hdCwgZXhwaXJ5KWAuIGBpc19jdXJyZW50bHlfdmFsaWRgCmFjY291bnRzIGZvciBleHBpcnkgYWdhaW5zdCB0aGUgY3VycmVudCBsZWRnZXIgdGltZS4KCmB0cnVzdGVkX2lzc3VlcnNgLCBpZiBgU29tZWAsIHJlc3RyaWN0cyB3aGljaCBpc3N1ZXIncyBwcm9vZiBpcyBhY2NlcHRlZDoKdGhlIHN0b3JlZCBwcm9vZidzIGlzc3VlciBtdXN0IGJlIGluIHRoZSBsaXN0LCBvciB0aGlzIHJldHVybnMKYChmYWxzZSwgdmVyaWZpZWRfYXQsIGV4cGlyeSlgIGV2ZW4gaWYgdGhlIHByb29mIGlzIG90aGVyd2lzZSB2YWxpZCDigJQKdGltZXN0YW1wcyBhcmUgc3RpbGwgcmV0dXJuZWQgZm9yIGF1ZGl0LCBtYXRjaGluZyB0aGUgZXhpc3RpbmcKcmV2b2tlZC9leHBpcmVkIGJlaGF2aW91ci4gYE5vbmVgIGFjY2VwdHMgYW55IHJlZ2lzdGVyZWQgaXNzdWVyCih1bmNoYW5nZWQgYmVoYXZpb3VyKS4AAAAAAAtpc192ZXJpZmllZAAAAAADAAAAAAAAAAZob2xkZXIAAAAAABMAAAAAAAAAD2NyZWRlbnRpYWxfdHlwZQAAAAARAAAAAAAAAA90cnVzdGVkX2lzc3VlcnMAAAAD6AAAA+oAAAATAAAAAQAAA+0AAAADAAAAAQAAAAYAAAAG",
         "AAAAAAAAAEJSZXZva2UgYSBjYWNoZWQgcHJvb2YuIFRoZSBob2xkZXIgYXV0aG9yaXplcyB0aGVpciBvd24gcmV2b2NhdGlvbi4AAAAAAAxyZXZva2VfcHJvb2YAAAACAAAAAAAAAAZob2xkZXIAAAAAABMAAAAAAAAAD2NyZWRlbnRpYWxfdHlwZQAAAAARAAAAAA==",
         "AAAAAAAAAM1WZXJpZnkgYSBwcm9vZiBhbmQsIGlmIHZhbGlkLCBjYWNoZSBpdCBmb3IgYGhvbGRlcmAgdW50aWwgYGV4cGlyeWAKKGxlZGdlciB0aW1lc3RhbXAsIHNlY29uZHMpLiBUaGUgaG9sZGVyIGF1dGhvcml6ZXMgdGhlaXIgb3duIHN1Ym1pc3Npb24uCmBpc3N1ZXJfaWRgIG11c3QgYmUgcmVnaXN0ZXJlZCBhbmQgdHJ1c3RlZCBmb3IgYGNyZWRlbnRpYWxfdHlwZWAuAAAAAAAADHN1Ym1pdF9wcm9vZgAAAAYAAAAAAAAABmhvbGRlcgAAAAAAEwAAAAAAAAAJaXNzdWVyX2lkAAAAAAAAEwAAAAAAAAAPY3JlZGVudGlhbF90eXBlAAAAABEAAAAAAAAABXByb29mAAAAAAAADgAAAAAAAAANcHVibGljX2lucHV0cwAAAAAAAA4AAAAAAAAABmV4cGlyeQAAAAAABgAAAAA=",
         "AAAAAAAAAE5gYWRtaW5gLCBgdmVyaWZpZXJgIGFuZCBgaXNzdWVyX3JlZ2lzdHJ5YCBhcmUgdGhlIGRlcGxveWVkIGNvbnRyYWN0IGFkZHJlc3Nlcy4AAAAAAA1fX2NvbnN0cnVjdG9yAAAAAAAAAwAAAAAAAAAFYWRtaW4AAAAAAAATAAAAAAAAAAh2ZXJpZmllcgAAABMAAAAAAAAAD2lzc3Vlcl9yZWdpc3RyeQAAAAATAAAAAA==",
