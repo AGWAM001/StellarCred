@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import { IconSun, IconMoon } from "@tabler/icons-react";
 
 export function ThemeToggle() {
-  const [activeTheme, setActiveTheme] = useState<string | null>(null);
+   const [activeTheme, setActiveTheme] = useState<string>(() => {
+    if (typeof document !== "undefined") {
+      return document.documentElement.getAttribute("data-theme") || "dark";
+    }
+    return "dark";
+  });
 
   useEffect(() => {
     const currentTheme =

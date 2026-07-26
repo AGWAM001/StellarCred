@@ -51,14 +51,20 @@
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: #f9f9f8;
-  --card: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-soft: #f4f4f3;   
   --input: #ffffff;
+  --card: #ffffff;
   --card-hover: #f3f3f1;
   --text: #111110;
   --muted: #6f6e6b;
   --faint: #a8a49e;
   --border: #e5e3de;
+  --border-strong: #c8c6c1;
   --accent: #1a7a4a;
+  --accent-dim: #135c37;
+  --accent-soft: rgba(26, 122, 74, 0.06);  /* Light green surface tint */
+  --accent-glow: rgba(26, 122, 74, 0.12);
 }
 :root .sun-icon {
   display: block;
@@ -80,7 +86,6 @@
 
 html,
 body {
-  color-scheme: dark;
   margin: 0;
   padding: 0;
 }

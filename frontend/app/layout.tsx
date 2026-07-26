@@ -36,11 +36,14 @@ export default function RootLayout({
 }) {
   const themeDetectionScript = `
     (function () {
-      const savedTheme = localStorage.getItem('theme');
       const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      
+      let savedTheme = null;
       let theme = 'dark'; 
       
+       try {
+      savedTheme = localStorage.getItem('theme');
+    } catch (e) {
+    }
       if (savedTheme === 'light' || (!savedTheme && !systemPrefersDark)) {
         theme = 'light';
       }
