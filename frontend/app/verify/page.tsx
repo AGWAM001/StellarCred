@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   IconArrowRight,
@@ -82,6 +82,7 @@ function VerifyInner() {
   const [urlError, setUrlError] = useState("");
   const [requestingDomain, setRequestingDomain] = useState("");
   const [done, setDone] = useState(false);
+  const justIssuedClaims = useRef<string[]>([]);
 
   useEffect(() => {
     if (returnUrl) {
@@ -184,6 +185,7 @@ function VerifyInner() {
       })
       .then(({ credentials }) => {
         credentials.forEach((c) => saveCredential(c));
+        justIssuedClaims.current = credentials.map((c) => c.type).filter((t) => VALID_CLAIMS.includes(t as CredentialType));
 
         setDone(true);
         toast.success(
@@ -229,6 +231,9 @@ function VerifyInner() {
 
         dest.searchParams.set("sc_verified", "true");
         dest.searchParams.set("sc_wallet", address);
+        if (justIssuedClaims.current.length > 0) {
+          dest.searchParams.set("sc_claims", justIssuedClaims.current.join(","));
+        }
 
         if (dest.origin === window.location.origin) {
           router.push(dest.pathname + dest.search);
@@ -289,6 +294,7 @@ function VerifyInner() {
         credentials: Credential[];
       };
       credentials.forEach((c) => saveCredential(c));
+      justIssuedClaims.current = credentials.map((c) => c.type).filter((t) => VALID_CLAIMS.includes(t as CredentialType));
       setDone(true);
       toast.success(
         credentials.length > 1
