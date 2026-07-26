@@ -120,7 +120,7 @@ function CredCard({
         </div>
 
         {/* right: badges + button + trash */}
-        <div className="row" style={{ gap: "0.4rem", flexShrink: 0 }}>
+        <div className="card-actions">
           {isPreview && <Badge variant="pending">Preview</Badge>}
           <Badge variant="verified" dot={false}>Held</Badge>
           {status === "proved" && <Badge variant="verified" dot={false}>On-chain</Badge>}
