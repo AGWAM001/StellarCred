@@ -62,10 +62,19 @@ pub struct ProofRecord {
     pub revoked: bool,
     /// The issuer that signed the credential this proof was verified against.
     /// Lets a protocol restrict which issuers it trusts per claim type via
-    /// `trusted_issuers` on `is_verified` / `check_claim`. `Option` so that
-    /// records written before this field existed still deserialize cleanly
-    /// (a missing map key decodes to `None`, not a trap) — `issuer_is_trusted`
-    /// treats `None` as unrestricted rather than rejecting them outright.
+    /// `trusted_issuers` on `is_verified` / `check_claim`.
+    ///
+    /// `Option` so `issuer` can be explicitly absent within an
+    /// already-current-shape record (e.g. one written by a future migration
+    /// that can't recover the original issuer) — `issuer_is_trusted` then
+    /// fails closed and rejects it under an active `trusted_issuers` filter,
+    /// since there's no issuer to check against (a filterless caller is
+    /// unaffected either way). This does NOT, by itself, make a record
+    /// written before this field existed readable: Soroban's struct decoding
+    /// requires the stored map's entry count to exactly match the current
+    /// struct's field count, so those records still fail to deserialize (see
+    /// `legacy_record_missing_issuer_key_fails_to_read` in test.rs). A real
+    /// migration is required before redeploying over existing stored proofs.
     pub issuer: Option<Address>,
 }
 
@@ -371,9 +380,12 @@ impl ProofRegistry {
 
     /// `None` trusts any registered issuer (unchanged default behaviour). `Some`
     /// (including an empty list) requires `issuer` to be a member — an empty
-    /// list therefore rejects every issuer. `issuer` itself is `None` only for
-    /// records written before the field existed; those are treated as
-    /// unrestricted rather than rejected, since there's no issuer to check.
+    /// list therefore rejects every issuer. `issuer` is only `None` for a
+    /// record explicitly written that way (no code path in this contract
+    /// does so today — see `ProofRecord::issuer`); under an active
+    /// `trusted_issuers` filter such a record fails closed (rejected), since
+    /// there's no issuer to check against. A `None` filter is unaffected
+    /// either way, matching unrestricted behaviour.
     fn issuer_is_trusted(trusted_issuers: &Option<Vec<Address>>, issuer: &Option<Address>) -> bool {
         match trusted_issuers {
             None => true,

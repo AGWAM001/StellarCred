@@ -902,3 +902,48 @@ fn set_admin_by_non_admin_panics() {
         .try_set_admin(&new_admin);
     assert!(res.is_err());
 }
+
+// A record shaped like `ProofRecord` before the `issuer` field was added —
+// same storage key, one fewer map entry. Used to prove (not just assert)
+// what actually happens when the current contract reads a proof stored under
+// the old schema.
+#[contracttype]
+#[derive(Clone)]
+struct LegacyProofRecord {
+    pub verified_at: u64,
+    pub expiry: u64,
+    pub threshold: Option<u64>,
+    pub revoked: bool,
+}
+
+/// `Option<Address>` on `ProofRecord::issuer` does NOT make a record written
+/// before that field existed readable. Soroban's derived struct decoding
+/// unpacks the stored map by exact field count (`map_unpack_to_slice` errors
+/// if the map has a different number of entries than the current struct has
+/// fields) before it ever gets to per-field `Option`/`Void` handling — a
+/// missing *key* is not the same as a present key with a `Void` value.
+/// `Option` only lets `issuer` be explicitly absent within an
+/// already-current-shape (5-entry) record. Redeploying this contract over
+/// existing stored proofs therefore still requires a real migration; without
+/// one, holders with pre-existing proofs must re-submit them.
+#[test]
+fn legacy_record_missing_issuer_key_fails_to_read() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    env.as_contract(&h.registry_id, || {
+        let key = DataKey::Proof(holder.clone(), symbol_short!("kyc"));
+        let legacy = LegacyProofRecord {
+            verified_at: 500,
+            expiry: 1000,
+            threshold: None,
+            revoked: false,
+        };
+        env.storage().persistent().set(&key, &legacy);
+    });
+
+    let result = h.registry.try_is_verified(&holder, &symbol_short!("kyc"), &None);
+    assert!(result.is_err());
+}
