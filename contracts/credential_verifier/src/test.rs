@@ -58,6 +58,19 @@ fn verifies_income() {
 }
 
 #[test]
+fn verifies_range() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+    c.set_vk(&symbol_short!("range"), &Bytes::from_slice(&env, fixture!("range", "vk")));
+    assert!(c.verify_proof(
+        &symbol_short!("range"),
+        &Bytes::from_slice(&env, fixture!("range", "proof")),
+        &Bytes::from_slice(&env, fixture!("range", "public_inputs")),
+    ));
+}
+
+#[test]
 fn verifies_jurisdiction() {
     let env = Env::default();
     env.mock_all_auths();

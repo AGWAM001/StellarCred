@@ -33,6 +33,12 @@ C=$(commit 250000 99)
   echo "threshold = \"200000\""; node "$SCRIPTS/sign.js" "$C"; } \
   > "$ROOT/income_proof/Prover.toml"
 
+echo "range_proof..."
+C=$(commit 40000 2024)
+{ echo "value = \"40000\""; echo "salt = \"2024\""; echo "commitment = \"$C\""; \
+  echo "min = \"30000\""; echo "max = \"50000\""; node "$SCRIPTS/sign.js" "$C"; } \
+  > "$ROOT/range_proof/Prover.toml"
+
 echo "jurisdiction_proof..."
 C=$(commit 566 77)
 { echo "country_code = \"566\""; echo "salt = \"77\""; echo "commitment = \"$C\""; \

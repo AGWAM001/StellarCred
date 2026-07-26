@@ -6,4 +6,5 @@ members = [
     "income_proof",
     "jurisdiction_proof",
     "funds_proof",
+    "range_proof",
 ]
