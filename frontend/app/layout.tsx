@@ -1,10 +1,9 @@
+import "./globals.css";
 import type { Metadata } from "next";
-import Script from "next/script";
 import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { SiteNav } from "@/components/SiteNav";
 import { WalletProvider } from "@/lib/wallet-context";
 import { ToastProvider } from "@/components/Toast";
-import "./globals.css";
 
 const body = Inter({
   subsets: ["latin"],
@@ -53,11 +52,12 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${body.variable} ${display.variable} ${mono.variable}`}
+      data-theme="light" 
+      suppressHydrationWarning
     >
       <head>
-        <Script
+        <script
           id="theme-detection"
-          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: themeDetectionScript }}
         />
       </head>
