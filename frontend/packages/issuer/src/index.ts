@@ -106,7 +106,7 @@ function attributeToValue(type: CredentialType, attribute: Record<string, string
     }
     case "income": {
       const income = parseInt(attribute.income ?? "", 10);
-      if (!Number.isFinite(income)) throw new Error("income credential requires attribute.income");
+      if (!Number.isFinite(income) || income < 0) throw new Error("income credential requires a non-negative attribute.income");
       return String(income);
     }
     case "jurisdiction": {
