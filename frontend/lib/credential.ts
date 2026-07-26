@@ -61,6 +61,12 @@ export const TYPE_META: Record<
     issuable: true,
     attribute: "Net worth (USD)",
   },
+  employment: {
+    title: "Employed",
+    claim: "employed, seniority ≥ 3",
+    issuable: true,
+    attribute: "Seniority (years)",
+  },
 };
 
 // BN254 scalar field is ~254 bits; 31 random bytes (248 bits) is always in range.

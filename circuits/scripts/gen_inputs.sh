@@ -39,5 +39,11 @@ C=$(commit 566 77)
   echo "restricted = [\"840\", \"364\", \"408\", \"0\", \"0\", \"0\", \"0\", \"0\"]"; node "$SCRIPTS/sign.js" "$C"; } \
   > "$ROOT/jurisdiction_proof/Prover.toml"
 
+echo "employment_proof..."
+C=$(commit 1 11)
+{ echo "employment_status = \"1\""; echo "seniority = \"5\""; echo "salt = \"11\""; \
+  echo "commitment = \"$C\""; echo "min_seniority = \"3\""; node "$SCRIPTS/sign.js" "$C"; } \
+  > "$ROOT/employment_proof/Prover.toml"
+
 echo "done. demo issuer public key:"
 node "$SCRIPTS/sign.js" --pubkey

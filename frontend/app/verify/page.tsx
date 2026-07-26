@@ -52,7 +52,7 @@ function VerifyInner() {
   const minThresholdParam = searchParams.get("min_threshold") ?? undefined;
   const claimParamsFromUrl = {
     threshold_years: searchParams.get("threshold_years") ?? (claimParam === "age" ? minThresholdParam : undefined),
-    threshold: searchParams.get("threshold") ?? (claimParam === "funds" || claimParam === "income" ? minThresholdParam : undefined),
+    threshold: searchParams.get("threshold") ?? (["funds", "income", "accreditation", "employment"].includes(claimParam ?? "") ? minThresholdParam : undefined),
     restricted: searchParams.get("restricted")?.split(",").filter(Boolean) ?? undefined,
   };
 
@@ -64,6 +64,7 @@ function VerifyInner() {
     income: "250000",
     net_worth: "1500000",
     country_code: "566",
+    seniority: "5",
   });
   const [expiry, setExpiry] = useState("90 days");
   const [busy, setBusy] = useState(false);
@@ -380,7 +381,9 @@ function VerifyInner() {
                                 ? `income > $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
                                 : key === "accreditation" && claimParamsFromUrl.threshold
                                   ? `net worth ≥ $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
-                                  : m.claim}
+                                  : key === "employment" && claimParamsFromUrl.threshold
+                                    ? `seniority ≥ ${claimParamsFromUrl.threshold} yrs`
+                                    : m.claim}
                         </span>
                       </div>
 
@@ -469,6 +472,16 @@ function VerifyInner() {
                               <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
                             ))}
                           </select>
+                        </div>
+                      )}
+                      {on && key === "employment" && (
+                        <div style={{ marginTop: "0.75rem" }} onClick={(e) => e.stopPropagation()}>
+                          <label className="field-label">{m.attribute}</label>
+                          <input
+                            type="number"
+                            value={attributes.seniority}
+                            onChange={(e) => setAttr("seniority", e.target.value)}
+                          />
                         </div>
                       )}
                     </div>

@@ -26,6 +26,7 @@ const DEFAULT_ATTR: Record<CredentialType, string> = {
   jurisdiction: "566",
   funds: "50000",
   accreditation: "1500000",
+  employment: "5",
 };
 
 const COUNTRIES = [
@@ -67,6 +68,8 @@ export default function IssuerPage() {
       else if (type === "funds") attributes.balance = attribute;
       else if (type === "accreditation") attributes.net_worth = attribute;
       else if (type === "jurisdiction") attributes.country_code = attribute;
+      // employment: the value is the binary status tag (set server-side to "1"),
+      // the user-supplied attribute is the holder's seniority in years.
 
       const res = await fetch("/api/issue", {
         method: "POST",
