@@ -138,6 +138,9 @@ impl CredentialVerifier {
         Self::require_admin(&env);
         let key = DataKey::DeprecatedVersion(credential_type, version);
         env.storage().persistent().set(&key, &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, VK_BUMP_THRESHOLD, VK_TTL);
     }
 
     /// Returns the highest registered VK version for `credential_type`, or 0 if
