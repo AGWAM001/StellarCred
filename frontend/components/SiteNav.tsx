@@ -6,10 +6,10 @@ import { IconBook2, IconCode } from "@tabler/icons-react";
 import { ThemeToggle } from "./ThemeToggle";
 
 const LINKS = [
-  { href: "/holder",   label: "Wallet" },
-  { href: "/verify",   label: "Verify" },
-  { href: "/issuer",   label: "Issuer" },
-  { href: "/apps",     label: "Apps" },
+  { href: "/holder", label: "Wallet" },
+  { href: "/verify", label: "Verify" },
+  { href: "/issuer", label: "Issuer" },
+  { href: "/apps", label: "Apps" },
 ];
 
 function ShieldIcon() {

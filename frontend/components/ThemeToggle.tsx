@@ -7,7 +7,8 @@ export function ThemeToggle() {
   const [activeTheme, setActiveTheme] = useState<string | null>(null);
 
   useEffect(() => {
-    const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
+    const currentTheme =
+      document.documentElement.getAttribute("data-theme") || "dark";
     setActiveTheme(currentTheme);
   }, []);
 
@@ -15,13 +16,14 @@ export function ThemeToggle() {
     const root = document.documentElement;
     const currentTheme = root.getAttribute("data-theme");
     const newTheme = currentTheme === "light" ? "dark" : "light";
-    
+
     root.setAttribute("data-theme", newTheme);
     localStorage.setItem("theme", newTheme);
     setActiveTheme(newTheme);
   };
 
-  const ariaLabel = activeTheme === "light" ? "Switch to dark mode" : "Switch to light mode";
+  const ariaLabel =
+    activeTheme === "light" ? "Switch to dark mode" : "Switch to light mode";
 
   return (
     <button

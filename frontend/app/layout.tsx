@@ -52,7 +52,7 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${body.variable} ${display.variable} ${mono.variable}`}
-      data-theme="light" 
+      data-theme="light"
       suppressHydrationWarning
     >
       <head>
