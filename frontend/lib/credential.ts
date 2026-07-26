@@ -36,7 +36,12 @@ export const TYPE_META: Record<
   { title: string; claim: string; issuable: boolean; attribute?: string }
 > = {
   kyc: { title: "KYC Complete", claim: "identity verified", issuable: true },
-  age: { title: "Age Verified", claim: "age ≥ 18", issuable: true, attribute: "Date of birth" },
+  age: {
+    title: "Age Verified",
+    claim: "age ≥ 18",
+    issuable: true,
+    attribute: "Date of birth",
+  },
   income: {
     title: "Accredited (Income)",
     claim: "income > $200,000",
@@ -97,7 +102,9 @@ export function saveCredential(cred: Credential): Credential[] {
   const all = loadCredentials();
   const next = [
     cred,
-    ...all.filter((c) => !(c.type === cred.type && c.commitment === cred.commitment)),
+    ...all.filter(
+      (c) => !(c.type === cred.type && c.commitment === cred.commitment),
+    ),
   ];
   localStorage.setItem(KEY, JSON.stringify(next));
   return next;
@@ -114,13 +121,14 @@ export function markProved(commitment: string, txHash: string): Credential[] {
 }
 
 /** Mark multiple credentials as proved in a single localStorage write. */
-export function markAllProved(commitments: string[], txHash: string): Credential[] {
+export function markAllProved(
+  commitments: string[],
+  txHash: string,
+): Credential[] {
   const set = new Set(commitments);
   const now = Math.floor(Date.now() / 1000);
   const next = loadCredentials().map((c) =>
-    set.has(c.commitment)
-      ? { ...c, provedAt: now, provedTxHash: txHash }
-      : c,
+    set.has(c.commitment) ? { ...c, provedAt: now, provedTxHash: txHash } : c,
   );
   localStorage.setItem(KEY, JSON.stringify(next));
   return next;
@@ -134,8 +142,16 @@ export function removeCredential(commitment: string): Credential[] {
 
 export function parseCredential(json: string): Credential {
   const c = JSON.parse(json);
-  if (!c.type || c.value === undefined || !c.commitment || !c.issuerId || !c.sig) {
-    throw new Error("Not a valid credential (missing type, value, commitment, issuerId, or sig).");
+  if (
+    !c.type ||
+    c.value === undefined ||
+    !c.commitment ||
+    !c.issuerId ||
+    !c.sig
+  ) {
+    throw new Error(
+      "Not a valid credential (missing type, value, commitment, issuerId, or sig).",
+    );
   }
   return c as Credential;
 }

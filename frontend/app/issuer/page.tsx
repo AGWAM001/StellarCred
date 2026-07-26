@@ -1,11 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  IconKey,
-  IconArrowRight,
-  IconLoader2,
-} from "@tabler/icons-react";
+import { IconKey, IconArrowRight, IconLoader2 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
@@ -84,7 +80,9 @@ export default function IssuerPage() {
         }),
       });
       if (!res.ok) throw new Error(await res.text());
-      const { credentials } = (await res.json()) as { credentials: Credential[] };
+      const { credentials } = (await res.json()) as {
+        credentials: Credential[];
+      };
       const cred = credentials[0];
       saveCredential(cred);
       setIssued(JSON.stringify(cred, null, 2));
@@ -100,7 +98,9 @@ export default function IssuerPage() {
       <div className="between" style={{ marginBottom: "2rem" }}>
         <div>
           <span className="eyebrow">Issuer admin · demo</span>
-          <h1 style={{ fontSize: "2rem", marginTop: "0.35rem" }}>Issue a credential</h1>
+          <h1 style={{ fontSize: "2rem", marginTop: "0.35rem" }}>
+            Issue a credential
+          </h1>
         </div>
         <WalletButton />
       </div>
@@ -117,21 +117,36 @@ export default function IssuerPage() {
           lineHeight: 1.6,
         }}
       >
-        <strong style={{ color: "var(--text)" }}>Simulates the issuer's side.</strong>{" "}
-        In production this would be a separate authenticated app run by the institution —
-        KYC provider, bank, employer — after verifying the holder off-chain. The holder
-        would never see this interface.
+        <strong style={{ color: "var(--text)" }}>
+          Simulates the issuer's side.
+        </strong>{" "}
+        In production this would be a separate authenticated app run by the
+        institution — KYC provider, bank, employer — after verifying the holder
+        off-chain. The holder would never see this interface.
       </div>
 
-      <div className="grid grid-2" style={{ alignItems: "start", gap: "1.5rem" }}>
+      <div
+        className="grid grid-2"
+        style={{ alignItems: "start", gap: "1.5rem" }}
+      >
         <div className="card">
           <label className="field-label">Holder address</label>
-          <input value={holder} onChange={(e) => setHolder(e.target.value)} placeholder="G…" />
+          <input
+            value={holder}
+            onChange={(e) => setHolder(e.target.value)}
+            placeholder="G…"
+          />
 
-          <div className="grid grid-2" style={{ marginTop: "1.25rem", gap: "1rem" }}>
+          <div
+            className="grid grid-2"
+            style={{ marginTop: "1.25rem", gap: "1rem" }}
+          >
             <div>
               <label className="field-label">Credential type</label>
-              <select value={type} onChange={(e) => onType(e.target.value as CredentialType)}>
+              <select
+                value={type}
+                onChange={(e) => onType(e.target.value as CredentialType)}
+              >
                 {TYPES.map(([key, m]) => (
                   <option key={key} value={key}>
                     {m.title}
@@ -141,7 +156,10 @@ export default function IssuerPage() {
             </div>
             <div>
               <label className="field-label">Expiry</label>
-              <select value={expiry} onChange={(e) => setExpiry(e.target.value)}>
+              <select
+                value={expiry}
+                onChange={(e) => setExpiry(e.target.value)}
+              >
                 {["30 days", "90 days", "1 year"].map((t) => (
                   <option key={t}>{t}</option>
                 ))}
@@ -153,9 +171,16 @@ export default function IssuerPage() {
             <div style={{ marginTop: "1.25rem" }}>
               <label className="field-label">{meta.attribute}</label>
               {type === "age" ? (
-                <input type="date" value={attribute} onChange={(e) => setAttribute(e.target.value)} />
+                <input
+                  type="date"
+                  value={attribute}
+                  onChange={(e) => setAttribute(e.target.value)}
+                />
               ) : type === "jurisdiction" ? (
-                <select value={attribute} onChange={(e) => setAttribute(e.target.value)}>
+                <select
+                  value={attribute}
+                  onChange={(e) => setAttribute(e.target.value)}
+                >
                   {COUNTRIES.map((c) => (
                     <option key={c.code} value={c.code}>
                       {c.name} ({c.code})
@@ -172,7 +197,10 @@ export default function IssuerPage() {
             </div>
           )}
 
-          <div className="row faint" style={{ marginTop: "1.25rem", fontSize: "0.8125rem" }}>
+          <div
+            className="row faint"
+            style={{ marginTop: "1.25rem", fontSize: "0.8125rem" }}
+          >
             <IconKey size={14} />
             <span>
               {needsAttr
@@ -201,12 +229,21 @@ export default function IssuerPage() {
             )}
           </button>
           {!issuerId && (
-            <p className="faint" style={{ marginTop: "0.6rem", fontSize: "0.8125rem" }}>
+            <p
+              className="faint"
+              style={{ marginTop: "0.6rem", fontSize: "0.8125rem" }}
+            >
               Connect the registered issuer wallet to issue.
             </p>
           )}
           {error && (
-            <p style={{ marginTop: "0.6rem", fontSize: "0.8125rem", color: "var(--danger)" }}>
+            <p
+              style={{
+                marginTop: "0.6rem",
+                fontSize: "0.8125rem",
+                color: "var(--danger)",
+              }}
+            >
               {error}
             </p>
           )}
@@ -238,11 +275,21 @@ export default function IssuerPage() {
               {issued}
             </pre>
           ) : (
-            <div style={{ height: 200, display: "grid", placeItems: "center", textAlign: "center" }}>
-              <p className="faint" style={{ maxWidth: 280, fontSize: "0.875rem" }}>
+            <div
+              style={{
+                height: 200,
+                display: "grid",
+                placeItems: "center",
+                textAlign: "center",
+              }}
+            >
+              <p
+                className="faint"
+                style={{ maxWidth: 280, fontSize: "0.875rem" }}
+              >
                 Issue a credential to generate signed JSON. It is saved to this
-                browser&rsquo;s wallet and ready to prove on the Holder page — we
-                never store it server-side.
+                browser&rsquo;s wallet and ready to prove on the Holder page —
+                we never store it server-side.
               </p>
             </div>
           )}

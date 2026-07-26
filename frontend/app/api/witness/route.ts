@@ -66,7 +66,9 @@ function buildInputs(type: string, cred: Record<string, unknown>): InputMap {
         salt,
         ...sigInputs,
         commitment,
-        restricted: normalizeRestricted(params.restricted ?? DEFAULT_RESTRICTED),
+        restricted: normalizeRestricted(
+          params.restricted ?? DEFAULT_RESTRICTED,
+        ),
       };
     case "funds":
       return {
@@ -101,14 +103,21 @@ function buildInputs(type: string, cred: Record<string, unknown>): InputMap {
 
 function circuitFor(type: string) {
   switch (type) {
-    case "age": return ageCircuit;
-    case "funds": return fundsCircuit;
-    case "accreditation": return accreditationCircuit;
-    case "income": return incomeCircuit;
-    case "jurisdiction": return jurisdictionCircuit;
-    case "employment": return employmentCircuit;
+    case "age":
+      return ageCircuit;
+    case "funds":
+      return fundsCircuit;
+    case "accreditation":
+      return accreditationCircuit;
+    case "income":
+      return incomeCircuit;
+    case "jurisdiction":
+      return jurisdictionCircuit;
+    case "employment":
+      return employmentCircuit;
     case "kyc":
-    default: return kycCircuit;
+    default:
+      return kycCircuit;
   }
 }
 
@@ -122,7 +131,10 @@ export async function POST(req: NextRequest) {
 
   const { type, credential } = body;
   if (!type || !credential) {
-    return NextResponse.json({ error: "type and credential are required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "type and credential are required" },
+      { status: 400 },
+    );
   }
 
   try {
