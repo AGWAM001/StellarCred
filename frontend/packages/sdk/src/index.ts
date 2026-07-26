@@ -94,6 +94,14 @@ export interface ClaimOptions {
    * Ignored for binary claims (`kyc`, `jurisdiction`).
    */
   minThreshold?: number;
+  /**
+   * Restrict which issuer(s) a proof must come from — e.g. accept `kyc` only
+   * from Persona or Jumio, not a self-attested issuer. Pass the issuers'
+   * Stellar addresses. Omit (or leave `undefined`) to accept a proof from any
+   * registered issuer, matching the on-chain `check_claim`/`is_verified`
+   * `trusted_issuers: None` default. An empty array rejects every issuer.
+   */
+  trustedIssuers?: string[];
 }
 
 export interface Claim {
@@ -133,6 +141,7 @@ async function getClient(): Promise<ProofRegistryClient | null> {
 async function readIsVerified(
   wallet: string,
   claimType: string,
+  trustedIssuers?: string[],
 ): Promise<{ valid: boolean; verifiedAt: number; expiry: number } | null> {
   const client = await getClient();
   if (!client) return null;
@@ -141,6 +150,7 @@ async function readIsVerified(
     const { result } = await client.is_verified({
       holder: wallet,
       credential_type: claimType,
+      trusted_issuers: trustedIssuers,
     });
     if (!result) return null;
     const [valid, verifiedAt, expiry] = result;
@@ -154,6 +164,7 @@ async function readCheckClaim(
   wallet: string,
   claimType: string,
   minThreshold: number,
+  trustedIssuers?: string[],
 ): Promise<boolean> {
   const client = await getClient();
   if (!client) return false;
@@ -163,6 +174,7 @@ async function readCheckClaim(
       holder: wallet,
       credential_type: claimType,
       min_threshold: BigInt(minThreshold),
+      trusted_issuers: trustedIssuers,
     });
     return result ?? false;
   } catch {
@@ -195,6 +207,12 @@ async function readCheckClaim(
  * @example
  * // Age gate — require age ≥ 21
  * const ok = await hasClaim("G1ABC…", "age", { minThreshold: 21 });
+ *
+ * @example
+ * // Only accept KYC from specific issuers, e.g. Persona or Jumio
+ * const ok = await hasClaim("G1ABC…", "kyc", {
+ *   trustedIssuers: ["G...PERSONA_ISSUER", "G...JUMIO_ISSUER"],
+ * });
  */
 export async function hasClaim(
   wallet: string,
@@ -202,9 +220,9 @@ export async function hasClaim(
   opts?: ClaimOptions,
 ): Promise<boolean> {
   if (opts?.minThreshold !== undefined) {
-    return readCheckClaim(wallet, claimType, opts.minThreshold);
+    return readCheckClaim(wallet, claimType, opts.minThreshold, opts.trustedIssuers);
   }
-  const r = await readIsVerified(wallet, claimType);
+  const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers);
   return !!r && r.valid;
 }
 
@@ -224,8 +242,10 @@ export async function getClaims(wallet: string): Promise<Claim[]> {
 
 /**
  * Build a StellarCred verification URL to redirect users to. After the user
- * verifies, StellarCred sends them back to `returnUrl` with `sc_verified=true`
- * and `sc_wallet=<address>` appended as query params.
+ * verifies, StellarCred sends them back to `returnUrl` with `sc_verified=true`,
+ * `sc_wallet=<address>`, and `sc_claims=<comma-separated-types>` appended as
+ * query params. `sc_claims` contains only the claim types issued in the current
+ * session (not all-time claims).
  *
  * Pass `claimParams` to customize thresholds for parameterised claims:
  *
