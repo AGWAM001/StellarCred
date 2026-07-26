@@ -378,7 +378,7 @@ impl ProofRegistry {
         match trusted_issuers {
             None => true,
             Some(list) => match issuer {
-                None => true,
+                None => false,
                 Some(addr) => list.contains(addr),
             },
         }
