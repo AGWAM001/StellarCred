@@ -223,11 +223,11 @@ export class IssuerClient {
     if (!CREDENTIAL_TYPES.includes(type)) {
       throw new Error(`Unknown credential type: ${type as string}`);
     }
+    const issuedAt = Math.floor(Date.now() / 1000);
     const value = attributeToValue(type, attribute);
     const salt = randomField();
     const commitment = await poseidonCommit(value, salt);
     const { sig, issuerX, issuerY } = signCommitment(commitment, this.privateKey);
-    const issuedAt = Math.floor(Date.now() / 1000);
     return {
       type,
       title: TYPE_TITLE[type],
