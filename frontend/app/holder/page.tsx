@@ -64,6 +64,10 @@ function daysRemaining(cred: Credential): number {
   return Math.max(0, Math.ceil(secsLeft / 86_400));
 }
 
+import { useProofTimeline, addTimelineEvent } from "@/lib/useProofTimeline";
+import { Timeline } from "@/components/Timeline";
+import { IconHistory } from "@tabler/icons-react";
+
 // ── Credential card ──────────────────────────────────────────────────────────
 
 function CredCard({
@@ -80,6 +84,8 @@ function CredCard({
   isPreview?: boolean;
 }) {
   const status = proofStatus(c);
+  const { events } = useProofTimeline(c);
+  const [showHistory, setShowHistory] = useState(false);
 
   return (
     <div className="card" style={{ padding: "1rem 1.25rem" }}>
@@ -136,6 +142,14 @@ function CredCard({
           </button>
           <button
             className="btn btn-ghost btn-sm"
+            title="History"
+            onClick={() => setShowHistory(!showHistory)}
+            style={{ padding: "0.3rem 0.4rem", color: showHistory ? "var(--accent)" : "var(--faint)" }}
+          >
+            <IconHistory size={13} />
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
             title="Remove"
             onClick={onRemove}
             style={{ padding: "0.3rem 0.4rem", color: "var(--faint)" }}
@@ -144,6 +158,10 @@ function CredCard({
           </button>
         </div>
       </div>
+      
+      {showHistory && (
+        <Timeline events={events} />
+      )}
     </div>
   );
 }
@@ -407,10 +425,10 @@ function ProofFlow({
   const [txHash, setTxHash] = useState("");
   const [error, setError] = useState<ContractError | null>(null);
   const [showRaw, setShowRaw] = useState(false);
-  // elapsed time for the proving stage
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toast = useToast();
+  const { addEvent } = useProofTimeline(cred);
 
   useEffect(() => {
     let cancelled = false;
@@ -441,6 +459,7 @@ function ProofFlow({
 
         setProof(result);
         setStage("generated");
+        addEvent("generated");
         toast.success(`Proof generated for ${cred.title}`);
       } catch (e) {
         clearInterval(timerRef.current!);
@@ -462,6 +481,7 @@ function ProofFlow({
   async function onSubmit() {
     if (!proof) return;
     setStage("submitting");
+    addEvent("submitted");
     toast.info(`Submitting proof for ${cred.title} to Stellar…`);
     try {
       const hash = await submitProof({
@@ -475,6 +495,7 @@ function ProofFlow({
       setTxHash(hash);
       onProved(hash);
       setStage("confirmed");
+      addEvent("verified", { txHash: hash });
       toast.success(`Proof confirmed on-chain for ${cred.title}`, { txHash: hash });
     } catch (e) {
       const parsed = parseContractError((e as Error).message);
@@ -802,6 +823,7 @@ function BatchProofFlow({
           next[i] = { status: "ready", proof: result };
           return next;
         });
+        addTimelineEvent(cred.commitment, "generated");
       }
     })();
 
@@ -833,13 +855,19 @@ function BatchProofFlow({
       };
     });
 
+    currentCreds.forEach(cred => addTimelineEvent(cred.commitment, "submitted"));
+
     toast.info(`Submitting ${currentCreds.length} proofs to Stellar…`);
     submitProofsBatch({ holder: currentHolder, submissions })
       .then((hash) => {
         setTxHash(hash);
+        const commitments = currentCreds.map((c) => c.commitment);
+        onProved(hash, commitments);
         setBatchStage("confirmed");
-        onProved(hash, currentCreds.map((c) => c.commitment));
-        toast.success(`All ${currentCreds.length} proofs confirmed on-chain`, { txHash: hash });
+
+        currentCreds.forEach(cred => addTimelineEvent(cred.commitment, "verified", { txHash: hash }));
+
+        toast.success(`Confirmed ${creds.length} proofs on-chain`, { txHash: hash });
       })
       .catch((e) => {
         const parsed = parseContractError((e as Error).message);
