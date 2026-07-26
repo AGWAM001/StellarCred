@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { StellarCred } from "./index";
-
-export type ClaimType = "kyc" | "age" | "jurisdiction" | "income" | "funds" | "accreditation";
+import { StellarCred, type ClaimType } from "./index";
 
 interface UseStellarCredOptions {
   claims?: ClaimType[];

@@ -307,15 +307,20 @@ export async function submitProofs(params: {
  * credential types (age, income, funds). Calls ProofRegistry.check_claim which
  * stores the proved threshold and checks stored >= minThreshold server-side.
  * For kyc / jurisdiction pass minThreshold = undefined.
+ *
+ * `trustedIssuers`, if provided, restricts which issuer's proof is accepted —
+ * the stored proof's issuer must be one of these addresses. Omit to accept
+ * any registered issuer (unchanged default behaviour).
  */
 export async function checkClaim(
   holder: string,
   credentialType: string,
   minThreshold?: number,
+  trustedIssuers?: string[],
 ): Promise<boolean> {
   if (!CONTRACTS.proofRegistry) return false;
 
-  const { rpc, Contract, TransactionBuilder, Address, nativeToScVal, scValToNative, BASE_FEE } =
+  const { rpc, Contract, TransactionBuilder, Address, nativeToScVal, scValToNative, xdr, BASE_FEE } =
     await sdk();
   const srv = await getServer();
 
@@ -327,6 +332,9 @@ export async function checkClaim(
     nativeToScVal(credentialType, { type: "symbol" }),
     minThreshold !== undefined
       ? nativeToScVal(BigInt(minThreshold), { type: "u64" })
+      : nativeToScVal(null, { type: "void" }),
+    trustedIssuers !== undefined
+      ? xdr.ScVal.scvVec(trustedIssuers.map((a) => Address.fromString(a).toScVal()))
       : nativeToScVal(null, { type: "void" }),
   );
   const tx = new TransactionBuilder(account, {
@@ -342,15 +350,21 @@ export async function checkClaim(
   return scValToNative(sim.result.retval) as boolean;
 }
 
-/** Read-only check of whether `holder` has a currently-valid proof of `type`. */
+/**
+ * Read-only check of whether `holder` has a currently-valid proof of `type`.
+ *
+ * `trustedIssuers`, if provided, restricts which issuer's proof is accepted —
+ * see {@link checkClaim}. Omit to accept any registered issuer.
+ */
 export async function isVerified(
   holder: string,
   credentialType: string,
+  trustedIssuers?: string[],
 ): Promise<VerificationStatus> {
   const empty: VerificationStatus = { valid: false, verifiedAt: 0, expiry: 0 };
   if (!CONTRACTS.proofRegistry) return empty;
 
-  const { rpc, Contract, TransactionBuilder, Address, nativeToScVal, scValToNative, BASE_FEE } =
+  const { rpc, Contract, TransactionBuilder, Address, nativeToScVal, scValToNative, xdr, BASE_FEE } =
     await sdk();
   const srv = await getServer();
 
@@ -360,6 +374,9 @@ export async function isVerified(
     "is_verified",
     Address.fromString(holder).toScVal(),
     nativeToScVal(credentialType, { type: "symbol" }),
+    trustedIssuers !== undefined
+      ? xdr.ScVal.scvVec(trustedIssuers.map((a) => Address.fromString(a).toScVal()))
+      : nativeToScVal(null, { type: "void" }),
   );
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,

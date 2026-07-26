@@ -73,6 +73,15 @@ for type in kyc age income jurisdiction funds accreditation; do
     --vk-file-path "$vk"
 done
 
+export NEXT_PUBLIC_ISSUER_ADDRESS=$ADMIN
+export NEXT_PUBLIC_ISSUER_REGISTRY_ID=$ISSUER_REGISTRY_ID
+export NEXT_PUBLIC_CREDENTIAL_VERIFIER_ID=$CREDENTIAL_VERIFIER_ID
+export NEXT_PUBLIC_PROOF_REGISTRY_ID=$PROOF_REGISTRY_ID
+export NEXT_PUBLIC_GATED_POOL_ID=$GATED_POOL_ID
+
+echo "Generating TypeScript bindings..."
+./scripts/gen-bindings.sh
+
 cat <<EOF
 
 Deployed. Copy into frontend/.env.local:
