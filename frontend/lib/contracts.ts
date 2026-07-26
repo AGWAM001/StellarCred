@@ -107,7 +107,7 @@ export async function submitProof(params: {
     xdr.ScVal.scvBytes(Buffer.from(proof)),
     xdr.ScVal.scvBytes(Buffer.from(publicInputs)),
     vkVersion != null
-      ? nativeToScVal(BigInt(vkVersion), { type: "u32" })
+      ? nativeToScVal(vkVersion, { type: "u32" })
       : nativeToScVal(null, { type: "void" }),
     nativeToScVal(BigInt(expiry), { type: "u64" }),
   );
@@ -254,7 +254,7 @@ export async function submitProofsBatch(params: {
         key: xdr.ScVal.scvSymbol("vk_version"),
         val:
           s.vkVersion != null
-            ? nativeToScVal(BigInt(s.vkVersion), { type: "u32" })
+            ? nativeToScVal(s.vkVersion, { type: "u32" })
             : nativeToScVal(null, { type: "void" }),
       }),
     ]);
