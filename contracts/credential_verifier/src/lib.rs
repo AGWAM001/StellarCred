@@ -104,9 +104,13 @@ impl CredentialVerifier {
             return false;
         }
 
+        // Version 0 is reserved — it is the ProofRecord sentinel meaning
+        // "no version", and no VK may be registered at version 0.
+        // Reject an explicit `Some(0)` so callers don't silently hit latest.
         let version = match vk_version {
-            Some(v) if v > 0 => v,
-            _ => env
+            Some(0) => panic_with_error!(&env, Error::VkNotSet),
+            Some(v) => v,
+            None => env
                 .storage()
                 .persistent()
                 .get(&DataKey::LatestVersion(credential_type.clone()))
