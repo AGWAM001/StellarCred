@@ -161,7 +161,8 @@ const fundsUrl = StellarCred.buildVerifyUrl({
   claimParams: { threshold: '50000' },
 });
 
-// When the user returns, check again:
+// The return URL includes sc_verified=true, sc_wallet=<address>, and sc_claims=<types>
+// sc_claims contains only the claim types issued in the current session.
 const verified = await StellarCred.hasClaim(wallet, "kyc");`}</Code>
       </Section>
 
