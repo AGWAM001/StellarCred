@@ -337,13 +337,18 @@ function VerifyInner() {
                   Requested by <strong style={{ color: "var(--accent)" }}>{requestingDomain}</strong>
                 </div>
               )}
-              <label className="field-label">Credential type</label>
+              <label className="field-label" id="credential-type-label">Credential type</label>
               {locked && (
                 <p className="faint" style={{ fontSize: "0.8125rem", margin: "0.4rem 0 0" }}>
                   A protocol requested the <strong style={{ color: "var(--accent)" }}>{requiredClaim}</strong> credential.
                 </p>
               )}
-              <div className="stack" style={{ gap: "0.5rem", marginTop: "0.5rem", marginBottom: "1.25rem" }}>
+              <div
+                className="stack"
+                role="radiogroup"
+                aria-labelledby="credential-type-label"
+                style={{ gap: "0.5rem", marginTop: "0.5rem", marginBottom: "1.25rem" }}
+              >
                 {TYPES.map(([key, m]) => {
                   const on = selected === key;
                   if (locked && key !== requiredClaim) return null;
@@ -351,6 +356,16 @@ function VerifyInner() {
                     <div
                       key={key}
                       onClick={() => { if (!locked) setSelected(key); }}
+                      onKeyDown={(e) => {
+                        if (!locked && (e.key === "Enter" || e.key === " ")) {
+                          e.preventDefault();
+                          setSelected(key);
+                        }
+                      }}
+                      role="radio"
+                      aria-checked={on}
+                      aria-label={m.title}
+                      tabIndex={locked && key !== requiredClaim ? -1 : 0}
                       style={{
                         padding: "0.75rem 0.9rem",
                         borderRadius: "var(--radius)",
@@ -397,8 +412,9 @@ function VerifyInner() {
                       )}
                       {on && key === "age" && (
                         <div style={{ marginTop: "0.75rem" }} onClick={(e) => e.stopPropagation()}>
-                          <label className="field-label">{m.attribute}</label>
+                          <label className="field-label" htmlFor="attr-date-of-birth">{m.attribute}</label>
                           <input
+                            id="attr-date-of-birth"
                             type="date"
                             value={attributes.date_of_birth}
                             onChange={(e) => setAttr("date_of_birth", e.target.value)}
@@ -407,8 +423,9 @@ function VerifyInner() {
                       )}
                       {on && key === "income" && (
                         <div style={{ marginTop: "0.75rem" }} onClick={(e) => e.stopPropagation()}>
-                          <label className="field-label">{m.attribute}</label>
+                          <label className="field-label" htmlFor="attr-income">{m.attribute}</label>
                           <input
+                            id="attr-income"
                             type="number"
                             value={attributes.income}
                             onChange={(e) => setAttr("income", e.target.value)}
@@ -417,8 +434,9 @@ function VerifyInner() {
                       )}
                       {on && key === "accreditation" && (
                         <div style={{ marginTop: "0.75rem" }} onClick={(e) => e.stopPropagation()}>
-                          <label className="field-label">{m.attribute}</label>
+                          <label className="field-label" htmlFor="attr-net-worth">{m.attribute}</label>
                           <input
+                            id="attr-net-worth"
                             type="number"
                             value={attributes.net_worth}
                             onChange={(e) => setAttr("net_worth", e.target.value)}
@@ -469,8 +487,8 @@ function VerifyInner() {
                       )}
                       {on && key === "jurisdiction" && (
                         <div style={{ marginTop: "0.75rem" }} onClick={(e) => e.stopPropagation()}>
-                          <label className="field-label">{m.attribute}</label>
-                          <select value={attributes.country_code} onChange={(e) => setAttr("country_code", e.target.value)}>
+                          <label className="field-label" htmlFor="attr-country-code">{m.attribute}</label>
+                          <select id="attr-country-code" value={attributes.country_code} onChange={(e) => setAttr("country_code", e.target.value)}>
                             {COUNTRIES.map((c) => (
                               <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
                             ))}
@@ -483,8 +501,8 @@ function VerifyInner() {
               </div>
 
               <div style={{ marginBottom: "1.5rem" }}>
-                <label className="field-label">Validity period</label>
-                <select value={expiry} onChange={(e) => setExpiry(e.target.value)}>
+                <label className="field-label" htmlFor="validity-period">Validity period</label>
+                <select id="validity-period" value={expiry} onChange={(e) => setExpiry(e.target.value)}>
                   {["30 days", "90 days", "1 year"].map((t) => (
                     <option key={t}>{t}</option>
                   ))}

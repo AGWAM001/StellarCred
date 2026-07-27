@@ -665,8 +665,36 @@ input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: rgba(62, 207, 142, 0.35);
-  box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.08);
+  border-color: rgba(62, 207, 142, 0.6);
+  box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.35);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(62, 207, 142, 0.9);
+  outline-offset: 1px;
+}
+
+/* ---- Skip link ---------------------------------------------------------------- */
+
+.skip-link {
+  position: absolute;
+  top: -3rem;
+  left: 0.5rem;
+  z-index: 1000;
+  padding: 0.6rem 1rem;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 0.5rem;
 }
 
 /* ---- Badge ------------------------------------------------------------------ */
@@ -900,11 +928,21 @@ textarea:focus {
     animation-duration: 0.001ms !important;
     animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 
   .check circle,
   .check path {
     stroke-dashoffset: 0;
+  }
+
+  .card-link:hover,
+  .protocol-card:hover,
+  .protocol-card:active,
+  .btn:active {
+    transform: none !important;
   }
 }
 

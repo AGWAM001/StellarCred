@@ -186,7 +186,7 @@ export default function IssuerPage() {
 
       <div className="grid grid-2" style={{ alignItems: "start", gap: "1.5rem" }}>
         <div className="card">
-          <label className="field-label">Registered issuer</label>
+          <label className="field-label" htmlFor="registered-issuer">Registered issuer</label>
           {issuersLoading ? (
             <p className="faint" style={{ fontSize: "0.8125rem", marginTop: "0.35rem" }}>
               Loading issuers from IssuerRegistry…
@@ -199,6 +199,7 @@ export default function IssuerPage() {
           ) : (
             <>
               <select
+                id="registered-issuer"
                 value={selectedIssuerId}
                 onChange={(e) => setSelectedIssuerId(e.target.value)}
               >
@@ -228,15 +229,16 @@ export default function IssuerPage() {
             </>
           )}
 
-          <label className="field-label" style={{ marginTop: "1.25rem" }}>
+          <label className="field-label" htmlFor="holder-address" style={{ marginTop: "1.25rem" }}>
             Holder address
           </label>
-          <input value={holder} onChange={(e) => setHolder(e.target.value)} placeholder="G…" />
+          <input id="holder-address" value={holder} onChange={(e) => setHolder(e.target.value)} placeholder="G…" />
 
           <div className="grid grid-2" style={{ marginTop: "1.25rem", gap: "1rem" }}>
             <div>
-              <label className="field-label">Credential type</label>
+              <label className="field-label" htmlFor="credential-type">Credential type</label>
               <select
+                id="credential-type"
                 value={type}
                 onChange={(e) => onType(e.target.value as CredentialType)}
                 disabled={availableTypes.length === 0}
@@ -249,8 +251,8 @@ export default function IssuerPage() {
               </select>
             </div>
             <div>
-              <label className="field-label">Expiry</label>
-              <select value={expiry} onChange={(e) => setExpiry(e.target.value)}>
+              <label className="field-label" htmlFor="issuer-expiry">Expiry</label>
+              <select id="issuer-expiry" value={expiry} onChange={(e) => setExpiry(e.target.value)}>
                 {["30 days", "90 days", "1 year"].map((t) => (
                   <option key={t}>{t}</option>
                 ))}
@@ -260,11 +262,11 @@ export default function IssuerPage() {
 
           {needsAttr && (
             <div style={{ marginTop: "1.25rem" }}>
-              <label className="field-label">{meta.attribute}</label>
+              <label className="field-label" htmlFor="issuer-attribute">{meta.attribute}</label>
               {type === "age" ? (
-                <input type="date" value={attribute} onChange={(e) => setAttribute(e.target.value)} />
+                <input id="issuer-attribute" type="date" value={attribute} onChange={(e) => setAttribute(e.target.value)} />
               ) : type === "jurisdiction" ? (
-                <select value={attribute} onChange={(e) => setAttribute(e.target.value)}>
+                <select id="issuer-attribute" value={attribute} onChange={(e) => setAttribute(e.target.value)}>
                   {COUNTRIES.map((c) => (
                     <option key={c.code} value={c.code}>
                       {c.name} ({c.code})
@@ -273,6 +275,7 @@ export default function IssuerPage() {
                 </select>
               ) : (
                 <input
+                  id="issuer-attribute"
                   type="number"
                   value={attribute}
                   onChange={(e) => setAttribute(e.target.value)}
