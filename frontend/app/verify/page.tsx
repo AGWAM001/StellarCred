@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   IconArrowRight,
@@ -12,6 +12,7 @@ import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { saveCredential, TYPE_META, type Credential } from "@/lib/credential";
 import type { CredentialType } from "@/lib/stellar";
+import { useToast } from "@/components/Toast";
 
 const TYPES = Object.entries(TYPE_META) as [
   CredentialType,
@@ -34,6 +35,7 @@ function VerifyInner() {
   const router = useRouter();
   const { address } = useWallet();
   const searchParams = useSearchParams();
+  const toast = useToast();
 
   // When a protocol redirects here it can specify where to send the user back
   // (return_url) and exactly which claim it requires (claim). A required claim
@@ -60,6 +62,7 @@ function VerifyInner() {
   const [attributes, setAttributes] = useState<Record<string, string>>({
     date_of_birth: "1995-06-15",
     income: "250000",
+    net_worth: "1500000",
     country_code: "566",
   });
   const [expiry, setExpiry] = useState("90 days");
@@ -68,6 +71,7 @@ function VerifyInner() {
   const [urlError, setUrlError] = useState("");
   const [requestingDomain, setRequestingDomain] = useState("");
   const [done, setDone] = useState(false);
+  const justIssuedClaims = useRef<string[]>([]);
 
   useEffect(() => {
     if (returnUrl) {
@@ -148,11 +152,19 @@ function VerifyInner() {
       })
       .then(({ credentials }) => {
         credentials.forEach((c) => saveCredential(c));
+        justIssuedClaims.current = credentials.map((c) => c.type).filter((t) => VALID_CLAIMS.includes(t as CredentialType));
 
         setDone(true);
+        toast.success(
+          credentials.length > 1 ? "Credentials issued successfully" : "Credential issued successfully",
+        );
         setTimeout(redirectAfterIssue, 1500);
       })
-      .catch((e) => setError((e as Error).message))
+      .catch((e) => {
+        const message = (e as Error).message;
+        setError(message);
+        toast.error(`Credential issuance failed: ${message}`);
+      })
       .finally(() => setBusy(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [personaInquiryId, address]);
@@ -181,6 +193,9 @@ function VerifyInner() {
 
         dest.searchParams.set("sc_verified", "true");
         dest.searchParams.set("sc_wallet", address);
+        if (justIssuedClaims.current.length > 0) {
+          dest.searchParams.set("sc_claims", justIssuedClaims.current.join(","));
+        }
 
         if (dest.origin === window.location.origin) {
           router.push(dest.pathname + dest.search);
@@ -235,10 +250,16 @@ function VerifyInner() {
       }
       const { credentials } = (await res.json()) as { credentials: Credential[] };
       credentials.forEach((c) => saveCredential(c));
+      justIssuedClaims.current = credentials.map((c) => c.type).filter((t) => VALID_CLAIMS.includes(t as CredentialType));
       setDone(true);
+      toast.success(
+        credentials.length > 1 ? "Credentials issued successfully" : "Credential issued successfully",
+      );
       setTimeout(redirectAfterIssue, 1500);
     } catch (e) {
-      setError((e as Error).message);
+      const message = (e as Error).message;
+      setError(message);
+      toast.error(`Credential issuance failed: ${message}`);
     } finally {
       setBusy(false);
     }
@@ -363,7 +384,9 @@ function VerifyInner() {
                               ? `age ≥ ${claimParamsFromUrl.threshold_years}`
                               : key === "income" && claimParamsFromUrl.threshold
                                 ? `income > $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
-                                : m.claim}
+                                : key === "accreditation" && claimParamsFromUrl.threshold
+                                  ? `net worth ≥ $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
+                                  : m.claim}
                         </span>
                       </div>
 
@@ -389,6 +412,16 @@ function VerifyInner() {
                             type="number"
                             value={attributes.income}
                             onChange={(e) => setAttr("income", e.target.value)}
+                          />
+                        </div>
+                      )}
+                      {on && key === "accreditation" && (
+                        <div style={{ marginTop: "0.75rem" }} onClick={(e) => e.stopPropagation()}>
+                          <label className="field-label">{m.attribute}</label>
+                          <input
+                            type="number"
+                            value={attributes.net_worth}
+                            onChange={(e) => setAttr("net_worth", e.target.value)}
                           />
                         </div>
                       )}
