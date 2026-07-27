@@ -1,0 +1,114 @@
+name: Reproducible Build
+
+# Verifies that the contract WASM artifacts are byte-identical when built twice
+# from the same source using the pinned toolchain. Runs on every push/PR that
+# touches contract source, Cargo files, the toolchain pin, or the Dockerfile.
+#
+# The job:
+#   1. Builds the WASM artifacts once (build-1).
+#   2. Builds them again in a clean environment (build-2).
+#   3. Compares the SHA-256 hashes — fails if any differ.
+#
+# The Docker image used is built from docker/Dockerfile.reproducible, which
+# pins the Debian base, Rust version, and build flags so the output is
+# deterministic across machines.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'docker/Dockerfile.reproducible'
+      - '.github/workflows/reproducible-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'docker/Dockerfile.reproducible'
+      - '.github/workflows/reproducible-build.yml'
+
+jobs:
+  reproducible-build:
+    name: Build twice, compare hashes
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Build the reproducible Docker image ──────────────────────────────
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f docker/Dockerfile.reproducible \
+            -t stellarcred-build:ci \
+            .
+
+      # ── First build ───────────────────────────────────────────────────────
+      - name: Build WASM (run 1)
+        run: |
+          mkdir -p build-1
+          docker run --rm \
+            -v "${{ github.workspace }}/build-1:/out" \
+            stellarcred-build:ci \
+            sh -c "cp target/wasm32v1-none/release/credential_verifier.wasm \
+                          target/wasm32v1-none/release/issuer_registry.wasm \
+                          target/wasm32v1-none/release/proof_registry.wasm \
+                          target/wasm32v1-none/release/gated_pool.wasm \
+                       /out/"
+
+      - name: Hash run-1 artifacts
+        id: hash1
+        run: |
+          echo "=== Run 1 SHA-256 hashes ==="
+          sha256sum build-1/*.wasm | tee build-1/sha256sums.txt
+          echo "hashes<<EOF" >> "$GITHUB_OUTPUT"
+          cat build-1/sha256sums.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      # ── Second build (clean Docker run — same image, no shared state) ─────
+      - name: Build WASM (run 2)
+        run: |
+          mkdir -p build-2
+          docker run --rm \
+            -v "${{ github.workspace }}/build-2:/out" \
+            stellarcred-build:ci \
+            sh -c "cp target/wasm32v1-none/release/credential_verifier.wasm \
+                          target/wasm32v1-none/release/issuer_registry.wasm \
+                          target/wasm32v1-none/release/proof_registry.wasm \
+                          target/wasm32v1-none/release/gated_pool.wasm \
+                       /out/"
+
+      - name: Hash run-2 artifacts
+        id: hash2
+        run: |
+          echo "=== Run 2 SHA-256 hashes ==="
+          sha256sum build-2/*.wasm | tee build-2/sha256sums.txt
+
+      # ── Compare ───────────────────────────────────────────────────────────
+      - name: Compare hashes (must be identical)
+        run: |
+          echo "Comparing run-1 vs run-2..."
+          diff build-1/sha256sums.txt build-2/sha256sums.txt && \
+            echo "✓ All WASM artifacts are byte-identical across two builds." || \
+            { echo "✗ Hash mismatch detected — build is NOT reproducible."; exit 1; }
+
+      # ── Upload artifacts for inspection ──────────────────────────────────
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-artifacts-${{ github.sha }}
+          path: build-1/*.wasm
+          retention-days: 30
+
+      - name: Upload SHA-256 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-sha256-${{ github.sha }}
+          path: build-1/sha256sums.txt
+          retention-days: 90

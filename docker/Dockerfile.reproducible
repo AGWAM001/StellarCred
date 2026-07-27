@@ -1,0 +1,111 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# Reproducible WASM build image for StellarCred contracts.
+#
+# Goals:
+#   • Byte-identical output across machines and CI runs.
+#   • Dependencies pre-fetched in a dedicated layer (cache-friendly, isolated
+#     from source changes).
+#   • Compile step runs --offline and --locked — no network access.
+#
+# The Rust version is driven by ARG RUST_VERSION (default matches
+# rust-toolchain.toml). The Debian base is pinned to a specific digest.
+#
+# Usage (from repo root):
+#   docker build -f docker/Dockerfile.reproducible -t stellarcred-build .
+#   mkdir -p out
+#   docker run --rm -v "$(pwd)/out:/out" stellarcred-build
+#
+# WASM artifacts land in:
+#   out/   (via the CMD above)
+#   target/wasm32v1-none/release/*.wasm  (inside the image layer)
+# ---------------------------------------------------------------------------
+
+# Pinned Debian Bookworm Slim digest — update only after vetting the new image.
+FROM debian:bookworm-slim@sha256:90522eeb7ef4924237be4a3917e0798b9a38029c6e3f42c00a2e3c96a741e31c AS base
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Toolchain layer — install rustup + exact Rust version + wasm32v1-none target.
+# Invalidated only when RUST_VERSION changes.
+# ---------------------------------------------------------------------------
+ARG RUST_VERSION=1.93.1
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH="/usr/local/cargo/bin:${PATH}"
+
+RUN curl -fsSL https://sh.rustup.rs | \
+    sh -s -- -y \
+       --no-modify-path \
+       --default-toolchain "${RUST_VERSION}" \
+       --target wasm32v1-none \
+    && rustup target add wasm32v1-none \
+    && rustc --version \
+    && cargo --version
+
+# ---------------------------------------------------------------------------
+# Dependency-fetch layer — copy only manifests + lockfile, stub out lib.rs
+# files so Cargo can resolve the workspace, then pre-fetch all crates.
+# Invalidated only on Cargo.lock / Cargo.toml changes, not on source changes.
+# ---------------------------------------------------------------------------
+FROM base AS fetcher
+
+WORKDIR /workspace
+
+COPY Cargo.toml Cargo.lock ./
+COPY contracts/credential_verifier/Cargo.toml  contracts/credential_verifier/
+COPY contracts/issuer_registry/Cargo.toml      contracts/issuer_registry/
+COPY contracts/proof_registry/Cargo.toml       contracts/proof_registry/
+COPY contracts/gated_pool/Cargo.toml           contracts/gated_pool/
+
+# Stub lib.rs so the workspace compiles enough for `cargo fetch`.
+RUN for d in credential_verifier issuer_registry proof_registry gated_pool; do \
+        mkdir -p "contracts/$d/src" && \
+        printf '#![no_std]\n' > "contracts/$d/src/lib.rs"; \
+    done
+
+# Fetch all dependencies into the Cargo registry cache.
+RUN cargo fetch --locked
+
+# ---------------------------------------------------------------------------
+# Compile layer — full source, fully offline, SOURCE_DATE_EPOCH=0 removes any
+# embedded timestamps that could differ across runs.
+# ---------------------------------------------------------------------------
+FROM fetcher AS compiler
+
+# Replace stubs with real sources.
+COPY contracts/ contracts/
+
+# Reproducibility flags:
+#   --locked     — use Cargo.lock exactly, reject any version drift
+#   --offline    — no network; all deps already fetched in the fetcher layer
+#   SOURCE_DATE_EPOCH=0 — strip timestamp metadata from the binary
+ENV SOURCE_DATE_EPOCH=0
+
+RUN cargo build \
+        --release \
+        --target wasm32v1-none \
+        --locked \
+        --offline
+
+# Print hashes at build time for easy log inspection.
+RUN echo "=== WASM SHA-256 hashes ===" \
+    && sha256sum \
+         target/wasm32v1-none/release/credential_verifier.wasm \
+         target/wasm32v1-none/release/issuer_registry.wasm \
+         target/wasm32v1-none/release/proof_registry.wasm \
+         target/wasm32v1-none/release/gated_pool.wasm
+
+# Default: copy WASMs to /out (bind-mount the host directory there).
+CMD ["sh", "-c", \
+     "cp target/wasm32v1-none/release/credential_verifier.wasm \
+           target/wasm32v1-none/release/issuer_registry.wasm \
+           target/wasm32v1-none/release/proof_registry.wasm \
+           target/wasm32v1-none/release/gated_pool.wasm \
+        /out/ && echo '=== Artifacts copied to /out/ ==='"]
