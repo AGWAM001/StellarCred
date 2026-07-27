@@ -15,6 +15,7 @@ import {
   IconCpu,
   IconCloudUpload,
   IconStack2,
+  IconInfoCircle,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
@@ -43,6 +44,7 @@ import {
 import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
 import { usePreviewMode } from "@/lib/wallet-context";
 import CopyButton from "@/components/CopyButton";
+import CredentialDetailModal from "@/components/CredentialDetailModal";
 import { useToast } from "@/components/Toast";
 
 // Parse "90 days", "30 days" etc from the credential's expiry string.
@@ -71,12 +73,14 @@ function CredCard({
   address,
   onProve,
   onRemove,
+  onInspect,
   isPreview,
 }: {
   c: Credential;
   address: string;
   onProve: () => void;
   onRemove: () => void;
+  onInspect: () => void;
   isPreview?: boolean;
 }) {
   const status = proofStatus(c);
@@ -90,8 +94,16 @@ function CredCard({
             <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{c.title}</span>
             <span className="mono faint" style={{ fontSize: "0.7rem" }}>{c.claim}</span>
           </div>
-          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem" }}>
+          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem", display: "flex", alignItems: "center", gap: "0.35rem" }}>
             {c.issuer} · <span>{truncateHash(c.commitment)}</span>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={onInspect}
+              title="View details"
+              style={{ padding: "0.1rem 0.2rem", color: "var(--faint)", lineHeight: 0 }}
+            >
+              <IconInfoCircle size={12} />
+            </button>
             {status === "proved" && (
               <>
                 {" · "}
@@ -190,6 +202,7 @@ export default function HolderPage() {
   const [creds, setCreds] = useState<Credential[]>([]);
   const [view, setView] = useState<PageView>({ kind: "list" });
   const [importing, setImporting] = useState(false);
+  const [detailCred, setDetailCred] = useState<Credential | null>(null);
 
   useEffect(() => setCreds(loadCredentials()), []);
 
@@ -288,6 +301,7 @@ export default function HolderPage() {
                   address={address}
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
+                  onInspect={() => setDetailCred(c)}
                   isPreview={isPreview}
                 />
               ))}
@@ -324,6 +338,7 @@ export default function HolderPage() {
                   address={address}
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
+                  onInspect={() => setDetailCred(c)}
                   isPreview={isPreview}
                 />
               ))}
@@ -352,6 +367,13 @@ export default function HolderPage() {
             </button>
           )}
         </div>
+      )}
+
+      {detailCred && (
+        <CredentialDetailModal
+          credential={detailCred}
+          onClose={() => setDetailCred(null)}
+        />
       )}
     </>
   );
