@@ -282,20 +282,41 @@ fn issuer_revoke_emits_event() {
     submit(&env, &h, &holder, 1000);
     h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
 
+    // submit emits "submitted", revoke emits "revoked" — assert the full list.
     assert_eq!(
         env.events().all(),
         vec![
             &env,
             (
                 h.registry_id.clone(),
-                (symbol_short!("revoked"),).into_val(&env),
                 (
-                    holder.clone(),
+                    symbol_short!("proof_reg"),
+                    symbol_short!("submitted"),
                     symbol_short!("kyc"),
-                    h.issuer.clone(),
-                    env.ledger().timestamp()
                 )
                     .into_val(&env),
+                EventProofSubmitted {
+                    holder: holder.clone(),
+                    issuer: h.issuer.clone(),
+                    verified_at: env.ledger().timestamp(),
+                    expiry: 1000,
+                }
+                .into_val(&env),
+            ),
+            (
+                h.registry_id.clone(),
+                (
+                    symbol_short!("proof_reg"),
+                    symbol_short!("revoked"),
+                    symbol_short!("kyc"),
+                )
+                    .into_val(&env),
+                EventProofRevoked {
+                    holder: holder.clone(),
+                    issuer: h.issuer.clone(),
+                    revoked_at: env.ledger().timestamp(),
+                }
+                .into_val(&env),
             ),
         ],
     );

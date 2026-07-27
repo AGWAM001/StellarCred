@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{symbol_short, testutils::Address as _, vec, Address, BytesN, Env};
+use soroban_sdk::{symbol_short, testutils::{Address as _, Events as _}, vec, Address, BytesN, Env, IntoVal};
 
 fn setup(env: &Env) -> (Address, IssuerRegistryClient<'_>) {
     let admin = Address::generate(env);
@@ -69,4 +69,70 @@ fn unknown_issuer_is_invalid() {
     let (_admin, client) = setup(&env);
     let stranger = Address::generate(&env);
     assert!(!client.is_valid_issuer(&stranger, &symbol_short!("kyc")));
+}
+
+#[test]
+fn register_issuer_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(IssuerRegistry, (admin.clone(),));
+    let client2 = IssuerRegistryClient::new(&env, &contract_id);
+
+    let issuer = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[7u8; 64]);
+    let types = vec![&env, symbol_short!("kyc")];
+
+    client2.register_issuer(&issuer, &pubkey, &types);
+
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
+            (
+                contract_id.clone(),
+                (symbol_short!("iss_reg"), symbol_short!("register")).into_val(&env),
+                EventIssuerRegistered {
+                    issuer: issuer.clone(),
+                    pubkey: pubkey.clone(),
+                }
+                .into_val(&env),
+            ),
+        ],
+    );
+}
+
+#[test]
+fn revoke_issuer_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(IssuerRegistry, (admin.clone(),));
+    let client = IssuerRegistryClient::new(&env, &contract_id);
+
+    let issuer = Address::generate(&env);
+    let pubkey = BytesN::from_array(&env, &[1u8; 64]);
+    client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
+    client.revoke_issuer(&issuer);
+
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
+            (
+                contract_id.clone(),
+                (symbol_short!("iss_reg"), symbol_short!("register")).into_val(&env),
+                EventIssuerRegistered {
+                    issuer: issuer.clone(),
+                    pubkey: pubkey.clone(),
+                }
+                .into_val(&env),
+            ),
+            (
+                contract_id.clone(),
+                (symbol_short!("iss_reg"), symbol_short!("revoked")).into_val(&env),
+                EventIssuerRevoked { issuer: issuer.clone() }.into_val(&env),
+            ),
+        ],
+    );
 }
