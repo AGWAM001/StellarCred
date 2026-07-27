@@ -73,7 +73,7 @@ export default function RootLayout({
           <WalletProvider>
             <SiteNav />
             <NetworkBanner />
-            <main id="main-content" className="container">
+            <main id="main-content" tabIndex={-1} className="container">
               {children}
             </main>
             <footer className="site-footer">

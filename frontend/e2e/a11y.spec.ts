@@ -32,5 +32,5 @@ test("skip link is keyboard-reachable and jumps to main content", async ({ page 
   const skipLink = page.locator(".skip-link");
   await expect(skipLink).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.locator("#main-content")).toBeVisible();
+  await expect(page.locator("#main-content")).toBeFocused();
 });

@@ -59,6 +59,7 @@ function VerifyInner() {
   const [selected, setSelected] = useState<CredentialType | null>(
     requiredClaim ?? (TYPES[0]?.[0] ?? null),
   );
+  const radioRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [attributes, setAttributes] = useState<Record<string, string>>({
     date_of_birth: "1995-06-15",
     income: "250000",
@@ -352,20 +353,37 @@ function VerifyInner() {
                 {TYPES.map(([key, m]) => {
                   const on = selected === key;
                   if (locked && key !== requiredClaim) return null;
+                  const visibleTypes = locked
+                    ? TYPES.filter(([k]) => k === requiredClaim)
+                    : TYPES;
                   return (
                     <div
                       key={key}
+                      ref={(el) => { radioRefs.current[key] = el; }}
                       onClick={() => { if (!locked) setSelected(key); }}
                       onKeyDown={(e) => {
-                        if (!locked && (e.key === "Enter" || e.key === " ")) {
+                        if (locked) return;
+                        if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           setSelected(key);
+                        } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+                          e.preventDefault();
+                          const i = visibleTypes.findIndex(([k]) => k === key);
+                          const [nextKey] = visibleTypes[(i + 1) % visibleTypes.length];
+                          setSelected(nextKey);
+                          radioRefs.current[nextKey]?.focus();
+                        } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+                          e.preventDefault();
+                          const i = visibleTypes.findIndex(([k]) => k === key);
+                          const [prevKey] = visibleTypes[(i - 1 + visibleTypes.length) % visibleTypes.length];
+                          setSelected(prevKey);
+                          radioRefs.current[prevKey]?.focus();
                         }
                       }}
                       role="radio"
                       aria-checked={on}
                       aria-label={m.title}
-                      tabIndex={locked && key !== requiredClaim ? -1 : 0}
+                      tabIndex={on ? 0 : -1}
                       style={{
                         padding: "0.75rem 0.9rem",
                         borderRadius: "var(--radius)",
