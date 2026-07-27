@@ -2,14 +2,18 @@ FROM node:20-slim
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --omit=dev
+# Copy package files and install all dependencies (including dev for build)
+COPY package.json package-lock.json ./
+RUN npm ci
 
+# Copy source and TypeScript config
 COPY src ./src
+COPY tsconfig.json ./
 
-ENV DB_CLIENT=postgres
-ENV PORT=4100
+# Build TypeScript source
+RUN npm run build
 
-EXPOSE 4100
+# Use the compiled entrypoint
+EXPOSE 3001
 
-CMD ["node", "src/index.js"]
+CMD ["node", "dist/index.js"]
