@@ -5,12 +5,12 @@ on:
     types: [opened, synchronize, reopened, closed]
     paths:
       - 'frontend/**'
-      - '.github/workflows/preview-deployment.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
-  # -------------------------------------------------------------
-  # JOB 1: Deploy or Update Preview URL on Open / Sync / Reopen
-  # -------------------------------------------------------------
   deploy-preview:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
@@ -24,10 +24,19 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: pnpm install --frozen-lockfile
 
       - name: Install Vercel CLI
-        run: npm install --global vercel@latest
+        run: pnpm add -g vercel
 
       - name: Pull Vercel Environment Information
         working-directory: ./frontend
@@ -42,9 +51,8 @@ jobs:
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          # SAFE DUMMY / TESTNET CONFIG (no production secrets required)
           NEXT_PUBLIC_STELLAR_NETWORK: "testnet"
-          NEXT_PUBLIC_CONTRACT_ID: "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+          NEXT_PUBLIC_CONTRACT_ID: "CB2R3O43TX3G3N3X4Y5Z6A7B8C9D0E1F2G3H4I5J6K7L8M9N0O"
 
       - name: Deploy Project Artifacts to Vercel
         id: deploy
@@ -56,22 +64,23 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      - name: Comment Preview URL on PR
+      - name: Comment PR with Preview Link
         uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const previewUrl = '${{ steps.deploy.outputs.preview_url }}';
-            const issue_number = context.payload.pull_request.number;
-            const body = `### 🚀 Preview Deployment Ready!\n\n| Name | Link |\n| --- | --- |\n| **Latest Preview** | [${previewUrl}](${previewUrl}) |\n\n*Built automatically with safe testnet configurations.*`;
-
+            const previewUrl = process.env.PREVIEW_URL;
+            const issue_number = context.issue.number;
+            const body = `### 🚀 Preview Deployment Ready!\n\n| Name | Link |\n| --- | --- |\n| **Latest Deploy** | [${previewUrl}](${previewUrl}) |\n\n*Built automatically for commit ${context.sha.substring(0, 7)}*`;
+            
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issue_number,
             });
 
-            const botComment = comments.find(c => c.body.includes('🚀 Preview Deployment Ready!'));
+            const botComment = comments.find(c => c.user.type === 'Bot' && c.body.includes('🚀 Preview Deployment Ready!'));
 
             if (botComment) {
               await github.rest.issues.updateComment({
@@ -89,23 +98,17 @@ jobs:
               });
             }
 
-  # -------------------------------------------------------------
-  # JOB 2: Teardown Preview Environment on PR Close
-  # -------------------------------------------------------------
   teardown-preview:
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Install Vercel CLI
-        run: npm install --global vercel@latest
+        run: pnpm add -g vercel
 
       - name: Remove Preview Deployment
-        working-directory: ./frontend
-        run: |
-          vercel remove ${{ github.head_ref }} --yes --token=${{ secrets.VERCEL_TOKEN }} || true
+        run: vercel remove ${{ secrets.VERCEL_PROJECT_ID }} --safe --yes --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
