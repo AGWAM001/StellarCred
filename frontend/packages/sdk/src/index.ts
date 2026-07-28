@@ -298,6 +298,38 @@ export async function hasClaim(
 }
 
 /**
+ * Returns the full claim record (valid, verifiedAt, expiry) for a wallet and
+ * credential type, or `null` if the wallet has no current proof of that type.
+ *
+ * Unlike {@link hasClaim} which only returns a boolean, this gives UIs the
+ * verified-at timestamp and expiry so they can show claim freshness without
+ * pulling every claim type via {@link getClaims}.
+ *
+ * Respects `trustedIssuers` — only proofs from the given issuers are accepted.
+ *
+ * @example
+ * const claim = await getClaim("G1ABC…", "kyc");
+ * if (claim) {
+ *   console.log(`Verified at: ${new Date(claim.verifiedAt * 1000)}`);
+ *   console.log(`Expires: ${new Date(claim.expiry * 1000)}`);
+ * }
+ *
+ * @example
+ * // Only accept KYC from a trusted issuer
+ * const claim = await getClaim("G1ABC…", "kyc", {
+ *   trustedIssuers: ["G...PERSONA_ISSUER"],
+ * });
+ */
+export async function getClaim(
+  wallet: string,
+  claimType: string,
+  opts?: Pick<ClaimOptions, "trustedIssuers">,
+): Promise<{ valid: boolean; verifiedAt: number; expiry: number } | null> {
+  warnIfMissingRegistryIdOnce();
+  return readIsVerified(wallet, claimType, opts?.trustedIssuers);
+}
+
+/**
  * Returns every active claim a wallet has proven, across all known credential
  * types. Useful for profile pages and protocol dashboards.
  */
@@ -569,6 +601,7 @@ export const StellarCred = {
   healthCheck,
   isConfigured,
   hasClaim,
+  getClaim,
   getClaims,
   buildVerifyUrl,
   parseReturnParams,
