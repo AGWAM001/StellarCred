@@ -149,6 +149,12 @@ export interface Client {
   check_claim: ({holder, credential_type, min_threshold, trusted_issuers}: {holder: string, credential_type: string, min_threshold: Option<u64>, trusted_issuers: Option<Array<string>>}, options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
 
   /**
+   * Construct and simulate a get_record transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns the stored record as-is (no validity computation); None when absent
+   */
+  get_record: ({holder, credential_type}: {holder: string, credential_type: string}, options?: MethodOptions) => Promise<AssembledTransaction<Option<ProofRecord>>>
+
+  /**
    * Construct and simulate a is_verified transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Returns `(is_currently_valid, verified_at, expiry)`. `is_currently_valid`
    * accounts for expiry against the current ledger time.
@@ -238,6 +244,7 @@ export class Client extends ContractClient {
         upgrade: this.txFromJSON<null>,
         set_admin: this.txFromJSON<null>,
         check_claim: this.txFromJSON<boolean>,
+        get_record: this.txFromJSON<Option<ProofRecord>>,
         is_verified: this.txFromJSON<readonly [boolean, u64, u64]>,
         revoke_proof: this.txFromJSON<null>,
         submit_proof: this.txFromJSON<null>,

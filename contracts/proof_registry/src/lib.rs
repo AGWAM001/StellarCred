@@ -378,6 +378,18 @@ impl ProofRegistry {
         }
     }
 
+    /// Returns the stored `ProofRecord` as-is (no validity computation), or `None`
+    /// if absent. Pure read: does not extend TTL.
+    pub fn get_record(
+        env: Env,
+        holder: Address,
+        credential_type: Symbol,
+    ) -> Option<ProofRecord> {
+        env.storage()
+            .persistent()
+            .get::<_, ProofRecord>(&DataKey::Proof(holder, credential_type))
+    }
+
     /// `None` trusts any registered issuer (unchanged default behaviour). `Some`
     /// (including an empty list) requires `issuer` to be a member — an empty
     /// list therefore rejects every issuer. `issuer` is only `None` for a

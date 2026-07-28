@@ -947,3 +947,109 @@ fn legacy_record_missing_issuer_key_fails_to_read() {
     let result = h.registry.try_is_verified(&holder, &symbol_short!("kyc"), &None);
     assert!(result.is_err());
 }
+
+// ── get_record tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn get_record_returns_full_proof_record_when_present() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+
+    let record_opt = h.registry.get_record(&holder, &symbol_short!("kyc"));
+    assert!(record_opt.is_some());
+    let record = record_opt.unwrap();
+
+    assert_eq!(record.verified_at, env.ledger().timestamp());
+    assert_eq!(record.expiry, 1000);
+    assert_eq!(record.threshold, None);
+    assert_eq!(record.revoked, false);
+    assert_eq!(record.issuer, Some(h.issuer.clone()));
+}
+
+#[test]
+fn get_record_returns_none_when_absent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+
+    // Stranger has no record.
+    assert!(h.registry.get_record(&stranger, &symbol_short!("kyc")).is_none());
+    // Holder has no record for a different credential type.
+    assert!(h.registry.get_record(&holder, &symbol_short!("funds")).is_none());
+}
+
+#[test]
+fn get_record_populates_threshold_for_parameterised_credentials() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+
+    let ir_id = env.register(IssuerRegistry, (admin.clone(),));
+    let ir = IssuerRegistryClient::new(&env, &ir_id);
+    let issuer = Address::generate(&env);
+    ir.register_issuer(
+        &issuer,
+        &pubkey_from(&env, FUNDS_PUBLIC_INPUTS),
+        &vec![&env, symbol_short!("funds")],
+    );
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
+    CredentialVerifierClient::new(&env, &v_id)
+        .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
+    let registry = ProofRegistryClient::new(&env, &pr_id);
+    let holder = Address::generate(&env);
+
+    registry.submit_proof(
+        &holder,
+        &issuer,
+        &symbol_short!("funds"),
+        &Bytes::from_slice(&env, FUNDS_PROOF),
+        &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &5000,
+    );
+
+    let record = registry
+        .get_record(&holder, &symbol_short!("funds"))
+        .expect("Record should exist");
+
+    assert_eq!(record.verified_at, env.ledger().timestamp());
+    assert_eq!(record.expiry, 5000);
+    assert_eq!(record.threshold, Some(200_000));
+    assert_eq!(record.revoked, false);
+    assert_eq!(record.issuer, Some(issuer));
+}
+
+#[test]
+fn get_record_returns_raw_record_without_validity_check() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+
+    // Revoke the proof via issuer.
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+
+    // Advance ledger timestamp past expiry.
+    env.ledger().with_mut(|li| li.timestamp = 2000);
+
+    // get_record returns the stored record as-is without validity computation.
+    let record = h
+        .registry
+        .get_record(&holder, &symbol_short!("kyc"))
+        .expect("Record should be retrieved as-is");
+
+    assert_eq!(record.expiry, 1000);
+    assert_eq!(record.revoked, true);
+    assert_eq!(record.issuer, Some(h.issuer.clone()));
+}
+
