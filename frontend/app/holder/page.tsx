@@ -742,7 +742,9 @@ function ProofFlow({
   const { networkMismatch } = useWallet();
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
+
     toast.info(`Generating proof for ${cred.title}…`);
     (async () => {
       try {
@@ -756,8 +758,9 @@ function ProofFlow({
         const witness = await computeWitness(
           cred.type,
           cred as unknown as Record<string, unknown>,
+          signal,
         );
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         // Stage 2: prove (browser WASM)
         setStage("proving");
@@ -770,29 +773,29 @@ function ProofFlow({
         const result = await proveWithBackend(
           cred.type,
           witness,
+          signal,
           (step) => {
-            if (!cancelled) setStage(step);
+            if (!signal.aborted) setStage(step);
           }
         );
         clearInterval(timerRef.current!);
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         setProof(result);
         setStage("generated");
         toast.success(`Proof generated for ${cred.title}`);
       } catch (e) {
         clearInterval(timerRef.current!);
-        if (!cancelled) {
-          const parsed = parseContractError((e as Error).message);
-          setError(parsed);
-          setErrorPhase("proving");
-          setStage("error");
-          toast.error(`Proof generation failed: ${parsed.friendly}`);
-        }
+        if (signal.aborted) return;
+        const parsed = parseContractError((e as Error).message);
+        setError(parsed);
+        setErrorPhase("proving");
+        setStage("error");
+        toast.error(`Proof generation failed: ${parsed.friendly}`);
       }
     })();
     return () => {
-      cancelled = true;
+      controller.abort();
       clearInterval(timerRef.current!);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
