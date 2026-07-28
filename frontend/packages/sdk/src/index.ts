@@ -122,7 +122,7 @@ function warnIfMissingRegistryIdOnce(): void {
   _warnedMissingRegistryId = true;
   // eslint-disable-next-line no-console
   console.warn(
-    "[StellarCred] hasClaim()/getClaims() called with no `registryId` configured. " +
+    "[StellarCred] hasClaim()/getClaim()/getClaims() called with no `registryId` configured. " +
       "Every check will silently return false/[] until you set STELLARCRED_REGISTRY_ID " +
       "(or NEXT_PUBLIC_PROOF_REGISTRY_ID) or call StellarCred.configure({ registryId }). " +
       "Call StellarCred.healthCheck() to diagnose. This warning only logs in development.",
@@ -326,7 +326,8 @@ export async function getClaim(
   opts?: Pick<ClaimOptions, "trustedIssuers">,
 ): Promise<{ valid: boolean; verifiedAt: number; expiry: number } | null> {
   warnIfMissingRegistryIdOnce();
-  return readIsVerified(wallet, claimType, opts?.trustedIssuers);
+  const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers);
+  return r && r.valid ? r : null;
 }
 
 /**

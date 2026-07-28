@@ -90,7 +90,7 @@ if (claim) {
 }
 
 // Restrict to a trusted issuer
-const claim = await StellarCred.getClaim(wallet, "kyc", {
+const trustedClaim = await StellarCred.getClaim(wallet, "kyc", {
   trustedIssuers: ["G...PERSONA_ISSUER"],
 });
 ```
