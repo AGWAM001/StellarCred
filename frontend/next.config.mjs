@@ -93,18 +93,8 @@ const nextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
         ],
       },
-      {
-        source: "/api/:path*",
-        headers: [
-          {
-            key: "Access-Control-Allow-Origin",
-            value: process.env.APP_ORIGIN || "http://localhost:3000",
-          },
-          { key: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS" },
-          { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization" },
-          { key: "Vary", value: "Origin" },
-        ],
-      },
+      // CORS headers for /api/* are handled by middleware.ts (OPTIONS preflight
+      // returns 204, all other methods get headers appended to the response).
     ];
   },
 };
