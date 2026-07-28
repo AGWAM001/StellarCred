@@ -54,6 +54,7 @@ function VerifyInner() {
     threshold_years: searchParams.get("threshold_years") ?? (claimParam === "age" ? minThresholdParam : undefined),
     threshold: searchParams.get("threshold") ?? (claimParam === "funds" || claimParam === "income" ? minThresholdParam : undefined),
     restricted: searchParams.get("restricted")?.split(",").filter(Boolean) ?? undefined,
+    mode: searchParams.get("mode") ?? undefined,
   };
 
   const [selected, setSelected] = useState<CredentialType | null>(
@@ -72,6 +73,10 @@ function VerifyInner() {
   const [requestingDomain, setRequestingDomain] = useState("");
   const [done, setDone] = useState(false);
   const justIssuedClaims = useRef<string[]>([]);
+  // Jurisdiction mode: "0" = denylist (block), "1" = allowlist (allow)
+  const [jurisdictionMode, setJurisdictionMode] = useState<string>(
+    claimParamsFromUrl.mode ?? "0",
+  );
 
   useEffect(() => {
     if (returnUrl) {
@@ -170,7 +175,7 @@ function VerifyInner() {
   }, [personaInquiryId, address]);
 
   function setAttr(key: string, val: string) {
-    setAttributes((a) => ({ ...a, [key]: val }));
+    setAttributes((a: Record<string, string>) => ({ ...a, [key]: val }));
   }
 
   // Where the user is sent after a successful issue.
@@ -227,7 +232,10 @@ function VerifyInner() {
         issuerName: "StellarCred Authority",
         expiry,
         attributes,
-        claimParams: claimParamsFromUrl,
+        claimParams: {
+          ...claimParamsFromUrl,
+          ...(selected === "jurisdiction" ? { mode: jurisdictionMode } : {}),
+        },
       };
       const res = await fetch("/api/issue", {
         method: "POST",
@@ -469,12 +477,36 @@ function VerifyInner() {
                       )}
                       {on && key === "jurisdiction" && (
                         <div style={{ marginTop: "0.75rem" }} onClick={(e) => e.stopPropagation()}>
+                          <label className="field-label" style={{ marginBottom: "0.35rem" }}>Mode</label>
+                          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${jurisdictionMode === "0" ? "btn-primary" : "btn-outline"}`}
+                              style={{ flex: 1, fontSize: "0.78rem", padding: "0.4rem 0.75rem" }}
+                              onClick={() => setJurisdictionMode("0")}
+                            >
+                              Block countries
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${jurisdictionMode === "1" ? "btn-primary" : "btn-outline"}`}
+                              style={{ flex: 1, fontSize: "0.78rem", padding: "0.4rem 0.75rem" }}
+                              onClick={() => setJurisdictionMode("1")}
+                            >
+                              Allow countries
+                            </button>
+                          </div>
                           <label className="field-label">{m.attribute}</label>
                           <select value={attributes.country_code} onChange={(e) => setAttr("country_code", e.target.value)}>
                             {COUNTRIES.map((c) => (
                               <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
                             ))}
                           </select>
+                          <p className="faint" style={{ fontSize: "0.72rem", margin: "0.35rem 0 0" }}>
+                            {jurisdictionMode === "0"
+                              ? "Proves your country is NOT in the restricted list — your country is never revealed on-chain."
+                              : "Proves your country IS in the allowed list — your country is never revealed on-chain."}
+                          </p>
                         </div>
                       )}
                     </div>

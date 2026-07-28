@@ -33,11 +33,20 @@ C=$(commit 250000 99)
   echo "threshold = \"200000\""; node "$SCRIPTS/sign.js" "$C"; } \
   > "$ROOT/income_proof/Prover.toml"
 
-echo "jurisdiction_proof..."
+echo "jurisdiction_proof (denylist)..."
 C=$(commit 566 77)
 { echo "country_code = \"566\""; echo "salt = \"77\""; echo "commitment = \"$C\""; \
-  echo "restricted = [\"840\", \"364\", \"408\", \"0\", \"0\", \"0\", \"0\", \"0\"]"; node "$SCRIPTS/sign.js" "$C"; } \
+  echo "restricted = [\"840\", \"364\", \"408\", \"0\", \"0\", \"0\", \"0\", \"0\"]"; \
+  echo "mode = \"0\""; node "$SCRIPTS/sign.js" "$C"; } \
   > "$ROOT/jurisdiction_proof/Prover.toml"
+
+echo "jurisdiction_proof (allowlist)..."
+C=$(commit 566 77)
+{ echo "country_code = \"566\""; echo "salt = \"77\""; echo "commitment = \"$C\""; \
+  echo "restricted = [\"566\", \"276\", \"356\", \"0\", \"0\", \"0\", \"0\", \"0\"]"; \
+  echo "mode = \"1\""; node "$SCRIPTS/sign.js" "$C"; } \
+  > "$ROOT/jurisdiction_proof/Prover_allowlist.toml"
 
 echo "done. demo issuer public key:"
 node "$SCRIPTS/sign.js" --pubkey
+

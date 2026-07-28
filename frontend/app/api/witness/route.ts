@@ -27,6 +27,8 @@ interface ClaimParams {
   threshold_years?: string;
   threshold?: string;
   restricted?: string[];
+  /** "0" = denylist (default), "1" = allowlist */
+  mode?: string;
 }
 
 function buildInputs(type: string, cred: Record<string, unknown>): InputMap {
@@ -64,6 +66,7 @@ function buildInputs(type: string, cred: Record<string, unknown>): InputMap {
         ...sigInputs,
         commitment,
         restricted: normalizeRestricted(params.restricted ?? DEFAULT_RESTRICTED),
+        mode: params.mode ?? "0",
       };
     case "funds":
       return {
