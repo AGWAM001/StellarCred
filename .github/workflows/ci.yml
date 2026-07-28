@@ -88,6 +88,9 @@ jobs:
   frontend:
     name: Frontend typecheck & build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     defaults:
       run:
         working-directory: frontend
@@ -165,6 +168,28 @@ jobs:
 
       - name: Build
         run: pnpm build
+        env:
+          # Dummy values so the build doesn't error on missing env vars
+          NEXT_PUBLIC_PROOF_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000001
+          NEXT_PUBLIC_ISSUER_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000002
+          NEXT_PUBLIC_CREDENTIAL_VERIFIER_ID: C000000000000000000000000000000000000000000000000000000000000003
+          NEXT_PUBLIC_GATED_POOL_ID: C000000000000000000000000000000000000000000000000000000000000004
+          NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
+          NEXT_PUBLIC_STELLAR_NETWORK: testnet
+          NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
 
       - name: Run axe-core accessibility checks
         run: pnpm test:e2e
+
+      - name: Check bundle size budget
+        run: pnpm size
+
+      - name: Report bundle size on PR
+        if: github.event_name == 'pull_request'
+        uses: andresz1/size-limit-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          skip_step: build
+          directory: frontend
+
+>>>>>>> 1e3a72f (feat(frontend): add bundle size budget and CI regression check (#139))
