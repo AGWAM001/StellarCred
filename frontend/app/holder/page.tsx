@@ -27,6 +27,7 @@ import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import { truncateHash } from "@/lib/format";
 import { EXPLORER_TX } from "@/lib/stellar";
 import { computeWitness, proveWithBackend } from "@/lib/proof";
+import { useWarmProver } from "@/lib/use-warm-prover";
 import {
   submitProof,
   submitProofsBatch,
@@ -231,6 +232,14 @@ function HolderInner() {
   const displayCreds = isPreview ? PREVIEW_CREDENTIALS : creds;
   const unproved = displayCreds.filter((c) => proofStatus(c) !== "proved");
   const proved   = displayCreds.filter((c) => proofStatus(c) === "proved");
+
+  // Warm the UltraHonk backend for whatever credential types the user still
+  // needs to prove, in the background, once the wallet is actually connected
+  // (never in preview mode — there's nothing real to prove yet). Only the
+  // types actually present in `unproved` are warmed, not all seven circuits,
+  // to avoid paying wasm-init cost for types the user has no credential for.
+  const unprovedTypes = Array.from(new Set(unproved.map((c) => c.type)));
+  useWarmProver(unprovedTypes, Boolean(address));
 
   // Credentials eligible for "Prove all" (unproved or expired), capped at 5.
   // Deduplicate by type: the contract writes one slot per (holder, credential_type),
