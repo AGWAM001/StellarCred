@@ -1,7 +1,7 @@
 {
   "circuit": "age_proof",
   "noir_version": "1.0.0-beta.9",
-  "bb_version": "0.87.0",
+  "bb_version": "v0.87.0",
   "witness": {
     "date_of_birth": "3650",
     "salt": "12345",
@@ -213,5 +213,5 @@
     "0x0000000000000000000000000000000000000000000000000000000000000012"
   ],
   "vk_hash_algo": "sha256",
-  "vk_hash": "29fad5734155e6e5434737f8ce71a218d76a9c55e479c875ec0982ce891f8502"
+  "vk_hash": "59c05b19612ba45c6d22e3156241a061f70d2b8b71f18bdb225eb3ba9e7a5642"
 }
