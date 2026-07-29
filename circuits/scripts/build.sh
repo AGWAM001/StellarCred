@@ -30,6 +30,7 @@ type_of() {
     income_proof) echo income ;;
     jurisdiction_proof) echo jurisdiction ;;
     funds_proof) echo funds ;;
+    accreditation_proof) echo accreditation ;;
     *) echo "$1" ;;
   esac
 }
@@ -47,8 +48,11 @@ build() {
 
   local type
   type="$(type_of "$name")"
-  local json="target/${name}.json"
-  local gz="target/${name}.gz"
+  # nargo resolves the output dir to the *workspace* root (circuits/target/),
+  # not a per-member target/, since these are workspace members — not bb's
+  # target, which is always relative to --output_path below.
+  local json="$ROOT/target/${name}.json"
+  local gz="$ROOT/target/${name}.gz"
 
   # The commit helper is only ever executed (to derive commitments), never
   # proven — compile and stage its JSON, nothing else.
@@ -92,5 +96,5 @@ build() {
 if [ "$#" -gt 0 ]; then
   for n in "$@"; do build "$n"; done
 else
-  for n in commit kyc_proof age_proof income_proof jurisdiction_proof funds_proof; do build "$n"; done
+  for n in commit kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof; do build "$n"; done
 fi
