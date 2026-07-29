@@ -28,6 +28,14 @@ const nextConfig = {
   webpack: (config, { webpack, isServer }) => {
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
 
+    // lib/wallet.ts's WalletConnectModule pulls in @walletconnect/sign-client
+    // -> @walletconnect/logger -> pino, which conditionally requires
+    // pino-pretty (a dev-only pretty-printing transport, never used in the
+    // browser bundle we ship). It's not a dependency here, so webpack can't
+    // statically resolve it — aliasing it to false is pino's own documented
+    // fix for bundlers (https://github.com/pinojs/pino/blob/main/docs/bundling.md).
+    config.resolve.alias = { ...config.resolve.alias, "pino-pretty": false };
+
     // Buffer/process polyfills are only needed in the browser bundle.
     // Applying ProvidePlugin on the server replaces Node's real `process`
     // with `process/browser` (env: {}), which hides server-only env vars
@@ -75,11 +83,24 @@ const nextConfig = {
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
               "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data:",
+              // Wallet icons for the Stellar Wallets Kit picker: stellar.creit.tech hosts
+              // most of them (Albedo/Freighter/xBull/Rabet/Lobstr/Hana/Klever/WalletConnect),
+              // storage.herewallet.app hosts HOT Wallet's, explorer-api.walletconnect.com
+              // is WalletConnect's own wallet list if its QR pairing screen is opened.
+              // Verified against the actual requests the picker modal makes in a real
+              // browser (next build && next start), not just package source greps.
+              "img-src 'self' data: https://stellar.creit.tech https://storage.herewallet.app https://explorer-api.walletconnect.com",
+              // verify.walletconnect.{com,org} is WalletConnect's domain-verification
+              // iframe (loaded by @walletconnect/sign-client); without this it's
+              // silently blocked and WalletConnect connect attempts hang.
+              "frame-src 'self' https://verify.walletconnect.com https://verify.walletconnect.org",
               // contracts.ts ("use client") calls getAccount / prepareTransaction /
               // sendTransaction against the Soroban RPC from the browser — must be
               // allowed here or proof submission and on-chain verification break.
-              `connect-src 'self' https://soroban-testnet.stellar.org https://soroban-mainnet.stellar.org${
+              // The relay/explorer/verify entries are required by lib/wallet.ts's
+              // WalletConnectModule — hardcoded by @walletconnect/core and
+              // @walletconnect/modal-core, not configurable via env.
+              `connect-src 'self' https://soroban-testnet.stellar.org https://soroban-mainnet.stellar.org wss://relay.walletconnect.com wss://relay.walletconnect.org https://explorer-api.walletconnect.com https://verify.walletconnect.com https://verify.walletconnect.org${
                 process.env.NEXT_PUBLIC_RPC_URL ? " " + process.env.NEXT_PUBLIC_RPC_URL : ""
               }`,
             ].join("; ") + ";",
