@@ -91,6 +91,10 @@ const nextConfig = {
             value: "max-age=63072000; includeSubDomains",
           },
           { key: "X-Frame-Options", value: "DENY" },
+          // components/QrScanner.tsx uses getUserMedia() for camera-based QR
+          // scanning (/verify and /holder). Explicitly scoped to this origin —
+          // no embedding context should be able to request it.
+          { key: "Permissions-Policy", value: "camera=(self)" },
         ],
       },
       {

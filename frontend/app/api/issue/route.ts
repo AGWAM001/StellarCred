@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomBytes } from "crypto";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { IssuerClient, CREDENTIAL_TYPES, type CredentialType, type ClaimParams } from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
-import { logger, stripSensitiveFields } from "../../../lib/logger";
+import { logger, stripSensitiveFields, resolveRequestId } from "../../../lib/logger";
 
 // Server-side only — never shipped to the browser.
 // Set ISSUER_PRIVATE_KEY in .env.local to the 64-char hex secp256k1 private
@@ -14,6 +13,13 @@ import { logger, stripSensitiveFields } from "../../../lib/logger";
 const DEMO_SK_HEX =
   process.env.ISSUER_PRIVATE_KEY ||
   Buffer.from(sha256(new TextEncoder().encode("stellarcred-demo-issuer"))).toString("hex");
+
+if (!process.env.ISSUER_PRIVATE_KEY) {
+  logger.warn(
+    stripSensitiveFields({ event: "demo_issuer_key_active" }),
+    "USING PUBLIC DEMO ISSUER KEY — not for production. Set ISSUER_PRIVATE_KEY to use a real issuer key.",
+  );
+}
 
 const issuer = new IssuerClient({ privateKey: DEMO_SK_HEX });
 const SIM_ACCOUNT =
@@ -167,8 +173,9 @@ async function verifyWithPlaid(): Promise<{
   error?: string;
 }> {
   if (!process.env.PLAID_ACCESS_TOKEN) {
-    console.warn(
-      "[StellarCred] PLAID_ACCESS_TOKEN not set — running in mock mode, returning mock balance $50,000",
+    logger.warn(
+      stripSensitiveFields({ event: "plaid_mock_mode", requestId }),
+      "PLAID_ACCESS_TOKEN not set — returning mock balance $50,000",
     );
     return { ok: true, balance: 50000 };
   }
@@ -192,7 +199,11 @@ async function verifyWithPlaid(): Promise<{
   });
 
   const result = await response.json();
-  console.log("[Plaid]", response.status, result.error_code ?? "ok");
+  logger.info(stripSensitiveFields({
+    event: "plaid_response",
+    outcome: result.error_code ?? "ok",
+    requestId,
+  }));
 
   if (!response.ok || result.error_code) {
     return { ok: false, error: result.error_message ?? "Plaid error" };
@@ -217,7 +228,7 @@ async function verifyWithPlaid(): Promise<{
 const VALID_TYPES: readonly string[] = CREDENTIAL_TYPES;
 
 export async function POST(req: NextRequest) {
-  const requestId = randomBytes(16).toString("hex");
+  const requestId = resolveRequestId(req.headers.get("x-request-id"));
   const startTime = Date.now();
   let outcome: "success" | "failure" = "failure";
   let credentialTypes: string[] = [];
@@ -350,20 +361,20 @@ export async function POST(req: NextRequest) {
   if (process.env.NEXT_PUBLIC_ISSUER_REGISTRY_ID) {
     const registered = await fetchIssuerPubkey(issuerId, SIM_ACCOUNT);
     if (!registered) {
-      return NextResponse.json(
+      return sendResponse(NextResponse.json(
         { error: "Selected issuer is not registered on IssuerRegistry." },
         { status: 400 },
-      );
+      ));
     }
     const localKey = localIssuerPubkeyBytes();
     if (!Buffer.from(registered).equals(localKey)) {
-      return NextResponse.json(
+      return sendResponse(NextResponse.json(
         {
           error:
             "ISSUER_PRIVATE_KEY does not match the selected issuer's registered public key on IssuerRegistry. Choose the issuer that matches your server key, or update ISSUER_PRIVATE_KEY.",
         },
         { status: 403 },
-      );
+      ));
     }
   }
 
@@ -478,7 +489,7 @@ export async function POST(req: NextRequest) {
   // truth — we overwrite any user-supplied balance with the verified figure.
   const needsFunds = credentialTypes.includes("funds");
   if (needsFunds) {
-    const plaid = await verifyWithPlaid();
+    const plaid = await verifyWithPlaid(requestId);
     if (!plaid.ok) {
       logger.info(
         stripSensitiveFields({

@@ -49,8 +49,11 @@ build() {
 
   local type
   type="$(type_of "$name")"
-  local json="target/${name}.json"
-  local gz="target/${name}.gz"
+  # nargo resolves the output dir to the *workspace* root (circuits/target/),
+  # not a per-member target/, since these are workspace members — not bb's
+  # target, which is always relative to --output_path below.
+  local json="$ROOT/target/${name}.json"
+  local gz="$ROOT/target/${name}.gz"
 
   # The commit helpers are only ever executed (to derive commitments), never
   # proven — compile and stage their JSON, nothing else.
