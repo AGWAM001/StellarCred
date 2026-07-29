@@ -21,6 +21,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { Check } from "@/components/Check";
 import { ConfigBanner } from "@/components/ConfigBanner";
+import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import { truncateHash } from "@/lib/format";
 import { EXPLORER_TX } from "@/lib/stellar";
 import { computeWitness, proveWithBackend } from "@/lib/proof";
@@ -43,6 +44,7 @@ import {
 import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
 import { usePreviewMode } from "@/lib/wallet-context";
 import CopyButton from "@/components/CopyButton";
+import { useToast } from "@/components/Toast";
 
 // Parse "90 days", "30 days" etc from the credential's expiry string.
 function credTtlSecs(cred: Credential): number {
@@ -119,7 +121,7 @@ function CredCard({
         </div>
 
         {/* right: badges + button + trash */}
-        <div className="row" style={{ gap: "0.4rem", flexShrink: 0 }}>
+        <div className="card-actions">
           {isPreview && <Badge variant="pending">Preview</Badge>}
           <Badge variant="verified" dot={false}>Held</Badge>
           {status === "proved" && <Badge variant="verified" dot={false}>On-chain</Badge>}
@@ -409,9 +411,12 @@ function ProofFlow({
   // elapsed time for the proving stage
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const toast = useToast();
+  const { networkMismatch } = useWallet();
 
   useEffect(() => {
     let cancelled = false;
+    toast.info(`Generating proof for ${cred.title}…`);
     (async () => {
       try {
         // Stage 1: witness (server)
@@ -438,11 +443,14 @@ function ProofFlow({
 
         setProof(result);
         setStage("generated");
+        toast.success(`Proof generated for ${cred.title}`);
       } catch (e) {
         clearInterval(timerRef.current!);
         if (!cancelled) {
-          setError(parseContractError((e as Error).message));
+          const parsed = parseContractError((e as Error).message);
+          setError(parsed);
           setStage("error");
+          toast.error(`Proof generation failed: ${parsed.friendly}`);
         }
       }
     })();
@@ -450,11 +458,13 @@ function ProofFlow({
       cancelled = true;
       clearInterval(timerRef.current!);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cred]);
 
   async function onSubmit() {
-    if (!proof) return;
+    if (!proof || networkMismatch) return;
     setStage("submitting");
+    toast.info(`Submitting proof for ${cred.title} to Stellar…`);
     try {
       const hash = await submitProof({
         holder,
@@ -467,9 +477,12 @@ function ProofFlow({
       setTxHash(hash);
       onProved(hash);
       setStage("confirmed");
+      toast.success(`Proof confirmed on-chain for ${cred.title}`, { txHash: hash });
     } catch (e) {
-      setError(parseContractError((e as Error).message));
+      const parsed = parseContractError((e as Error).message);
+      setError(parsed);
       setStage("error");
+      toast.error(`Submission failed: ${parsed.friendly}`);
     }
   }
 
@@ -581,14 +594,28 @@ function ProofFlow({
 
         {/* CTA */}
         {stage === "generated" && (
-          <button
-            className="btn btn-primary"
-            style={{ marginTop: "1.5rem", width: "100%" }}
-            onClick={onSubmit}
-          >
-            Submit to Stellar
-            <IconArrowRight size={15} />
-          </button>
+          <>
+            {networkMismatch && (
+              <div style={{ marginTop: "1.5rem" }}>
+                <NetworkMismatchBanner />
+              </div>
+            )}
+            <button
+              className="btn btn-primary"
+              style={{
+                marginTop: networkMismatch ? 0 : "1.5rem",
+                width: "100%",
+                opacity: networkMismatch ? 0.5 : 1,
+                cursor: networkMismatch ? "not-allowed" : "pointer",
+              }}
+              onClick={onSubmit}
+              disabled={networkMismatch}
+              title={networkMismatch ? "Switch your wallet to the correct network to submit" : undefined}
+            >
+              Submit to Stellar
+              <IconArrowRight size={15} />
+            </button>
+          </>
         )}
 
         {stage === "error" && error && (
@@ -700,6 +727,8 @@ function BatchProofFlow({
   const [txHash, setTxHash] = useState("");
   const [batchError, setBatchError] = useState<ContractError | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  const toast = useToast();
+  const { networkMismatch } = useWallet();
   const generatedProofs = useRef<Array<{ proof: Uint8Array; publicInputs: Uint8Array } | null>>(
     creds.map(() => null),
   );
@@ -713,6 +742,7 @@ function BatchProofFlow({
   // Generate proofs for all credentials in sequence.
   useEffect(() => {
     let cancelled = false;
+    toast.info(`Generating ${creds.length} proofs…`);
 
     (async () => {
       for (let i = 0; i < creds.length; i++) {
@@ -737,7 +767,9 @@ function BatchProofFlow({
             return next;
           });
           setBatchStage("error");
-          setBatchError(parseContractError((e as Error).message));
+          const parsed = parseContractError((e as Error).message);
+          setBatchError(parsed);
+          toast.error(`Proof generation failed for ${cred.title}: ${parsed.friendly}`);
           return;
         }
 
@@ -772,7 +804,9 @@ function BatchProofFlow({
             return next;
           });
           setBatchStage("error");
-          setBatchError(parseContractError((e as Error).message));
+          const parsed = parseContractError((e as Error).message);
+          setBatchError(parsed);
+          toast.error(`Proof generation failed for ${cred.title}: ${parsed.friendly}`);
           return;
         }
 
@@ -792,14 +826,20 @@ function BatchProofFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // All proofs ready — fire the batch submission automatically.
+  // All proofs ready — fire the batch submission automatically, but never
+  // while the connected wallet is on the wrong network: submission would
+  // fail after the (expensive) proofs are already generated. Once ready,
+  // this effect re-fires the moment `networkMismatch` clears — no separate
+  // retry button needed, matching this flow's fully-automatic submission.
   const allReady =
     batchStage === "generating" &&
     credStates.length > 0 &&
     credStates.every((s) => s.status === "ready");
+  const blockedByNetwork = allReady && networkMismatch;
 
   useEffect(() => {
-    if (!allReady) return;
+    if (!allReady || networkMismatch) return;
+    toast.success(`Generated ${creds.length} proofs`);
     setBatchStage("submitting");
 
     const currentCreds = credsRef.current;
@@ -815,17 +855,22 @@ function BatchProofFlow({
       };
     });
 
+    toast.info(`Submitting ${currentCreds.length} proofs to Stellar…`);
     submitProofsBatch({ holder: currentHolder, submissions })
       .then((hash) => {
         setTxHash(hash);
         setBatchStage("confirmed");
         onProved(hash, currentCreds.map((c) => c.commitment));
+        toast.success(`All ${currentCreds.length} proofs confirmed on-chain`, { txHash: hash });
       })
       .catch((e) => {
-        setBatchError(parseContractError((e as Error).message));
+        const parsed = parseContractError((e as Error).message);
+        setBatchError(parsed);
         setBatchStage("error");
+        toast.error(`Batch submission failed: ${parsed.friendly}`);
       });
-  }, [allReady, onProved]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allReady, networkMismatch, onProved]);
 
   const isSubmitting = batchStage === "submitting";
   const isConfirmed = batchStage === "confirmed";
@@ -899,6 +944,13 @@ function BatchProofFlow({
             ) : null
           }
         />
+
+        {/* Network mismatch — proofs are ready but submission is blocked */}
+        {blockedByNetwork && (
+          <div style={{ marginTop: "1.5rem" }}>
+            <NetworkMismatchBanner />
+          </div>
+        )}
 
         {/* Error banner */}
         {isError && batchError && (
