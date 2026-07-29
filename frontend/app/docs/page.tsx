@@ -422,7 +422,7 @@ export default function DocsPage() {
   // Deep link to section on load or on hash change
   useEffect(() => {
     const handleHashChange = () => {
-      if (typeof window !== "undefined" && window.location.hash) {
+      if (window.location.hash) {
         const id = window.location.hash.slice(1);
         if (id) {
           const el = document.getElementById(id);
