@@ -167,7 +167,7 @@ async function resolvePersonaKYC(inquiryId: string): Promise<{
 // Plaid balance attestation relay. Returns the verified balance from the user's
 // bank — this becomes the credential value, not what the user typed.
 // Mock mode: no PLAID_ACCESS_TOKEN set → returns a mock balance of $50,000.
-async function verifyWithPlaid(): Promise<{
+async function verifyWithPlaid(requestId?: string): Promise<{
   ok: boolean;
   balance?: number;
   error?: string;
@@ -535,13 +535,6 @@ export async function POST(req: NextRequest) {
           requestId,
         }),
       );
-      const credential = await buildCredential({
-        type,
-        holder,
-        issuerId,
-        walletAddress,
-        requestId,
-      }));
       const credential = await issuer.issue({
         type: type as CredentialType,
         holder,

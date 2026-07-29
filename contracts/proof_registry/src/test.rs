@@ -589,15 +589,15 @@ fn employment_threshold_stored_and_checked() {
     );
 
     // The holder is verified as "employed" (no threshold).
-    assert!(registry.is_verified(&holder, &Symbol::new(&env, "employment")).0);
-    assert!(registry.check_claim(&holder, &Symbol::new(&env, "employment"), &None));
+    assert!(registry.is_verified(&holder, &Symbol::new(&env, "employment"), &None).0);
+    assert!(registry.check_claim(&holder, &Symbol::new(&env, "employment"), &None, &None));
 
     // Proven seniority >= 3: a protocol requiring <= 3 passes.
-    assert!(registry.check_claim(&holder, &Symbol::new(&env, "employment"), &Some(3)));
-    assert!(registry.check_claim(&holder, &Symbol::new(&env, "employment"), &Some(1)));
+    assert!(registry.check_claim(&holder, &Symbol::new(&env, "employment"), &Some(3), &None));
+    assert!(registry.check_claim(&holder, &Symbol::new(&env, "employment"), &Some(1), &None));
 
     // Requiring seniority > 3 (only the proven amount) fails.
-    assert!(!registry.check_claim(&holder, &Symbol::new(&env, "employment"), &Some(4)));
+    assert!(!registry.check_claim(&holder, &Symbol::new(&env, "employment"), &Some(4), &None));
 }
 
 // ── submit_proofs_batch tests ─────────────────────────────────────────────────
