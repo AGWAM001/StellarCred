@@ -598,10 +598,11 @@ proptest! {
             expiry: 1000,
             threshold: Some(stored),
             revoked: false,
+            issuer: None,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
-        let res = client.check_claim(&holder, &cred, &Some(required));
+        let res = client.check_claim(&holder, &cred, &Some(required), &None);
         prop_assert!(res);
     }
 
@@ -624,10 +625,11 @@ proptest! {
             expiry: 1000,
             threshold: Some(stored),
             revoked: false,
+            issuer: None,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
-        let res = client.check_claim(&holder, &cred, &Some(required));
+        let res = client.check_claim(&holder, &cred, &Some(required), &None);
         prop_assert!(!res);
     }
 
@@ -645,10 +647,11 @@ proptest! {
             expiry: 1000,
             threshold: stored,
             revoked: false,
+            issuer: None,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
-        let res = client.check_claim(&holder, &cred, &None);
+        let res = client.check_claim(&holder, &cred, &None, &None);
         prop_assert!(res);
     }
 
@@ -675,10 +678,11 @@ proptest! {
             expiry,
             threshold: stored,
             revoked,
+            issuer: None,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
-        let res = client.check_claim(&holder, &cred, &required);
+        let res = client.check_claim(&holder, &cred, &required, &None);
         prop_assert!(!res);
     }
 }
@@ -700,10 +704,11 @@ fn check_claim_boundary_values_exhaustive() {
                 expiry: 1000,
                 threshold: Some(req),
                 revoked: false,
+                issuer: None,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
-                client.check_claim(&holder, &cred, &Some(req)),
+                client.check_claim(&holder, &cred, &Some(req), &None),
                 "Failed boundary stored == req for req={}", req
             );
         }
@@ -717,10 +722,11 @@ fn check_claim_boundary_values_exhaustive() {
                 expiry: 1000,
                 threshold: Some(stored),
                 revoked: false,
+                issuer: None,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
-                client.check_claim(&holder, &cred, &Some(req)),
+                client.check_claim(&holder, &cred, &Some(req), &None),
                 "Failed boundary stored == req + 1 for req={}", req
             );
         }
@@ -734,10 +740,11 @@ fn check_claim_boundary_values_exhaustive() {
                 expiry: 1000,
                 threshold: Some(stored),
                 revoked: false,
+                issuer: None,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
-                !client.check_claim(&holder, &cred, &Some(req)),
+                !client.check_claim(&holder, &cred, &Some(req), &None),
                 "Failed boundary stored == req - 1 for req={}", req
             );
         }
@@ -755,14 +762,15 @@ fn check_claim_stored_none_with_required_threshold() {
         expiry: 1000,
         threshold: None, // e.g. KYC proof without numeric threshold
         revoked: false,
+        issuer: None,
     };
     set_proof_record(&env, &reg_id, &holder1, &cred, &record1);
 
     // None threshold defaults to 0 in unwrap_or(0).
     // So Some(0) returns true (0 >= 0), while Some(1) returns false (0 < 1).
-    assert!(client.check_claim(&holder1, &cred, &Some(0)));
-    assert!(!client.check_claim(&holder1, &cred, &Some(1)));
-    assert!(!client.check_claim(&holder1, &cred, &Some(u64::MAX)));
+    assert!(client.check_claim(&holder1, &cred, &Some(0), &None));
+    assert!(!client.check_claim(&holder1, &cred, &Some(1), &None));
+    assert!(!client.check_claim(&holder1, &cred, &Some(u64::MAX), &None));
 }
 
 // ── submit_proofs_batch tests ─────────────────────────────────────────────────
