@@ -11,3 +11,6 @@ dist
 .soroban
 .stellar
 .env.local
+
+# Benchmark output (local results; see BENCHMARKS.md for documented figures)
+benchmark_results.txt
