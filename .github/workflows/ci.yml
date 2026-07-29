@@ -55,17 +55,21 @@ jobs:
           key: circuits-toolchain-noir1.0.0-beta.9-bb0.87.0
 
       - name: Install nargo (pinned)
+        # Installer fetched by commit SHA (not the mutable `main` branch) so its
+        # content can't change under us on a cache miss.
         run: |
           [ -x "$HOME/.nargo/bin/nargo" ] || {
-            curl -fsSL https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+            curl -fsSL https://raw.githubusercontent.com/noir-lang/noirup/324a51fca2c410d2477400316efc5ce0d743a5b3/install | bash
             "$HOME/.nargo/bin/noirup" -v 1.0.0-beta.9
           }
           echo "$HOME/.nargo/bin" >> "$GITHUB_PATH"
 
       - name: Install bb (pinned)
+        # Installer fetched by commit SHA (not the mutable `next` branch) so its
+        # content can't change under us on a cache miss.
         run: |
           [ -x "$HOME/.bb/bb" ] || {
-            curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
+            curl -fsSL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/d0afa5fc8b6550a14a265dd285a640c069bc0a43/barretenberg/bbup/install | bash
             "$HOME/.bb/bbup" -v 0.87.0
           }
           echo "$HOME/.bb" >> "$GITHUB_PATH"
@@ -88,7 +92,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
 
       - name: Setup Node
         uses: actions/setup-node@v4

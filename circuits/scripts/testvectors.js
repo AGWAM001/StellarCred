@@ -67,7 +67,7 @@ function parseProverToml(text) {
         .filter(Boolean)
         .map((s) => (s.startsWith('"') ? s.slice(1, -1) : Number(s)));
     } else {
-      witness[key] = value.slice(1, -1);
+      witness[key] = value.startsWith('"') ? value.slice(1, -1) : Number(value);
     }
   }
   return witness;
