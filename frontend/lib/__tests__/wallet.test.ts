@@ -51,6 +51,7 @@ vi.mock("@creit.tech/stellar-wallets-kit/modules/walletconnect.module", () => {
   return {
     WalletConnectModule: MockWalletConnectModule,
     WalletConnectAllowedMethods: { SIGN: "stellar_signXDR", SIGN_AND_SUBMIT: "stellar_signAndSubmitXDR" },
+    WALLET_CONNECT_ID: "wallet_connect",
   };
 });
 
@@ -122,6 +123,19 @@ describe("lib/wallet.ts", () => {
         walletName: "Lobstr",
         installUrl: "https://lobstr.co",
       });
+    });
+
+    it("maps WalletConnect's own 'not connected' relay failures to rejected, not not-installed", async () => {
+      // WalletConnect isn't a browser extension — "not connected" here means a
+      // dropped relay socket or expired session, not something to "install".
+      kit.openModal.mockImplementation(async ({ onWalletSelected }: { onWalletSelected: (w: ISupportedWallet) => Promise<void> }) => {
+        kit.getAddress.mockRejectedValue(new Error("not connected"));
+        await onWalletSelected(wallet("wallet_connect", "WalletConnect", "https://walletconnect.com"));
+      });
+
+      const rejection = await connect().catch((e) => e);
+      expect(rejection).toMatchObject({ kind: "rejected" });
+      expect(rejection.installUrl).toBeUndefined();
     });
 
     it("maps any other selection failure to rejected (treated as user cancellation)", async () => {

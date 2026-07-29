@@ -21,6 +21,7 @@ import {
 import {
   WalletConnectModule,
   WalletConnectAllowedMethods,
+  WALLET_CONNECT_ID,
 } from "@creit.tech/stellar-wallets-kit/modules/walletconnect.module";
 import { NETWORK, NETWORK_PASSPHRASE } from "./stellar";
 
@@ -84,11 +85,11 @@ export class WalletConnectError extends Error {
 // package), so any post-selection failure that isn't the well-known
 // "not installed" message is treated as a cancellation.
 //
-// `wallet` carries the name/install-url of whichever wallet was being
+// `wallet` carries the id/name/install-url of whichever wallet was being
 // connected (from the kit's own ISupportedWallet), so the resulting error —
 // and the UI showing it — refers to the wallet the user actually picked
 // instead of assuming Freighter.
-function toWalletError(e: unknown, wallet?: { name: string; url: string }): WalletConnectError {
+function toWalletError(e: unknown, wallet?: { id: string; name: string; url: string }): WalletConnectError {
   if (e instanceof WalletConnectError) return e;
   const message =
     e instanceof Error
@@ -96,7 +97,11 @@ function toWalletError(e: unknown, wallet?: { name: string; url: string }): Wall
       : typeof e === "object" && e && "message" in e
         ? String((e as { message: unknown }).message)
         : String(e);
-  if (/not connected|not available/i.test(message)) {
+  // WalletConnect isn't a browser extension — there's nothing to "install".
+  // Its own "not connected" errors are relay/session failures (dropped
+  // socket, expired session, peer rejection), so it's excluded from the
+  // not-installed classification and falls through to "rejected" instead.
+  if (wallet?.id !== WALLET_CONNECT_ID && /not connected|not available/i.test(message)) {
     return new WalletConnectError(
       "not-installed",
       wallet
@@ -152,7 +157,7 @@ export async function connect(): Promise<Connection> {
           const { address } = await k.getAddress();
           resolve({ address, walletId: option.id });
         } catch (e) {
-          reject(toWalletError(e, { name: option.name, url: option.url }));
+          reject(toWalletError(e, { id: option.id, name: option.name, url: option.url }));
         }
       },
       onClosed: () => reject(new WalletConnectError("dismissed", "Connection cancelled")),
