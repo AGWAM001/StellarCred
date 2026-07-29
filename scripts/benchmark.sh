@@ -2,7 +2,7 @@
 # scripts/benchmark.sh
 #
 # Measure the instruction budget (CPU instructions, memory, ledger I/O, fee)
-# for every public function across all four StellarCred contracts on testnet.
+# for the public functions across all four StellarCred contracts on testnet.
 #
 # Results are printed to stdout and also appended to benchmark_results.txt in
 # the repo root for persistent record-keeping.
@@ -105,7 +105,7 @@ bench() {
   fi
 
   echo "  │  Status:           $status"
-  echo "  │  CPU instructions: ${cpu}"
+  echo "  │  CPU instructions: ${instructions_pct}"
   echo "  │  Memory bytes:     ${mem}"
   echo "  │  Ledger read bytes:  ${read_bytes}"
   echo "  │  Ledger write bytes: ${write_bytes}"
@@ -252,6 +252,63 @@ else
   echo ""
   echo "  [SKIP] proof_registry::submit_proof — fixture not found at $proof_file"
   echo "         Run circuits/scripts/build.sh to generate fixtures, then re-run."
+fi
+
+# ── submit_proofs_batch (batch of 1 entry — measures the batch overhead vs single) ──
+# Uses the same fixture as submit_proof; batches the same single proof wrapped in
+# the ProofSubmission struct. Skipped when fixtures are not present.
+if [ -f "$proof_file" ] && [ -f "$inputs_file" ]; then
+  batch_json="[{\"credential_type\":\"${FIXTURE_TYPE}\",\"proof\":\"$(cat "$proof_file")\",\"public_inputs\":\"$(cat "$inputs_file")\",\"issuer_id\":\"${ADMIN}\",\"expiry\":9999999999}]"
+  bench "proof_registry::submit_proofs_batch (${FIXTURE_TYPE}, 1)" "$PROOF_REGISTRY_ID" submit_proofs_batch \
+    --holder "$ADMIN" \
+    --submissions "$batch_json"
+else
+  echo ""
+  echo "  [SKIP] proof_registry::submit_proofs_batch — fixture not found at $proof_file"
+fi
+
+# ── revoke_proof (holder self-revocation — removes persistent entry) ─────────
+# The holder authorizes their own revocation. Benchmarks the storage remove path.
+# May produce ProofNotFound if submit_proof above was also skipped; the failed
+# invocation cost is still measured by --cost.
+bench "proof_registry::revoke_proof" "$PROOF_REGISTRY_ID" revoke_proof \
+  --holder "$ADMIN" \
+  --credential_type "kyc"
+
+# ── revoke (issuer-initiated revocation — marks proof revoked) ────────────────
+# Requires the caller to be a registered issuer for the credential type. The
+# issuer_registry::register_issuer pre-setup at deploy time grants $ADMIN that
+# role for "kyc". Will produce ProofNotFound if no proof was ever stored.
+bench "proof_registry::revoke" "$PROOF_REGISTRY_ID" revoke \
+  --issuer "$ADMIN" \
+  --holder "$ADMIN" \
+  --credential_type "kyc"
+
+# ── set_admin (instance write, admin-auth) ────────────────────────────────────
+# Transfers admin to the same address (no-op semantically) to keep other
+# benchmarks working. Measures the auth + instance write cost.
+bench "proof_registry::set_admin" "$PROOF_REGISTRY_ID" set_admin \
+  --new_admin "$ADMIN"
+
+# ── upgrade (WASM replacement — most privileged admin op) ─────────────────────
+# Uploading a new WASM blob then calling upgrade measures the update_current_
+# contract_wasm host-function cost. We reuse the same WASM so the contract
+# behaviour is unchanged after the benchmark.
+if [ -f "$WASM_DIR/proof_registry.wasm" ]; then
+  PROOF_REGISTRY_WASM_HASH="$(stellar contract upload \
+    --wasm "$WASM_DIR/proof_registry.wasm" \
+    --source "$SOURCE" \
+    --network "$NETWORK" 2>/dev/null || true)"
+  if [ -n "$PROOF_REGISTRY_WASM_HASH" ]; then
+    bench "proof_registry::upgrade" "$PROOF_REGISTRY_ID" upgrade \
+      --new_wasm_hash "$PROOF_REGISTRY_WASM_HASH"
+  else
+    echo ""
+    echo "  [SKIP] proof_registry::upgrade — could not upload WASM (check network/source)"
+  fi
+else
+  echo ""
+  echo "  [SKIP] proof_registry::upgrade — $WASM_DIR/proof_registry.wasm not found"
 fi
 
 sep
