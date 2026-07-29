@@ -19,7 +19,6 @@ fn main(
     threshold_years: pub u64,
 ) {
     credential_lib::assert_committed_and_signed(date_of_birth as Field, salt, sig, commitment, issuer_x, issuer_y);
-    assert(current_date >= date_of_birth);
-    let age_years = (current_date - date_of_birth) / 365;
-    assert(age_years >= threshold_years);
+    assert(threshold_years <= 200);
+    assert(current_date >= date_of_birth + threshold_years * 365);
 }

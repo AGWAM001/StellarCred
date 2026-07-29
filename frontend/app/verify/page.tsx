@@ -7,12 +7,14 @@ import {
   IconLoader2,
   IconCheck,
   IconBuildingBank,
+  IconQrcode,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { saveCredential, TYPE_META, type Credential } from "@/lib/credential";
 import type { CredentialType } from "@/lib/stellar";
 import { useToast } from "@/components/Toast";
+import { QrScanner } from "@/components/QrScanner";
 
 const TYPES = Object.entries(TYPE_META) as [
   CredentialType,
@@ -30,6 +32,22 @@ const COUNTRIES = [
 const DEMO_ISSUER_ID = process.env.NEXT_PUBLIC_ISSUER_ADDRESS ?? "";
 
 const VALID_CLAIMS = TYPES.map(([k]) => k);
+
+// One id per verify session, sent as `x-request-id` on every /api/issue and
+// /api/plaid-balance call so server logs for a single issuance — including
+// across the Persona redirect round-trip — can be correlated together.
+function getOrCreateRequestId(): string {
+  if (typeof window === "undefined") return "";
+  const KEY = "sc_request_id";
+  let id = sessionStorage.getItem(KEY);
+  if (!id) {
+    id = window.crypto?.randomUUID
+      ? window.crypto.randomUUID()
+      : `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+    sessionStorage.setItem(KEY, id);
+  }
+  return id;
+}
 
 function VerifyInner() {
   const router = useRouter();
@@ -71,7 +89,67 @@ function VerifyInner() {
   const [urlError, setUrlError] = useState("");
   const [requestingDomain, setRequestingDomain] = useState("");
   const [done, setDone] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const justIssuedClaims = useRef<string[]>([]);
+
+  // A protocol can display this scanned code instead of a clickable link
+  // (e.g. on a kiosk or a screen the phone doesn't have a direct link to) —
+  // it's the exact same /verify?return_url=...&claim=... URL buildVerifyUrl
+  // produces, so scanning it just navigates there like clicking the link would.
+  function onScanRequest(text: string) {
+    setScanning(false);
+    let dest: URL;
+    try {
+      dest = new URL(text, window.location.origin);
+    } catch {
+      toast.error("That QR code isn't a valid StellarCred verify request.");
+      return;
+    }
+    // A real verify request always has return_url — reject anything else
+    // outright rather than treating an arbitrary scanned URL as trustworthy.
+    if (dest.pathname !== "/verify" || !dest.searchParams.has("return_url")) {
+      toast.error("That QR code isn't a valid StellarCred verify request.");
+      return;
+    }
+    if (dest.origin === window.location.origin) {
+      // The scanned URL itself is same-origin, but its embedded return_url
+      // is where the wallet address ends up after issuance — a QR can stay
+      // on stellarcred.xyz throughout and still smuggle in a cross-origin
+      // return_url, so that param needs the same confirmation the top-level
+      // origin check gets below.
+      const embeddedReturnUrl = dest.searchParams.get("return_url");
+      if (embeddedReturnUrl && !embeddedReturnUrl.startsWith("/")) {
+        let returnDest: URL | null = null;
+        try {
+          returnDest = new URL(embeddedReturnUrl);
+        } catch {
+          toast.error("That QR code isn't a valid StellarCred verify request.");
+          return;
+        }
+        if (returnDest.protocol !== "https:") {
+          toast.error("That QR code isn't a valid StellarCred verify request.");
+          return;
+        }
+        if (returnDest.origin !== window.location.origin) {
+          if (!window.confirm(`This code will request verification on behalf of ${returnDest.hostname}, and your wallet address will be sent there once you finish. Continue?`)) {
+            return;
+          }
+        }
+      }
+      router.push(dest.pathname + dest.search);
+    } else if (dest.protocol === "https:") {
+      // Leaving the app entirely on a scanned code's say-so is exactly the
+      // shape of an open-redirect/phishing risk (a malicious QR could point
+      // anywhere) — confirm the destination with the user first instead of
+      // silently redirecting.
+      if (!window.confirm(`This code will take you to ${dest.hostname} to continue verification there. Continue?`)) {
+        return;
+      }
+      window.location.href = dest.toString();
+    } else {
+      toast.error("That QR code isn't a valid StellarCred verify request.");
+    }
+  }
 
   useEffect(() => {
     if (returnUrl) {
@@ -115,7 +193,7 @@ function VerifyInner() {
   useEffect(() => {
     if (!fundsSelected) return;
     setPlaidBalance(null);
-    fetch("/api/plaid-balance")
+    fetch("/api/plaid-balance", { headers: { "x-request-id": getOrCreateRequestId() } })
       .then((r) => r.json())
       .then((d: { balance?: number; accounts?: { name: string; available: number }[]; mock?: boolean; error?: string }) => {
         if (d.balance !== undefined) {
@@ -138,9 +216,10 @@ function VerifyInner() {
     try { pending = JSON.parse(raw); } catch { return; }
     setBusy(true);
     setError("");
+    const requestId = getOrCreateRequestId();
     fetch("/api/issue", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-request-id": requestId },
       body: JSON.stringify({ ...pending, persona_inquiry_id: personaInquiryId }),
     })
       .then(async (res) => {
@@ -162,7 +241,7 @@ function VerifyInner() {
       })
       .catch((e) => {
         const message = (e as Error).message;
-        setError(message);
+        setError(`${message} (ref: ${requestId})`);
         toast.error(`Credential issuance failed: ${message}`);
       })
       .finally(() => setBusy(false));
@@ -216,6 +295,7 @@ function VerifyInner() {
     if (!address || !selected) return;
     setBusy(true);
     setError("");
+    const requestId = getOrCreateRequestId();
     try {
       if (!DEMO_ISSUER_ID) {
         throw new Error("NEXT_PUBLIC_ISSUER_ADDRESS is not set — cannot issue credentials");
@@ -231,7 +311,7 @@ function VerifyInner() {
       };
       const res = await fetch("/api/issue", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-request-id": requestId },
         body: JSON.stringify({
           ...payload,
           returnUrl: returnUrl ?? undefined,
@@ -258,7 +338,7 @@ function VerifyInner() {
       setTimeout(redirectAfterIssue, 1500);
     } catch (e) {
       const message = (e as Error).message;
-      setError(message);
+      setError(`${message} (ref: ${requestId})`);
       toast.error(`Credential issuance failed: ${message}`);
     } finally {
       setBusy(false);
@@ -276,6 +356,24 @@ function VerifyInner() {
       </div>
 
       <div style={{ maxWidth: 520, margin: "0 auto" }}>
+        {!locked && (
+          <div style={{ textAlign: "right", marginBottom: "0.75rem" }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setScanning(true)}>
+              <IconQrcode size={14} />
+              Scan QR
+            </button>
+          </div>
+        )}
+
+        {scanning && (
+          <QrScanner
+            title="Scan a verify request"
+            hint="Point your camera at the QR code a protocol displayed."
+            onScan={onScanRequest}
+            onClose={() => setScanning(false)}
+          />
+        )}
+
         <div className="card">
           {!address ? (
             <div style={{ textAlign: "center", padding: "2rem 0" }}>

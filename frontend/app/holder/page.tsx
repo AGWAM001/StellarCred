@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -15,12 +16,14 @@ import {
   IconCpu,
   IconCloudUpload,
   IconStack2,
+  IconQrcode,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { Check } from "@/components/Check";
 import { ConfigBanner } from "@/components/ConfigBanner";
+import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import { truncateHash } from "@/lib/format";
 import { EXPLORER_TX } from "@/lib/stellar";
 import { computeWitness, proveWithBackend } from "@/lib/proof";
@@ -44,6 +47,10 @@ import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
 import { usePreviewMode } from "@/lib/wallet-context";
 import CopyButton from "@/components/CopyButton";
 import { useToast } from "@/components/Toast";
+import { QrScanner } from "@/components/QrScanner";
+import { TransferExportModal } from "@/components/TransferExportModal";
+import { TransferImportModal } from "@/components/TransferImportModal";
+import { IMPORT_PARAM } from "@/lib/transfer";
 
 // Parse "90 days", "30 days" etc from the credential's expiry string.
 function credTtlSecs(cred: Credential): number {
@@ -71,12 +78,14 @@ function CredCard({
   address,
   onProve,
   onRemove,
+  onTransfer,
   isPreview,
 }: {
   c: Credential;
   address: string;
   onProve: () => void;
   onRemove: () => void;
+  onTransfer: () => void;
   isPreview?: boolean;
 }) {
   const status = proofStatus(c);
@@ -136,6 +145,14 @@ function CredCard({
           </button>
           <button
             className="btn btn-ghost btn-sm"
+            title="Transfer to another device"
+            onClick={onTransfer}
+            style={{ padding: "0.3rem 0.4rem", color: "var(--faint)" }}
+          >
+            <IconQrcode size={13} />
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
             title="Remove"
             onClick={onRemove}
             style={{ padding: "0.3rem 0.4rem", color: "var(--faint)" }}
@@ -184,14 +201,32 @@ type PageView =
   | { kind: "single"; cred: Credential }
   | { kind: "batch"; creds: Credential[] };
 
-export default function HolderPage() {
+function HolderInner() {
   const { address, connect } = useWallet();
   const isPreview = usePreviewMode();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const toast = useToast();
   const [creds, setCreds] = useState<Credential[]>([]);
   const [view, setView] = useState<PageView>({ kind: "list" });
   const [importing, setImporting] = useState(false);
+  const [transferCred, setTransferCred] = useState<Credential | null>(null);
+  const [importScanning, setImportScanning] = useState(false);
+  const [importPayload, setImportPayload] = useState<string | null>(null);
 
   useEffect(() => setCreds(loadCredentials()), []);
+
+  // A transfer QR opened directly (native camera app -> /holder?import=...)
+  // lands here with the payload already in the URL — prompt for the
+  // passphrase immediately, and strip it from the URL so a refresh or the
+  // back button doesn't re-trigger the prompt or leave ciphertext in history.
+  useEffect(() => {
+    const payload = searchParams.get(IMPORT_PARAM);
+    if (!payload) return;
+    setImportPayload(payload);
+    router.replace("/holder");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const displayCreds = isPreview ? PREVIEW_CREDENTIALS : creds;
   const unproved = displayCreds.filter((c) => proofStatus(c) !== "proved");
@@ -288,6 +323,7 @@ export default function HolderPage() {
                   address={address}
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
+                  onTransfer={() => setTransferCred(c)}
                   isPreview={isPreview}
                 />
               ))}
@@ -324,6 +360,7 @@ export default function HolderPage() {
                   address={address}
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
+                  onTransfer={() => setTransferCred(c)}
                   isPreview={isPreview}
                 />
               ))}
@@ -342,18 +379,73 @@ export default function HolderPage() {
               onCancel={() => setImporting(false)}
             />
           ) : (
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ alignSelf: "flex-start" }}
-              onClick={() => setImporting(true)}
-            >
-              <IconPlus size={14} />
-              Import credential JSON
-            </button>
+            <div className="row" style={{ gap: "0.5rem" }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setImporting(true)}
+              >
+                <IconPlus size={14} />
+                Import credential JSON
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setImportScanning(true)}
+              >
+                <IconQrcode size={14} />
+                Scan QR
+              </button>
+            </div>
           )}
         </div>
       )}
+
+      {transferCred && (
+        <TransferExportModal cred={transferCred} onClose={() => setTransferCred(null)} />
+      )}
+
+      {importScanning && (
+        <QrScanner
+          title="Scan a transfer code"
+          hint="Point your camera at a StellarCred credential-transfer QR code."
+          onScan={(text) => {
+            setImportScanning(false);
+            let payload: string | null = null;
+            try {
+              payload = new URL(text, window.location.origin).searchParams.get(IMPORT_PARAM);
+            } catch {
+              // not a URL — fall through, payload stays null
+            }
+            if (!payload) {
+              toast.error("That QR code isn't a valid credential-transfer code.");
+              return;
+            }
+            setImportPayload(payload);
+          }}
+          onClose={() => setImportScanning(false)}
+        />
+      )}
+
+      {importPayload && (
+        <TransferImportModal
+          payload={importPayload}
+          onImported={(c) => {
+            setCreds(saveCredential(c));
+            setImportPayload(null);
+            toast.success(`${c.title} imported`);
+          }}
+          onClose={() => setImportPayload(null)}
+        />
+      )}
     </>
+  );
+}
+
+// useSearchParams() must be inside a Suspense boundary in the App Router.
+export default function HolderPage() {
+  return (
+    <Suspense fallback={null}>
+      <HolderInner />
+    </Suspense>
   );
 }
 
@@ -411,6 +503,7 @@ function ProofFlow({
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toast = useToast();
+  const { networkMismatch } = useWallet();
 
   useEffect(() => {
     let cancelled = false;
@@ -460,7 +553,7 @@ function ProofFlow({
   }, [cred]);
 
   async function onSubmit() {
-    if (!proof) return;
+    if (!proof || networkMismatch) return;
     setStage("submitting");
     toast.info(`Submitting proof for ${cred.title} to Stellar…`);
     try {
@@ -592,14 +685,28 @@ function ProofFlow({
 
         {/* CTA */}
         {stage === "generated" && (
-          <button
-            className="btn btn-primary"
-            style={{ marginTop: "1.5rem", width: "100%" }}
-            onClick={onSubmit}
-          >
-            Submit to Stellar
-            <IconArrowRight size={15} />
-          </button>
+          <>
+            {networkMismatch && (
+              <div style={{ marginTop: "1.5rem" }}>
+                <NetworkMismatchBanner />
+              </div>
+            )}
+            <button
+              className="btn btn-primary"
+              style={{
+                marginTop: networkMismatch ? 0 : "1.5rem",
+                width: "100%",
+                opacity: networkMismatch ? 0.5 : 1,
+                cursor: networkMismatch ? "not-allowed" : "pointer",
+              }}
+              onClick={onSubmit}
+              disabled={networkMismatch}
+              title={networkMismatch ? "Switch your wallet to the correct network to submit" : undefined}
+            >
+              Submit to Stellar
+              <IconArrowRight size={15} />
+            </button>
+          </>
         )}
 
         {stage === "error" && error && (
@@ -712,6 +819,7 @@ function BatchProofFlow({
   const [batchError, setBatchError] = useState<ContractError | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const toast = useToast();
+  const { networkMismatch } = useWallet();
   const generatedProofs = useRef<Array<{ proof: Uint8Array; publicInputs: Uint8Array } | null>>(
     creds.map(() => null),
   );
@@ -809,14 +917,19 @@ function BatchProofFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // All proofs ready — fire the batch submission automatically.
+  // All proofs ready — fire the batch submission automatically, but never
+  // while the connected wallet is on the wrong network: submission would
+  // fail after the (expensive) proofs are already generated. Once ready,
+  // this effect re-fires the moment `networkMismatch` clears — no separate
+  // retry button needed, matching this flow's fully-automatic submission.
   const allReady =
     batchStage === "generating" &&
     credStates.length > 0 &&
     credStates.every((s) => s.status === "ready");
+  const blockedByNetwork = allReady && networkMismatch;
 
   useEffect(() => {
-    if (!allReady) return;
+    if (!allReady || networkMismatch) return;
     toast.success(`Generated ${creds.length} proofs`);
     setBatchStage("submitting");
 
@@ -848,7 +961,7 @@ function BatchProofFlow({
         toast.error(`Batch submission failed: ${parsed.friendly}`);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allReady, onProved]);
+  }, [allReady, networkMismatch, onProved]);
 
   const isSubmitting = batchStage === "submitting";
   const isConfirmed = batchStage === "confirmed";
@@ -922,6 +1035,13 @@ function BatchProofFlow({
             ) : null
           }
         />
+
+        {/* Network mismatch — proofs are ready but submission is blocked */}
+        {blockedByNetwork && (
+          <div style={{ marginTop: "1.5rem" }}>
+            <NetworkMismatchBanner />
+          </div>
+        )}
 
         {/* Error banner */}
         {isError && batchError && (
