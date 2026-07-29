@@ -57,7 +57,7 @@ function SectionHeading({ id, children }: { id: string; children: React.ReactNod
     >
       <a
         href={`#${id}`}
-        aria-label={`Link to section: ${id}`}
+        aria-label={typeof children === "string" ? `Link to section: ${children}` : `Link to section: ${id}`}
         style={{
           color: "inherit",
           textDecoration: "none",
