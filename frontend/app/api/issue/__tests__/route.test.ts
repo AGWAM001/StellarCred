@@ -207,12 +207,16 @@ describe("no identity leakage", () => {
       }),
     );
 
+    const { POST } = await loadRoute();
+    // Imported after loadRoute()'s vi.resetModules() so this resolves to the
+    // same fresh logger instance route.ts itself just imported — spying
+    // before the reset would watch a stale, disconnected instance and make
+    // the "no PII in logs" assertions below pass vacuously.
     const { logger } = await import("@/lib/logger");
     const infoSpy = vi.spyOn(logger, "info");
     const warnSpy = vi.spyOn(logger, "warn");
     const errorSpy = vi.spyOn(logger, "error");
 
-    const { POST } = await loadRoute();
     const res = await POST(
       postRequest({
         type: "kyc",
@@ -227,6 +231,7 @@ describe("no identity leakage", () => {
     expect(responseText).not.toMatch(/Alice|Example|123-45-6789/);
     expect(responseText).not.toMatch(/first_name|last_name|id_number/);
 
+    expect(infoSpy.mock.calls.length).toBeGreaterThan(0);
     for (const spy of [infoSpy, warnSpy, errorSpy]) {
       for (const call of spy.mock.calls) {
         const logged = JSON.stringify(call);

@@ -69,9 +69,8 @@ let loggedThreadCount = false;
 
 function pickThreadCount(): number {
   const isolated = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
-  const threads = isolated
-    ? Math.max(1, Math.min(navigator.hardwareConcurrency || 1, MAX_THREADS))
-    : 1;
+  const hardwareConcurrency = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 0;
+  const threads = isolated ? Math.max(1, Math.min(hardwareConcurrency || 1, MAX_THREADS)) : 1;
   if (!loggedThreadCount) {
     loggedThreadCount = true;
     console.info(`[proof] crossOriginIsolated=${isolated}, proving with ${threads} thread(s)`);
