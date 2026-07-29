@@ -125,9 +125,13 @@ function getBackend(type: CredentialType): Promise<Backend> {
 // error, wasm init failure, etc.) it's logged and swallowed -- the real
 // prove click still falls back to constructing fresh via proveWithBackend.
 export function warmBackend(type: CredentialType): void {
-  getBackend(type).catch((err) => {
-    console.warn(`[proof] Failed to warm prover for "${type}":`, err);
-  });
+  const before = backendCache.get(type);
+  const pending = getBackend(type);
+  if (pending !== before) {
+    pending.catch((err) => {
+      console.warn(`[proof] Failed to warm prover for "${type}":`, err);
+    });
+  }
 }
 
 // Destroys and evicts the cached backend for `type`, if one exists. Safe to
