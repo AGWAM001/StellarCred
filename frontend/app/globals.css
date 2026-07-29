@@ -265,6 +265,24 @@ p {
   }
 }
 
+/* Documentation Anchor Links */
+.heading-group .anchor-link-icon {
+  opacity: 0;
+  transition: opacity 0.15s var(--ease), transform 0.15s var(--ease);
+}
+
+.heading-group:hover .anchor-link-icon,
+.heading-group a:focus .anchor-link-icon,
+.anchor-link-icon:focus {
+  opacity: 0.85;
+}
+
+@media (max-width: 640px) {
+  .heading-group .anchor-link-icon {
+    opacity: 0.5;
+  }
+}
+
 .row {
   display: flex;
   align-items: center;

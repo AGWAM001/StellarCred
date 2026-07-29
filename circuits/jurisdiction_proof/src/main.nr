@@ -5,8 +5,7 @@
 // (secp256k1 ECDSA, in-circuit). Country codes are ISO 3166-1 numeric
 // (US=840, IR=364, KP=408); unused slots in the restricted list are 0.
 
-use dep::poseidon::poseidon2::Poseidon2;
-use std::ecdsa_secp256k1::verify_signature;
+use dep::credential_lib;
 
 global RESTRICTED_LEN: u32 = 8;
 
@@ -21,9 +20,7 @@ fn main(
     issuer_y: pub [u8; 32],
     restricted: pub [u64; RESTRICTED_LEN],
 ) {
-    assert(Poseidon2::hash([country_code as Field, salt], 2) == commitment);
-    let z: [u8; 32] = commitment.to_be_bytes();
-    assert(verify_signature(issuer_x, issuer_y, sig, z));
+    credential_lib::assert_committed_and_signed(country_code as Field, salt, sig, commitment, issuer_x, issuer_y);
     for i in 0..RESTRICTED_LEN {
         assert(country_code != restricted[i]);
     }
