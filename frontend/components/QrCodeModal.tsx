@@ -26,7 +26,18 @@ export function QrCodeModal({
     setError("");
     toQrDataUrl(value)
       .then((url) => { if (!cancelled) setDataUrl(url); })
-      .catch(() => { if (!cancelled) setError("Couldn't generate QR code."); });
+      .catch((e) => {
+        if (cancelled) return;
+        // qrcode throws this exact message when the content exceeds what a
+        // (max-version) QR code can hold — most likely for a credential with
+        // unusually large fields. The link below still works either way.
+        const tooBig = e instanceof Error && /too big/i.test(e.message);
+        setError(
+          tooBig
+            ? "This credential is too large for a QR code — use the link below instead."
+            : "Couldn't generate a QR code — use the link below instead.",
+        );
+      });
     return () => { cancelled = true; };
   }, [value]);
 

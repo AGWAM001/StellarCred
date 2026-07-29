@@ -105,9 +105,22 @@ function VerifyInner() {
       toast.error("That QR code isn't a valid StellarCred verify request.");
       return;
     }
+    // A real verify request always has return_url — reject anything else
+    // outright rather than treating an arbitrary scanned URL as trustworthy.
+    if (dest.pathname !== "/verify" || !dest.searchParams.has("return_url")) {
+      toast.error("That QR code isn't a valid StellarCred verify request.");
+      return;
+    }
     if (dest.origin === window.location.origin) {
       router.push(dest.pathname + dest.search);
     } else if (dest.protocol === "https:") {
+      // Leaving the app entirely on a scanned code's say-so is exactly the
+      // shape of an open-redirect/phishing risk (a malicious QR could point
+      // anywhere) — confirm the destination with the user first instead of
+      // silently redirecting.
+      if (!window.confirm(`This code will take you to ${dest.hostname} to continue verification there. Continue?`)) {
+        return;
+      }
       window.location.href = dest.toString();
     } else {
       toast.error("That QR code isn't a valid StellarCred verify request.");

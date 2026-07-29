@@ -1068,6 +1068,9 @@ textarea:focus {
   overflow-y: auto;
   box-shadow: var(--shadow-card);
   animation: modal-in 0.2s var(--ease) both;
+  /* Programmatically focused on open (for the Tab trap) — a focus ring
+     around the whole dialog on open would look like a rendering glitch. */
+  outline: none;
 }
 
 @keyframes modal-overlay-in {
