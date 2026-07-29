@@ -59,6 +59,26 @@ async function loadBb(): Promise<BbModule> {
   return import(/* webpackIgnore: true */ "/bb/index.js") as Promise<BbModule>;
 }
 
+// bb.js only takes its multithreaded path when SharedArrayBuffer is available,
+// which requires the page to be crossOriginIsolated (COOP/COEP headers — see
+// next.config.mjs). Cap the thread count since bb.js's own worker pool doesn't
+// benefit past a handful of threads and we don't want to starve the rest of
+// the page on very high-core-count machines.
+const MAX_THREADS = 8;
+let loggedThreadCount = false;
+
+function pickThreadCount(): number {
+  const isolated = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
+  const threads = isolated
+    ? Math.max(1, Math.min(navigator.hardwareConcurrency || 1, MAX_THREADS))
+    : 1;
+  if (!loggedThreadCount) {
+    loggedThreadCount = true;
+    console.info(`[proof] crossOriginIsolated=${isolated}, proving with ${threads} thread(s)`);
+  }
+  return threads;
+}
+
 // Stage 1 — server computes the witness (Noir circuit execution).
 // Exported so ProofFlow can report progress between stages.
 export async function computeWitness(
@@ -97,7 +117,7 @@ export async function proveWithBackend(
   const circuit = (await circuitRes.json()) as { bytecode: string };
 
   const { UltraHonkBackend } = await loadBb();
-  const backend = new UltraHonkBackend(circuit.bytecode, { threads: 1 });
+  const backend = new UltraHonkBackend(circuit.bytecode, { threads: pickThreadCount() });
   try {
     const { proof, publicInputs } = await backend.generateProof(witness, {
       keccak: true,
