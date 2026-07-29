@@ -57,11 +57,12 @@ jobs:
         working-directory: .
         run: |
           NOTES=$(npx --yes conventional-changelog-cli -p angular -r 1 --outfile /dev/stdout 2>/dev/null)
-          # Store as multiline env var
+          # Store as multiline env var using a random delimiter to avoid EOF injection
+          DELIM=$(openssl rand -hex 8)
           {
-            echo "RELEASE_NOTES<<EOF"
+            echo "RELEASE_NOTES<<$DELIM"
             echo "$NOTES"
-            echo "EOF"
+            echo "$DELIM"
           } >> "$GITHUB_ENV"
 
       # Commit the updated CHANGELOG.md back to the default branch
