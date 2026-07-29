@@ -64,9 +64,13 @@ fn main(
     //     submits an all-zero list produces a perfectly valid proof of nothing.
     //   - Zero padding does double duty. Padding slots are 0, so the loop also
     //     enforces `country_code != 0`, rejecting a credential with an empty or
-    //     unset country. That implicit check disappears if all eight slots are
-    //     ever filled with real codes, so raise RESTRICTED_LEN before the list
-    //     grows to eight rather than after.
+    //     unset country. This guard is incidental rather than designed: it
+    //     holds only while at least one slot is still padding, and it vanishes
+    //     the moment all RESTRICTED_LEN slots carry real codes.
+    //     Whoever fills the last slot must add an explicit
+    //     `assert(country_code != 0)` here in the same change. It has to go
+    //     here and nowhere else - `country_code` is a private input that never
+    //     reaches the verifier, so the contract cannot make up for its loss.
     for i in 0..RESTRICTED_LEN {
         assert(country_code != restricted[i]);
     }

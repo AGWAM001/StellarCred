@@ -50,13 +50,17 @@ fn main(
     // holder ever makes back to a single credential.
     assert(verify_signature(issuer_x, issuer_y, sig, z));
 
-    // Underflow guard, and a sanity check on the credential. The subtraction
-    // below is on u64; a date of birth in the future would wrap it to an
-    // enormous value that trivially clears any threshold. Noir range-checks
-    // unsigned subtraction and would abort on its own, but relying on that
-    // means the circuit's soundness depends on backend arithmetic semantics
-    // rather than an explicit constraint. This assert states the requirement
-    // where a reviewer can see it.
+    // Underflow guard. To be precise about what this does and does not buy:
+    // Noir does NOT wrap on unsigned underflow. It range-constrains the result,
+    // so with a date of birth after `current_date` the subtraction below fails
+    // during witness generation and no proof is produced at all (verified on
+    // the pinned nargo 1.0.0-beta.9: `a - b` on u64 with a < b aborts with
+    // "Failed assertion"). There is no enormous `age_years` for an attacker to
+    // reach, and removing this line does not open a soundness hole.
+    // It stays for two reasons: it puts the precondition in the source instead
+    // of leaving it implicit in backend arithmetic semantics, and it fails
+    // naming the actual problem - a future-dated credential - rather than as an
+    // opaque arithmetic failure inside the expression below.
     assert(current_date >= date_of_birth);
 
     // Age derivation. Integer division truncates, and 365 ignores leap days, so
