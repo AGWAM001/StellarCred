@@ -76,6 +76,8 @@ COPY contracts/ contracts/
 
 # Default command: build and copy WASM artifacts to /out.
 # The caller is expected to bind-mount a host directory at /out.
+# Each step is intentionally left to fail loudly — no error suppression —
+# so a failed cargo build surfaces as a non-zero exit code, not a false success.
 CMD ["sh", "-c", \
      "SOURCE_DATE_EPOCH=0 cargo build \
         --release \
@@ -92,4 +94,4 @@ CMD ["sh", "-c", \
             target/wasm32v1-none/release/issuer_registry.wasm \
             target/wasm32v1-none/release/proof_registry.wasm \
             target/wasm32v1-none/release/gated_pool.wasm \
-         /out/ 2>/dev/null || true"]
+         /out/"]

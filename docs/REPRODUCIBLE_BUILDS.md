@@ -24,7 +24,7 @@ All build inputs are pinned so the output is deterministic:
 | Rust compiler | `1.93.1` | `rust-toolchain.toml` |
 | Cargo dependencies | exact lockfile | `Cargo.lock` (`--locked` flag) |
 | Build profile | `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `strip = "symbols"` | `Cargo.toml` `[profile.release]` |
-| Docker base image | `debian:bookworm-slim@sha256:90522…` | `docker/Dockerfile.reproducible` |
+| Docker base image | `rust:1.93.1-slim-bookworm@sha256:81ca81aa…` | `docker/Dockerfile.reproducible` |
 
 Do **not** run `cargo update` before verifying — the lockfile must be identical
 to the one at the deployed commit.
@@ -187,7 +187,13 @@ or the reproducible Dockerfile triggers the **Reproducible Build** CI job
 When the Rust toolchain is bumped:
 
 1. Update `rust-toolchain.toml` → `channel`.
-2. Update the `ARG RUST_VERSION` in `docker/Dockerfile.reproducible`.
+2. Update the `FROM` line in `docker/Dockerfile.reproducible` — change the
+   image tag and digest:
+   ```bash
+   docker pull rust:<NEW_VERSION>-slim-bookworm
+   docker inspect --format='{{index .RepoDigests 0}}' rust:<NEW_VERSION>-slim-bookworm
+   # Paste the printed digest into the FROM line.
+   ```
 3. Update the `toolchain:` field in `.github/workflows/ci.yml`.
 4. Rebuild, re-run `verify-wasm.sh`, and update the hashes in `DEPLOYMENTS.md`.
 5. Open a PR — the reproducible-build CI job will confirm byte-identity before
