@@ -59,23 +59,6 @@ async function loadBb(): Promise<BbModule> {
   return import(/* webpackIgnore: true */ "/bb/index.js") as Promise<BbModule>;
 }
 
-// bb.js only takes its multithreaded path when SharedArrayBuffer is available,
-// which requires the page to be crossOriginIsolated (COOP/COEP headers — see
-// next.config.mjs). Cap the thread count since bb.js's own worker pool doesn't
-// benefit past a handful of threads and we don't want to starve the rest of
-// the page on very high-core-count machines.
-const MAX_THREADS = 8;
-let loggedThreadCount = false;
-
-function pickThreadCount(): number {
-  const isolated = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
-  const hardwareConcurrency = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 0;
-  const threads = isolated ? Math.max(1, Math.min(hardwareConcurrency || 1, MAX_THREADS)) : 1;
-  if (!loggedThreadCount) {
-    loggedThreadCount = true;
-    console.info(`[proof] crossOriginIsolated=${isolated}, proving with ${threads} thread(s)`);
-  }
-  return threads;
 type Backend = InstanceType<BbModule["UltraHonkBackend"]>;
 
 // Constructed (or in-flight) UltraHonkBackend instances, keyed by circuit
@@ -89,13 +72,22 @@ type Backend = InstanceType<BbModule["UltraHonkBackend"]>;
 // its own.
 const backendCache = new Map<CredentialType, Promise<Backend>>();
 
-// Multithreading is only safe once the page is crossOriginIsolated (see the
-// COOP/COEP comment in next.config.mjs, which today keeps that permanently
-// false so bb.js stays on its single-threaded path). Read the live value at
-// construction time rather than hardcoding `threads: 1`, so this keeps
-// working correctly without changes if/when the multithreading fix lands.
+// Multithreading is only safe once the page is crossOriginIsolated (COOP/COEP
+// headers — see next.config.mjs). Read the live value at construction time
+// rather than caching it, so a proxy/CDN stripping those headers still falls
+// back correctly to the single-threaded path. Omitting `threads` when
+// isolated lets bb.js pick its own worker-pool size (it reads
+// navigator.hardwareConcurrency internally); logged once so the choice is
+// visible in the field.
+let loggedIsolation = false;
+
 function backendOptions(): { threads?: number } {
-  if (typeof window !== "undefined" && window.crossOriginIsolated) {
+  const isolated = typeof window !== "undefined" && window.crossOriginIsolated;
+  if (!loggedIsolation) {
+    loggedIsolation = true;
+    console.info(`[proof] crossOriginIsolated=${!!isolated}`);
+  }
+  if (isolated) {
     return {};
   }
   return { threads: 1 };
@@ -211,24 +203,6 @@ export async function proveWithBackend(
   type: CredentialType,
   witness: Uint8Array,
 ): Promise<GeneratedProof> {
-  const circuitRes = await fetch(`/circuits/${type}.json`);
-  if (!circuitRes.ok) {
-    throw new Error(
-      `Compiled circuit "${type}" not found. Run the circuit build to emit /public/circuits/${type}.json.`,
-    );
-  }
-  const circuit = (await circuitRes.json()) as { bytecode: string };
-
-  const { UltraHonkBackend } = await loadBb();
-  const backend = new UltraHonkBackend(circuit.bytecode, { threads: pickThreadCount() });
-  try {
-    const { proof, publicInputs } = await backend.generateProof(witness, {
-      keccak: true,
-    });
-    return { proof, publicInputs: fieldsToBytes(publicInputs) };
-  } finally {
-    await backend.destroy();
-  }
   const backend = await getBackend(type);
   const { proof, publicInputs } = await backend.generateProof(witness, {
     keccak: true,
