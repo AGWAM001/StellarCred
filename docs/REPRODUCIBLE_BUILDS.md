@@ -162,11 +162,15 @@ Every pull request that touches contract source, `Cargo.lock`, `rust-toolchain.t
 or the reproducible Dockerfile triggers the **Reproducible Build** CI job
 (`.github/workflows/reproducible-build.yml`). That job:
 
-1. Builds the Docker image from `docker/Dockerfile.reproducible`.
-2. Runs the build container **twice** in independent Docker runs (no shared
-   writable state between runs).
+1. Builds the Docker image from `docker/Dockerfile.reproducible`. The image
+   installs the compiler and pre-fetches all Cargo dependencies but does **not**
+   run `cargo build` — compilation is deferred to run time.
+2. Runs the build container **twice** in independent `docker run` invocations.
+   Each run executes `cargo build --release --target wasm32v1-none --locked --offline`
+   from scratch inside its own container, with `SOURCE_DATE_EPOCH=0`.
 3. Computes SHA-256 of all four WASM artifacts from each run.
-4. Diffs the two hash lists — the job fails if any file differs.
+4. Diffs the two hash lists — the job fails if any file differs, catching any
+   non-determinism in code-generation, symbol ordering, or LTO.
 5. Uploads the WASM artifacts and a `sha256sums.txt` manifest as GitHub Actions
    artifacts (retained 30 / 90 days respectively) for independent inspection.
 

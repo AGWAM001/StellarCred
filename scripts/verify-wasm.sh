@@ -67,7 +67,6 @@ fi
 # ---------------------------------------------------------------------------
 command -v stellar >/dev/null 2>&1  || die "'stellar' CLI not found. Install with: cargo install stellar-cli --locked --version 27.0.0"
 command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || die "sha256sum / shasum not found."
-command -v xxd >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || die "xxd or python3 required for hex decoding."
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WASM_DIR="$REPO_ROOT/target/wasm32v1-none/release"
