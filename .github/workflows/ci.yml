@@ -8,15 +8,16 @@ on:
 
 jobs:
   contracts:
-    name: Contract tests
+    name: Contract tests & build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
+          components: clippy
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -28,10 +29,10 @@ jobs:
           key: cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-
 
-      - name: Build contracts
+      - name: Build WASM artifacts (required by upgrade tests)
         run: cargo build --release --target wasm32v1-none
 
-      - name: Run tests
+      - name: Run contract tests
         run: cargo test
 
   circuits:
@@ -126,7 +127,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -144,7 +145,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm tsc --noEmit
+        run: pnpm exec tsc --noEmit
 
       - name: Build
         run: pnpm build
@@ -157,3 +158,6 @@ jobs:
           NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
           NEXT_PUBLIC_STELLAR_NETWORK: testnet
           NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
+
+      - name: Run issuer tests (incl. cross-boundary circuit test)
+        run: pnpm --filter @stellarcred/issuer test
