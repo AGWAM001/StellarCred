@@ -6,8 +6,7 @@
 // bind the public key to the registered issuer. The signature and secret stay
 // private.
 
-use dep::poseidon::poseidon2::Poseidon2;
-use std::ecdsa_secp256k1::verify_signature;
+use dep::credential_lib;
 
 fn main(
     secret: Field,
@@ -17,7 +16,5 @@ fn main(
     issuer_x: pub [u8; 32],
     issuer_y: pub [u8; 32],
 ) {
-    assert(Poseidon2::hash([secret, salt], 2) == commitment);
-    let z: [u8; 32] = commitment.to_be_bytes();
-    assert(verify_signature(issuer_x, issuer_y, sig, z));
+    credential_lib::assert_committed_and_signed(secret, salt, sig, commitment, issuer_x, issuer_y);
 }
