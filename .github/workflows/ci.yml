@@ -11,7 +11,7 @@ jobs:
     name: Contract tests & build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,7 +45,7 @@ jobs:
     name: Script syntax check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check deploy.sh syntax
         run: bash -n scripts/deploy.sh
@@ -63,7 +63,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -94,3 +94,6 @@ jobs:
           NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
           NEXT_PUBLIC_STELLAR_NETWORK: testnet
           NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
+
+      - name: Run issuer tests (incl. cross-boundary circuit test)
+        run: pnpm --filter @stellarcred/issuer test
