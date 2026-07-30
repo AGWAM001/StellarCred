@@ -23,9 +23,10 @@
 # ---------------------------------------------------------------------------
 
 # Official Rust image — compiler is already installed, no rustup script needed.
-# Pin to a specific digest for a fully reproducible base layer.
-# To update: docker pull rust:1.93.1-slim-bookworm && docker inspect --format='{{index .RepoDigests 0}}'
-FROM rust:1.93.1-slim-bookworm AS base
+# Pinned to a specific manifest digest so the base layer is immutable between
+# CI runs. To update: docker pull rust:1.93.1-slim-bookworm && \
+#   docker inspect --format='{{index .RepoDigests 0}}' rust:1.93.1-slim-bookworm
+FROM rust:1.93.1-slim-bookworm@sha256:81ca81aaf083572c3ddfb8d6f290d74ccbd4d0bda9e0f56ac4e48fd380359466 AS base
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

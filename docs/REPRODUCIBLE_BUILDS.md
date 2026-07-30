@@ -61,12 +61,18 @@ docker build \
 mkdir -p out
 docker run --rm \
   -v "$(pwd)/out:/out" \
+  --env SOURCE_DATE_EPOCH=0 \
   stellarcred-build \
-  sh -c "cp target/wasm32v1-none/release/credential_verifier.wasm \
+  sh -c "cargo build \
+           --release \
+           --target wasm32v1-none \
+           --locked \
+           --offline \
+         && cp target/wasm32v1-none/release/credential_verifier.wasm \
                 target/wasm32v1-none/release/issuer_registry.wasm \
                 target/wasm32v1-none/release/proof_registry.wasm \
                 target/wasm32v1-none/release/gated_pool.wasm \
-             /out/"
+              /out/"
 ```
 
 ### 4. Hash the local artifacts
