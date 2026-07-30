@@ -127,11 +127,11 @@ fetch_onchain_hash() {
     local network="$2"
     local rpc_url="$3"
 
-    stellar contract info \
+    stellar contract info hash \
         --id "$contract_id" \
         --network "$network" \
         --rpc-url "$rpc_url" \
-        --wasm-hash 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]' || true
+        2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]' || true
 }
 
 # ---------------------------------------------------------------------------
