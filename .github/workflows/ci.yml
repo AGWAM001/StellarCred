@@ -53,7 +53,7 @@ jobs:
       - name: Compile circuits
         run: |
           export PATH="$HOME/.nargo/bin:$PATH"
-          for dir in commit kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof; do
+          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof; do
             echo "=== $dir ==="
             (cd "$dir" && nargo compile)
           done
@@ -73,6 +73,7 @@ jobs:
               jurisdiction_proof) echo jurisdiction ;;
               funds_proof) echo funds ;;
               employment_proof) echo employment ;;
+              accreditation_proof) echo accreditation ;;
               *) echo "$1" ;;
             esac
           }
