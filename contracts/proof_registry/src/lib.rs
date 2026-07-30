@@ -432,6 +432,7 @@ impl ProofRegistry {
             .persistent()
             .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
 
+        #[allow(deprecated)]
         env.events().publish(
             (symbol_short!("revoked"),),
             (holder, credential_type, issuer, env.ledger().timestamp()),

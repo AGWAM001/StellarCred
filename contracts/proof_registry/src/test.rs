@@ -969,7 +969,7 @@ fn batch_max_size_boundary_accepts_five() {
     ];
 
     // Must not panic — 5 distinct types is within the allowed maximum.
-    registry.submit_proofs_batch(&holder, &submissions);
+    registry.submit_proofs(&holder, &submissions);
     assert!(registry.is_verified(&holder, &types[0], &None).0);
     assert!(registry.is_verified(&holder, &types[4], &None).0);
 }

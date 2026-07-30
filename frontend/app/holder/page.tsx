@@ -953,14 +953,14 @@ function BatchProofFlow({
     });
 
     toast.info(`Submitting ${currentCreds.length} proofs to Stellar…`);
-    submitProofsBatch({ holder: currentHolder, submissions })
-      .then((hash) => {
+    submitProofs({ holder: currentHolder, submissions })
+      .then((hash: string) => {
         setTxHash(hash);
         setBatchStage("confirmed");
         onProved(hash, currentCreds.map((c) => c.commitment));
         toast.success(`All ${currentCreds.length} proofs confirmed on-chain`, { txHash: hash });
       })
-      .catch((e) => {
+      .catch((e: any) => {
         const parsed = parseContractError((e as Error).message);
         setBatchError(parsed);
         setBatchStage("error");
