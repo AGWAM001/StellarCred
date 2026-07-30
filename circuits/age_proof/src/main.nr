@@ -4,8 +4,7 @@
 // birth, bound to a commitment a trusted issuer signed (secp256k1 ECDSA, checked
 // in-circuit). Dates are days since the Unix epoch.
 
-use dep::poseidon::poseidon2::Poseidon2;
-use std::ecdsa_secp256k1::verify_signature;
+use dep::credential_lib;
 
 fn main(
     // private
@@ -19,10 +18,7 @@ fn main(
     current_date: pub u64,
     threshold_years: pub u64,
 ) {
-    assert(Poseidon2::hash([date_of_birth as Field, salt], 2) == commitment);
-    let z: [u8; 32] = commitment.to_be_bytes();
-    assert(verify_signature(issuer_x, issuer_y, sig, z));
-    assert(current_date >= date_of_birth);
-    let age_years = (current_date - date_of_birth) / 365;
-    assert(age_years >= threshold_years);
+    credential_lib::assert_committed_and_signed(date_of_birth as Field, salt, sig, commitment, issuer_x, issuer_y);
+    assert(threshold_years <= 200);
+    assert(current_date >= date_of_birth + threshold_years * 365);
 }
