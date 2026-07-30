@@ -77,16 +77,18 @@ fn register_issuer_emits_event() {
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let contract_id = env.register(IssuerRegistry, (admin.clone(),));
-    let client2 = IssuerRegistryClient::new(&env, &contract_id);
+    let client = IssuerRegistryClient::new(&env, &contract_id);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
     let types = vec![&env, symbol_short!("kyc")];
 
-    client2.register_issuer(&issuer, &pubkey, &types);
+    client.register_issuer(&issuer, &pubkey, &types);
 
+    // Filter to this contract's events to avoid picking up noise from other
+    // contracts that may have been registered in the same Env.
     assert_eq!(
-        env.events().all(),
+        env.events().all().filter_by_contract(&contract_id),
         vec![
             &env,
             (
@@ -115,8 +117,10 @@ fn revoke_issuer_emits_event() {
     client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
     client.revoke_issuer(&issuer);
 
+    // Filter to this contract's events so the assertion is stable regardless
+    // of what other contracts were registered in the same Env.
     assert_eq!(
-        env.events().all(),
+        env.events().all().filter_by_contract(&contract_id),
         vec![
             &env,
             (

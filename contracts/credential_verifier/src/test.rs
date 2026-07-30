@@ -142,7 +142,7 @@ fn set_vk_emits_event() {
     );
 
     assert_eq!(
-        env.events().all(),
+        env.events().all().filter_by_contract(&contract_id),
         vec![
             &env,
             (

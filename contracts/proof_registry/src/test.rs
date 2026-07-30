@@ -282,9 +282,11 @@ fn issuer_revoke_emits_event() {
     submit(&env, &h, &holder, 1000);
     h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
 
-    // submit emits "submitted", revoke emits "revoked" — assert the full list.
+    // deploy() registers an issuer (EventIssuerRegistered) and sets a VK
+    // (EventVkSet) in other contracts, so the full event log has 4 entries.
+    // Scope to the ProofRegistry contract to assert only what it emits.
     assert_eq!(
-        env.events().all(),
+        env.events().all().filter_by_contract(&h.registry_id),
         vec![
             &env,
             (
