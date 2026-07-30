@@ -21,7 +21,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { Check } from "@/components/Check";
 import { ConfigBanner } from "@/components/ConfigBanner";
-import { ProofProgress, type ProgressStep, type StepStatus } from "@/components/ProofProgress";
+
 import { truncateHash } from "@/lib/format";
 import { EXPLORER_TX } from "@/lib/stellar";
 import { computeWitness, proveWithBackend } from "@/lib/proof";
@@ -384,6 +384,101 @@ function ImportPanel({ onImport, onCancel }: { onImport: (c: Credential) => void
         <button className="btn btn-primary btn-sm" onClick={onAdd} disabled={!json.trim()}>Add credential</button>
         <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
       </div>
+    </div>
+  );
+}
+
+// --- progress types + small ProofProgress component ---
+
+type StepStatus = "pending" | "active" | "done" | "error";
+
+type ProgressStep = {
+  label: string;
+  status: StepStatus;
+  error?: string;
+};
+
+function ProofProgress({ steps }: { steps: ProgressStep[] }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
+      {steps.map((s, idx) => {
+        const isLast = idx === steps.length - 1;
+        return (
+          <div key={s.label} style={{ display: "flex", gap: "0.85rem", alignItems: "flex-start" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 28, flexShrink: 0 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: "50%",
+                  display: "grid",
+                  placeItems: "center",
+                  border: `1px solid ${
+                    s.status === "done" ? "var(--accent)" :
+                    s.status === "active" ? "rgba(62,207,142,0.5)" :
+                    "var(--border-strong)"
+                  }`,
+                  background: s.status === "done" ? "var(--accent)" : "transparent",
+                  color: s.status === "done" ? "var(--bg)" : s.status === "active" ? "var(--accent)" : "var(--faint)",
+                  transition: "all 0.25s var(--ease)",
+                }}
+              >
+                {s.status === "done" ? (
+                  <IconCheck size={13} stroke={3} />
+                ) : s.status === "active" ? (
+                  <IconLoader2 size={13} className="spin" />
+                ) : s.status === "error" ? (
+                  <IconAlertTriangle size={13} />
+                ) : (
+                  <span style={{ fontSize: "0.7rem", color: "var(--faint)" }}>•</span>
+                )}
+              </div>
+
+              {!isLast && (
+                <div
+                  style={{
+                    width: 1,
+                    flex: 1,
+                    minHeight: 20,
+                    marginTop: 6,
+                    background: s.status === "done" ? "var(--accent)" : "var(--border)",
+                    opacity: s.status === "done" ? 0.4 : 1,
+                    transition: "background 0.3s var(--ease)",
+                  }}
+                />
+              )}
+            </div>
+
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", paddingTop: "0.25rem" }}>
+                <span style={{ fontWeight: 600, fontSize: "0.9rem", color: s.status === "pending" ? "var(--muted)" : "var(--text)" }}>
+                  {s.label}
+                </span>
+                {s.status === "active" && (
+                  <span
+                    style={{
+                      fontSize: "0.68rem",
+                      color: "var(--accent)",
+                      background: "rgba(62,207,142,0.1)",
+                      border: "1px solid rgba(62,207,142,0.2)",
+                      borderRadius: 999,
+                      padding: "0.12rem 0.45rem",
+                      fontWeight: 500,
+                    }}
+                  >
+                    running
+                  </span>
+                )}
+              </div>
+              {s.error && (
+                <div style={{ marginTop: "0.45rem", color: "var(--danger)", fontSize: "0.82rem" }}>
+                  {s.error}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
