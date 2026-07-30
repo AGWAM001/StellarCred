@@ -82,7 +82,7 @@ jobs:
 
           for dir in kyc_proof age_proof income_proof jurisdiction_proof funds_proof; do
             type=$(type_of "$dir")
-            json="$dir/target/${dir}.json"
+            json="target/${dir}.json"
             out="$VK_TMP/$type"
             echo "=== Re-deriving VK for $type ==="
 
