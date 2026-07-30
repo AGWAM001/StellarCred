@@ -94,3 +94,6 @@ jobs:
           NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
           NEXT_PUBLIC_STELLAR_NETWORK: testnet
           NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
+
+      - name: Run issuer tests (incl. cross-boundary circuit test)
+        run: pnpm --filter @stellarcred/issuer test
