@@ -3,6 +3,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { IssuerClient, CREDENTIAL_TYPES, type CredentialType, type ClaimParams } from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
 import { logger, stripSensitiveFields, resolveRequestId } from "../../../lib/logger";
+import { readJsonBody, bodyErrorResponse } from "../../../lib/request-limits";
 
 // Server-side only — never shipped to the browser.
 // Set ISSUER_PRIVATE_KEY in .env.local to the 64-char hex secp256k1 private
@@ -238,11 +239,18 @@ export async function POST(req: NextRequest) {
     returnUrl?: string;
   };
 
-  try {
-    body = await req.json();
-  } catch {
-    return sendResponse(NextResponse.json({ error: "Invalid JSON" }, { status: 400 }));
+  // Size-guarded read — runs before parsing, so an oversized payload is
+  // rejected without being buffered. The body itself is never logged.
+  const parsed = await readJsonBody<typeof body>(req);
+  if (!parsed.ok) {
+    logger.warn(stripSensitiveFields({
+      event: "request_rejected",
+      outcome: parsed.error.code,
+      requestId,
+    }));
+    return sendResponse(bodyErrorResponse(parsed.error));
   }
+  body = parsed.body;
 
   const {
     holder,
