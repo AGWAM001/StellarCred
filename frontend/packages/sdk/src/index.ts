@@ -231,8 +231,12 @@ async function getClient(): Promise<ProofRegistryClient | null> {
         allowHttp: rpcUrl.startsWith("http://"),
       }),
   );
-  // Don't cache a failed SDK import — the next read should retry.
+  // Don't cache a failed SDK import — the next read should retry. `_sdk` holds
+  // the import promise itself, so it has to be cleared too: leaving a rejected
+  // promise there would make every later `getClient()` fail on the same
+  // rejection instead of re-attempting the import.
   _client.catch(() => {
+    _sdk = null;
     _client = null;
     _clientKey = "";
   });
@@ -421,8 +425,15 @@ export async function hasClaims(
 export async function getClaims(wallet: string): Promise<Claim[]> {
   warnIfMissingRegistryIdOnce();
   const results = await fanOut(CLAIM_TYPES, async (t) => {
-    const r = await readIsVerified(wallet, t);
-    return r && r.valid ? { type: t, verifiedAt: r.verifiedAt, expiry: r.expiry } : null;
+    // Same isolation as `hasClaims`: `readIsVerified` swallows read errors, but
+    // its own `getClient()` await can still reject (a failed SDK import), which
+    // would otherwise reject the whole fan-out instead of dropping one type.
+    try {
+      const r = await readIsVerified(wallet, t);
+      return r && r.valid ? { type: t, verifiedAt: r.verifiedAt, expiry: r.expiry } : null;
+    } catch {
+      return null;
+    }
   });
   return results.filter((x): x is NonNullable<typeof x> => x !== null);
 }
