@@ -286,11 +286,11 @@ fn issuer_revoke_emits_event() {
     // (EventVkSet) in other contracts, so the full event log has 4 entries.
     // Scope to the ProofRegistry contract to assert only what it emits.
     assert_eq!(
-        env.events().all().filter_by_contract(&h.registry_id),
+        env.events().all().filter_by_contract(&h.registry.address),
         vec![
             &env,
             (
-                h.registry_id.clone(),
+                h.registry.address.clone(),
                 (
                     symbol_short!("proof_reg"),
                     symbol_short!("submitted"),
@@ -306,7 +306,7 @@ fn issuer_revoke_emits_event() {
                 .into_val(&env),
             ),
             (
-                h.registry_id.clone(),
+                h.registry.address.clone(),
                 (
                     symbol_short!("proof_reg"),
                     symbol_short!("revoked"),

@@ -142,11 +142,11 @@ fn set_vk_emits_event() {
     );
 
     assert_eq!(
-        env.events().all().filter_by_contract(&contract_id),
+        env.events().all().filter_by_contract(&c.address),
         vec![
             &env,
             (
-                contract_id.clone(),
+                c.address.clone(),
                 (
                     symbol_short!("cred_ver"),
                     symbol_short!("vk_set"),
