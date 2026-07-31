@@ -8,7 +8,13 @@ use soroban_sdk::{symbol_short, testutils::Address as _, Address, Bytes, Env, Sy
 // BN254 verification path, not a stub.
 macro_rules! fixture {
     ($t:literal, $f:literal) => {
-        include_bytes!(concat!("../../../fixtures/", $t, "/", $f))
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/",
+            $t,
+            "/",
+            $f
+        ))
     };
 }
 
