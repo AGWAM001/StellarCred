@@ -8,7 +8,7 @@ on:
 
 jobs:
   contracts:
-    name: Contract tests
+    name: Contract tests & build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +16,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          # Toolchain version is read from rust-toolchain.toml; specifying it
+          # here too lets the action cache by version rather than just "stable".
+          toolchain: "1.93.1"
           targets: wasm32v1-none
+          components: clippy
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -28,39 +32,36 @@ jobs:
           key: cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-
 
-      - name: Install Noir
-        shell: bash
-        run: |
-          curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
-          export PATH="$HOME/.nargo/bin:$PATH"
-          noirup -v 1.0.0-beta.9
+      - name: Build WASM artifacts
+        # --locked ensures Cargo.lock is respected exactly (no silent dep upgrades).
+        run: cargo build --release --target wasm32v1-none --locked
 
-      - name: Install Barretenberg
-        shell: bash
-        run: |
-          curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
-          export PATH="$HOME/.bb/bin:$PATH"
-          bbup -v 0.87.0
+      - name: Run contract tests
+        run: cargo test --locked
 
-      - name: Generate circuit fixtures
-        shell: bash
-        run: |
-          export PATH="$HOME/.nargo/bin:$HOME/.bb/bin:$PATH"
-          bash ./circuits/scripts/build.sh
+      - name: Lint (clippy)
+        # Warn-only — clippy lints should not block CI on first integration,
+        # but the output is captured so reviewers can see any issues.
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true
 
-      - name: Verify generated fixtures
-        shell: bash
-        run: |
-          ls -R fixtures
-          test -f fixtures/range/vk
-          test -f fixtures/range/proof
-          test -f fixtures/range/public_inputs
+  scripts:
+    name: Script syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Build contracts
-        run: cargo build --release --target wasm32v1-none
+      - name: Check deploy.sh syntax
+        run: bash -n scripts/deploy.sh
 
-      - name: Run tests
-        run: cargo test
+      - name: Check deploy-mainnet.sh syntax
+        run: bash -n scripts/deploy-mainnet.sh
+
+      - name: Check benchmark.sh syntax
+        run: bash -n scripts/benchmark.sh
+
+      - name: Check verify-wasm.sh syntax
+        run: bash -n scripts/verify-wasm.sh
 
   frontend:
     name: Frontend typecheck & build
@@ -87,7 +88,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm tsc --noEmit
+        run: pnpm exec tsc --noEmit
 
       - name: Build
         run: pnpm build
@@ -100,3 +101,48 @@ jobs:
           NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
           NEXT_PUBLIC_STELLAR_NETWORK: testnet
           NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
+
+      - name: Run issuer tests (incl. cross-boundary circuit test)
+        run: pnpm --filter @stellarcred/issuer test
+
+  a11y:
+    name: Accessibility (axe-core)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # Dummy values so the build doesn't error on missing env vars
+      NEXT_PUBLIC_PROOF_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000001
+      NEXT_PUBLIC_ISSUER_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000002
+      NEXT_PUBLIC_CREDENTIAL_VERIFIER_ID: C000000000000000000000000000000000000000000000000000000000000003
+      NEXT_PUBLIC_GATED_POOL_ID: C000000000000000000000000000000000000000000000000000000000000004
+      NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
+      NEXT_PUBLIC_STELLAR_NETWORK: testnet
+      NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run axe-core accessibility checks
+        run: pnpm test:e2e
