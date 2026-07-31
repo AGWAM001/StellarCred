@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logger, stripSensitiveFields, resolveRequestId } from "../../../lib/logger";
+import { checkContentLength, bodyErrorResponse } from "../../../lib/request-limits";
 import { fetchPlaidBalance } from "../../../lib/plaid";
 
 export async function GET(req: NextRequest) {
@@ -9,6 +10,18 @@ export async function GET(req: NextRequest) {
     response.headers.set("x-request-id", requestId);
     return response;
   };
+
+  // This route reads no body, but it still refuses an oversized one rather
+  // than letting the request reach the upstream Plaid call.
+  const oversized = checkContentLength(req);
+  if (oversized) {
+    logger.warn(stripSensitiveFields({
+      event: "plaid_balance_request_rejected",
+      outcome: oversized.code,
+      requestId,
+    }));
+    return sendResponse(bodyErrorResponse(oversized));
+  }
 
   logger.info(stripSensitiveFields({ event: "plaid_balance_request_received", requestId }));
 

@@ -7,6 +7,7 @@ import {
   type ClaimParams,
 } from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
+import { readJsonBody, bodyErrorResponse } from "../../../lib/request-limits";
 import {
   logger,
   stripSensitiveFields,
@@ -207,7 +208,7 @@ export async function POST(req: NextRequest) {
     return response;
   };
 
-  let body: {
+  type BodyType = {
     credential_types?: string[];
     // Legacy single-type shape — still accepted for backward compatibility.
     type?: string;
@@ -223,13 +224,11 @@ export async function POST(req: NextRequest) {
     returnUrl?: string;
   };
 
-  try {
-    body = await req.json();
-  } catch {
-    return sendResponse(
-      NextResponse.json({ error: "Invalid JSON" }, { status: 400 }),
-    );
+  const parsed = await readJsonBody<BodyType>(req);
+  if (!parsed.ok) {
+    return sendResponse(bodyErrorResponse(parsed.error));
   }
+  const body = parsed.body;
 
   const {
     holder,
