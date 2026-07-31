@@ -68,6 +68,9 @@ async function deriveKey(
 export async function createEncryptedBackup(
   passphrase: string
 ): Promise<EncryptedBackup> {
+  if (!passphrase) {
+    throw new Error("Passphrase must not be empty");
+  }
   const credentials = loadCredentials();
   const plaintext = new TextEncoder().encode(JSON.stringify(credentials));
 
