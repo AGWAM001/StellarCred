@@ -169,7 +169,7 @@ export function validateVerifyParams(params: {
     params.currentOrigin
   );
 
-  const claimResult =
+  const claimError =
     params.claim && !(VALID_CLAIM_TYPES as readonly string[]).includes(params.claim)
       ? `Unknown credential type "${params.claim}". Supported: ${VALID_CLAIM_TYPES.join(", ")}.`
       : null;
