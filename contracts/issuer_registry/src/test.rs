@@ -79,10 +79,12 @@ fn register_issuer_emits_event() {
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
-    let types = vec![&env, symbol_short!("kyc")];
 
-    client.register_issuer(&issuer, &pubkey, &types);
+    client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
 
+    // Assert immediately after the call — the snapshot framework drains
+    // env.events().all() after each contract invocation, so we must
+    // capture events before any subsequent call.
     assert_eq!(
         env.events().all(),
         vec![
@@ -108,9 +110,9 @@ fn revoke_issuer_emits_event() {
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[1u8; 64]);
-    client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
-    client.revoke_issuer(&issuer);
 
+    // Call register and assert its event immediately.
+    client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
     assert_eq!(
         env.events().all(),
         vec![
@@ -124,6 +126,15 @@ fn revoke_issuer_emits_event() {
                 }
                 .into_val(&env),
             ),
+        ],
+    );
+
+    // Call revoke and assert its event immediately.
+    client.revoke_issuer(&issuer);
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
             (
                 client.address.clone(),
                 (symbol_short!("iss_reg"), symbol_short!("revoked")).into_val(&env),

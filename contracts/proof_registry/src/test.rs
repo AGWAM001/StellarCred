@@ -279,12 +279,9 @@ fn issuer_revoke_emits_event() {
     let h = deploy(&env);
     let holder = Address::generate(&env);
 
+    // Assert the submitted event immediately after submit — the snapshot
+    // framework drains env.events().all() after each contract invocation.
     submit(&env, &h, &holder, 1000);
-    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
-
-    // deploy() registers an issuer (EventIssuerRegistered) and sets a VK
-    // (EventVkSet) in other contracts, so the full event log has 4 entries.
-    // Scope to the ProofRegistry contract to assert only what it emits.
     assert_eq!(
         env.events().all().filter_by_contract(&h.registry.address),
         vec![
@@ -305,6 +302,15 @@ fn issuer_revoke_emits_event() {
                 }
                 .into_val(&env),
             ),
+        ],
+    );
+
+    // Assert the revoked event immediately after revoke.
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+    assert_eq!(
+        env.events().all().filter_by_contract(&h.registry.address),
+        vec![
+            &env,
             (
                 h.registry.address.clone(),
                 (
