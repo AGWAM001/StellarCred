@@ -19,6 +19,40 @@ use soroban_sdk::{
     symbol_short, Address, Bytes, BytesN, Env, Map, Symbol, Val, Vec,
 };
 
+// ── Event topic constants ────────────────────────────────────────────────────
+// Topics follow the convention: (contract, action, credential_type).
+// `contract` is always `symbol_short!("proof_reg")` for ProofRegistry events.
+// `action`   identifies the operation.
+// `credential_type` is the per-event Symbol (e.g. "kyc", "age").
+
+/// Payload emitted when a proof is successfully verified and stored.
+/// Topics: ("proof_reg", "submitted", credential_type)
+#[contracttype]
+#[derive(Clone)]
+pub struct EventProofSubmitted {
+    /// The holder whose proof was verified.
+    pub holder: Address,
+    /// The issuer that signed the credential.
+    pub issuer: Address,
+    /// The ledger timestamp at which verification was recorded.
+    pub verified_at: u64,
+    /// The expiry timestamp supplied by the holder.
+    pub expiry: u64,
+}
+
+/// Payload emitted when an issuer revokes a holder's proof.
+/// Topics: ("proof_reg", "revoked", credential_type)
+#[contracttype]
+#[derive(Clone)]
+pub struct EventProofRevoked {
+    /// The holder whose proof was revoked.
+    pub holder: Address,
+    /// The issuer that performed the revocation.
+    pub issuer: Address,
+    /// The ledger timestamp at which the revocation was recorded.
+    pub revoked_at: u64,
+}
+
 // Persistent-entry lifetime management (~5s ledgers).
 const DAY_IN_LEDGERS: u32 = 17280;
 const PROOF_BUMP_THRESHOLD: u32 = DAY_IN_LEDGERS;
@@ -222,7 +256,7 @@ impl ProofRegistry {
             panic_with_error!(&env, Error::VerificationFailed);
         }
 
-        let key = DataKey::Proof(holder, credential_type.clone());
+        let key = DataKey::Proof(holder.clone(), credential_type.clone());
         let record = ProofRecord {
             verified_at: env.ledger().timestamp(),
             expiry,
@@ -235,15 +269,26 @@ impl ProofRegistry {
             .persistent()
             .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
 
-        // Emit an event matching the event emission shape in the batch-proof path.
+        // Emit: topics = ("proof_reg", "submitted", credential_type)
+        //       data   = EventProofSubmitted { holder, issuer, verified_at, expiry }
         env.events().publish(
-            (symbol_short!("proof"), symbol_short!("verified")),
-            record.expiry,
+            (
+                symbol_short!("proof_reg"),
+                symbol_short!("submitted"),
+                credential_type,
+            ),
+            EventProofSubmitted {
+                holder,
+                issuer: record.issuer.unwrap(),
+                verified_at: record.verified_at,
+                expiry: record.expiry,
+            },
         );
     }
 
-    /// One event is emitted per successfully verified credential, matching
-    /// the event emission shape in the single-proof path.
+    /// One event is emitted per successfully verified credential.
+    /// Topics: ("proof_reg", "submitted", credential_type)
+    /// Data:   EventProofSubmitted { holder, issuer, verified_at, expiry }
     // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
     // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
     // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
@@ -315,11 +360,21 @@ impl ProofRegistry {
                 .persistent()
                 .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
 
-            // Emit one event per credential, matching the shape callers already
-            // expect from the single-proof path.
+            // Emit one event per credential.
+            // Topics: ("proof_reg", "submitted", credential_type)
+            // Data:   EventProofSubmitted { holder, issuer, verified_at, expiry }
             env.events().publish(
-                (symbol_short!("proof"), symbol_short!("verified")),
-                record.expiry,
+                (
+                    symbol_short!("proof_reg"),
+                    symbol_short!("submitted"),
+                    sub.credential_type.clone(),
+                ),
+                EventProofSubmitted {
+                    holder: holder.clone(),
+                    issuer: record.issuer.clone().unwrap(),
+                    verified_at: record.verified_at,
+                    expiry: record.expiry,
+                },
             );
         }
     }
@@ -418,6 +473,10 @@ impl ProofRegistry {
 
     /// Invalidate a holder's cached proof. Only the registered issuer for
     /// `credential_type` may call this (e.g. when KYC status changes).
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here.
+    // The idiomatic Soroban v26 replacement is `#[contractevent]`; we use
+    // value-based publish to stay consistent with the rest of the codebase.
+    #[allow(deprecated)]
     pub fn revoke(env: Env, issuer: Address, holder: Address, credential_type: Symbol) {
         issuer.require_auth();
 
@@ -438,9 +497,19 @@ impl ProofRegistry {
             .persistent()
             .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
 
+        // Emit: topics = ("proof_reg", "revoked", credential_type)
+        //       data   = EventProofRevoked { holder, issuer, revoked_at }
         env.events().publish(
-            (symbol_short!("revoked"),),
-            (holder, credential_type, issuer, env.ledger().timestamp()),
+            (
+                symbol_short!("proof_reg"),
+                symbol_short!("revoked"),
+                credential_type,
+            ),
+            EventProofRevoked {
+                holder,
+                issuer,
+                revoked_at: env.ledger().timestamp(),
+            },
         );
     }
 
