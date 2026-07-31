@@ -231,7 +231,6 @@ export async function POST(req: NextRequest) {
       NextResponse.json({ error: "Invalid JSON" }, { status: 400 }),
     );
   }
-  body = parsed.body;
 
   const {
     holder,
