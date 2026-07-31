@@ -131,6 +131,21 @@ export async function decryptBackup(
     throw new Error("Invalid backup contents");
   }
 
+  // Validate each entry has required Credential fields
+  for (const item of parsed) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      !item.type ||
+      item.value === undefined ||
+      !item.commitment ||
+      !item.issuerId ||
+      !item.sig
+    ) {
+      throw new Error("Invalid backup contents: malformed credential entry");
+    }
+  }
+
   return parsed as Credential[];
 }
 
