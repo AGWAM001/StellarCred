@@ -49,16 +49,64 @@ const nextConfig = {
     return config;
   },
 
-  // NOTE: We intentionally do NOT set Cross-Origin-Opener/Embedder-Policy.
-  // Those headers enable SharedArrayBuffer (crossOriginIsolated), which makes
-  // bb.js take its *multithreaded* path. That path spawns a Web Worker from
-  // @aztec/bb.js's prebuilt main.worker.js bundle via `new Worker(new URL(...))`.
-  // Next.js's webpack re-wraps that already-bundled file and corrupts its inner
-  // module runtime, throwing "Object.defineProperty called on non-object" the
-  // moment you generate a proof. Without these headers, getSharedMemoryAvailable()
-  // is false, so bb.js runs single-threaded: it only loads barretenberg.js (a
-  // trivial one-line module exporting the wasm as a data URI) and never touches
-  // the worker. Slower proving, but it actually runs. See lib/proof.ts.
+  // Cross-Origin-Opener/Embedder-Policy make the page crossOriginIsolated,
+  // which unlocks SharedArrayBuffer and lets bb.js take its *multithreaded*
+  // proving path (lib/proof.ts picks navigator.hardwareConcurrency threads
+  // when crossOriginIsolated, else falls back to 1).
+  //
+  // This used to corrupt proving: @aztec/bb.js's UltraHonkBackend spawns a Web
+  // Worker from its prebuilt main.worker.js bundle via
+  // `new Worker(new URL("./main.worker.js", import.meta.url))`, and if
+  // Next.js/webpack re-processed that already-bundled file it corrupted its
+  // inner module runtime ("Object.defineProperty called on non-object"). That
+  // no longer applies: scripts/copy-bb.mjs copies bb.js's browser bundle to
+  // /public/bb, and lib/proof.ts loads it with a webpackIgnore dynamic import,
+  // so webpack never touches it regardless of these headers. All bb.js assets
+  // (main.worker.js, barretenberg.js, the .wasm) are served same-origin from
+  // /public/bb, so COEP's same-origin exemption covers them without needing
+  // extra Cross-Origin-Resource-Policy headers.
+  //
+  // 'wasm-unsafe-eval' in script-src is required for WASM instantiation and
+  // is unrelated to cross-origin isolation.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data:",
+              // contracts.ts ("use client") calls getAccount / prepareTransaction /
+              // sendTransaction against the Soroban RPC from the browser — must be
+              // allowed here or proof submission and on-chain verification break.
+              `connect-src 'self' https://soroban-testnet.stellar.org https://soroban-mainnet.stellar.org${
+                process.env.NEXT_PUBLIC_RPC_URL ? " " + process.env.NEXT_PUBLIC_RPC_URL : ""
+              }`,
+            ].join("; ") + ";",
+          },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=63072000; includeSubDomains",
+          },
+          { key: "X-Frame-Options", value: "DENY" },
+          // components/QrScanner.tsx uses getUserMedia() for camera-based QR
+          // scanning (/verify and /holder). Explicitly scoped to this origin —
+          // no embedding context should be able to request it.
+          { key: "Permissions-Policy", value: "camera=(self)" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+        ],
+      },
+      // CORS headers for /api/* are handled by middleware.ts (OPTIONS preflight
+      // returns 204, all other methods get headers appended to the response).
+    ];
+  },
 };
 
 export default nextConfig;

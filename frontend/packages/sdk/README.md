@@ -9,7 +9,19 @@ Protocols call one function. No API key, no backend, no personal data handling �
 ```bash
 npm install @stellarcred/sdk
 ```
+## API Reference
 
+Generate the SDK API documentation locally:
+
+```bash
+pnpm docs:api
+```
+
+The generated documentation is written to:
+
+```
+docs/api/
+```
 ## Quick start
 
 ```ts
@@ -65,6 +77,20 @@ const incOk   = await StellarCred.hasClaim(wallet, "income", { minThreshold: 200
 const fundsOk = await StellarCred.hasClaim(wallet, "funds",  { minThreshold: 50000 });
 ```
 
+Pass `trustedIssuers` to restrict which issuer(s) a proof must come from — e.g. accept `kyc` only from Persona or Jumio, not a self-attested issuer. This is enforced on-chain by `ProofRegistry`; omit it (or leave it `undefined`) to accept a proof from any registered issuer, matching current behaviour. An empty array rejects every issuer.
+
+```ts
+const kycOk = await StellarCred.hasClaim(wallet, "kyc", {
+  trustedIssuers: ["G...PERSONA_ISSUER", "G...JUMIO_ISSUER"],
+});
+
+// Combine with a threshold — both must hold
+const incomeOk = await StellarCred.hasClaim(wallet, "income", {
+  minThreshold: 100000,
+  trustedIssuers: ["G...PLAID_ISSUER"],
+});
+```
+
 ### `getClaims(wallet)`
 
 Returns all active claims a wallet has proved, across all known credential types.
@@ -108,7 +134,7 @@ const stop = StellarCred.watchClaim(wallet, 'funds', {
 
 ### `buildVerifyUrl(options)`
 
-Builds a StellarCred verification URL to redirect users to. After verifying, StellarCred returns the user to `returnUrl` with `?sc_verified=true&sc_wallet=<address>` appended.
+Builds a StellarCred verification URL to redirect users to. After verifying, StellarCred returns the user to `returnUrl` with `?sc_verified=true&sc_wallet=<address>&sc_claims=<claim-types>` appended. `sc_claims` is a comma-separated list of the claim types issued in the current session (not all-time claims), allowing protocols to optimistically update their UI before an on-chain read completes.
 
 ```ts
 // Basic — redirect to verify KYC
@@ -160,8 +186,8 @@ are available from `@stellarcred/sdk` directly.
 import type { ClaimType, ClaimOptions } from "@stellarcred/sdk";
 
 // `ClaimType` is exactly the credential union published with the SDK.
-// `ClaimOptions.minThreshold` is the value passed to `hasClaim`'s on-chain
-// `check_claim` check.
+// `ClaimOptions.minThreshold` / `.trustedIssuers` are forwarded to `hasClaim`'s
+// on-chain `check_claim` / `is_verified` checks.
 function gate(wallet: string, claim: ClaimType, opts?: ClaimOptions) {
   return StellarCred.hasClaim(wallet, claim, opts);
 }
@@ -170,7 +196,7 @@ function gate(wallet: string, claim: ClaimType, opts?: ClaimOptions) {
 | Export | Kind | Description |
 |---|---|---|
 | `ClaimType` | `"kyc" \| "age" \| "income" \| "jurisdiction" \| "funds" \| "accreditation"` | The credential types StellarCred supports. Mirrors the on-chain `CLAIM_TYPES` constant. |
-| `ClaimOptions` | `{ minThreshold?: number }` | Optional settings for `hasClaim`. Only `minThreshold` is currently supported; it is forwarded to the on-chain `check_claim` for parameterised claim types and ignored for binary claims (`kyc`, `jurisdiction`). |
+| `ClaimOptions` | `{ minThreshold?: number; trustedIssuers?: string[] }` | Optional settings for `hasClaim`. `minThreshold` is forwarded to the on-chain `check_claim` for parameterised claim types and ignored for binary claims (`kyc`, `jurisdiction`). `trustedIssuers` restricts which issuer(s) the proof must come from, for any claim type — omit to accept any registered issuer. |
 | `Claim` | `{ type: string; verifiedAt: number; expiry: number }` | Shape returned by `getClaims`. |
 | `CLAIM_TYPES` | `readonly ClaimType[]` | The runtime constant. Use `as const` strings for compile-time narrowing. |
 
