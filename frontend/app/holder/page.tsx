@@ -869,37 +869,89 @@ function ProofFlow({
         </div>
 
         {/* step list */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <ProofProgress steps={steps} />
-          
-          {proofDone && proof && stage !== "submitting" && stage !== "confirmed" && (
-            <div style={{ marginTop: "0.5rem" }}>
-              <span className="mono" style={{ fontSize: "0.75rem", color: "var(--accent)" }}>
-                π {truncateHash("0x" + toHex(proof.proof))}
-              </span>
-              <span className="mono faint" style={{ fontSize: "0.72rem", marginLeft: "0.5rem" }}>
-                {proof.proof.length.toLocaleString()} bytes
-              </span>
-            </div>
-          )}
-          {submitDone && (
-            <div
-              className="row"
-              style={{ gap: "0.5rem", marginTop: "0.5rem", alignItems: "center" }}
-            >
-              <a
-                href={EXPLORER_TX(txHash)}
-                target="_blank"
-                rel="noreferrer"
-                className="row accent"
-                style={{ gap: "0.3rem", fontSize: "0.775rem" }}
-              >
-                {txHash.slice(0, 8)}...{txHash.slice(-6)}
-                <IconExternalLink size={12} />
-              </a>
-              <CopyButton value={txHash} />
-            </div>
-          )}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
+          <ProofStep
+            icon={<IconServer size={14} stroke={1.8} />}
+            title="Compute witness"
+            subtitle="Poseidon2 · secp256k1 · server-side Noir execution"
+            state={
+              stage === "witness"  ? "active" :
+              stage === "error"    ? "idle"   : "done"
+            }
+            detail={
+              stage === "witness" ? <AnimatedDots text="Running circuit on server" /> : null
+            }
+          />
+
+          <ProofStep
+            icon={<IconCpu size={14} stroke={1.8} />}
+            title="UltraHonk proof"
+            subtitle="BN254 · keccak transcript · browser WASM"
+            state={
+              stage === "proving"  ? "active" :
+              proofDone            ? "done"   : "idle"
+            }
+            detail={
+              stage === "proving" ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.65rem" }}>
+                  <ProvingBar />
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
+                      Generating proof in browser…
+                    </span>
+                    <span className="mono" style={{ fontSize: "0.72rem", color: "var(--faint)" }}>
+                      {elapsed}s
+                    </span>
+                  </div>
+                  <span style={{ fontSize: "0.72rem", color: "var(--faint)" }}>
+                    First run loads the WASM prover (~5–15 s)
+                  </span>
+                </div>
+              ) : proofDone && proof ? (
+                <div style={{ marginTop: "0.4rem" }}>
+                  <span className="mono" style={{ fontSize: "0.75rem", color: "var(--accent)" }}>
+                    π {truncateHash("0x" + toHex(proof.proof))}
+                  </span>
+                  <span className="mono faint" style={{ fontSize: "0.72rem", marginLeft: "0.5rem" }}>
+                    {proof.proof.length.toLocaleString()} bytes
+                  </span>
+                </div>
+              ) : null
+            }
+          />
+
+          <ProofStep
+            icon={<IconCloudUpload size={14} stroke={1.8} />}
+            title="Submit to Stellar"
+            subtitle="ProofRegistry.submit_proof · wallet signature"
+            state={
+              stage === "submitting" ? "active" :
+              submitDone             ? "done"   : "idle"
+            }
+            last
+            detail={
+              stage === "submitting" ? (
+                <AnimatedDots text="Writing to ProofRegistry" style={{ marginTop: "0.35rem" }} />
+              ) : submitDone ? (
+                <div
+                  className="row"
+                  style={{ gap: "0.5rem", marginTop: "0.3rem", alignItems: "center" }}
+                >
+                  <a
+                    href={EXPLORER_TX(txHash)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="row accent"
+                    style={{ gap: "0.3rem", fontSize: "0.775rem" }}
+                  >
+                    {txHash.slice(0, 8)}...{txHash.slice(-6)}
+                    <IconExternalLink size={12} />
+                  </a>
+                  <CopyButton value={txHash} />
+                </div>
+              ) : null
+            }
+          />
         </div>
 
         {/* CTA */}
@@ -1222,7 +1274,7 @@ function BatchProofFlow({
         <ProofStep
           icon={<IconCloudUpload size={14} stroke={1.8} />}
           title="Submit batch to Stellar"
-          subtitle={`ProofRegistry.submit_proofs_batch · ${creds.length} credentials · single Freighter signature`}
+          subtitle={`ProofRegistry.submit_proofs_batch · ${creds.length} credentials · single wallet signature`}
           state={
             isSubmitting ? "active" :
             isConfirmed  ? "done"   : "idle"
