@@ -35,8 +35,6 @@
   onDestroy(() => {
     gate?.destroy();
   });
-
-  $: snap = $state;
 </script>
 
 <div class="claim-gate">

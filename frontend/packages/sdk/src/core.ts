@@ -10,7 +10,7 @@
 //   gate.subscribe((state) => console.log(state));
 //   // later: gate.destroy();
 
-import { StellarCred, type ClaimType } from "./index";
+import { hasClaim, type ClaimType } from "./claims";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,10 @@ export function createClaimGate(config: ClaimGateConfig): ClaimGate {
   const listeners = new Set<ClaimGateListener>();
   let state: ClaimGateState = { claims: null, loading: true, error: null };
   let destroyed = false;
+  // Monotonic fetch id — lets an older in-flight fetch detect that a newer
+  // one has started and discard its (stale) results instead of overwriting
+  // fresher data (last-write-wins race on concurrent refetch()).
+  let fetchId = 0;
 
   function emit() {
     // Snapshot so listeners can't mutate our internal state.
@@ -84,6 +88,7 @@ export function createClaimGate(config: ClaimGateConfig): ClaimGate {
   }
 
   async function fetchClaims() {
+    const myId = ++fetchId;
     if (!wallet) {
       setState({ claims: null, loading: false, error: null });
       return;
@@ -95,19 +100,21 @@ export function createClaimGate(config: ClaimGateConfig): ClaimGate {
 
     await Promise.all(
       claimsToCheck.map(async (claimType) => {
-        if (destroyed) return;
+        if (destroyed || myId !== fetchId) return;
         try {
-          const ok = await StellarCred.hasClaim(wallet, claimType, {
+          const ok = await hasClaim(wallet, claimType, {
             minThreshold: thresholds[claimType],
           });
-          if (!destroyed) results[claimType] = ok;
+          if (!destroyed && myId === fetchId) results[claimType] = ok;
         } catch {
-          if (!destroyed) results[claimType] = false;
+          if (!destroyed && myId === fetchId) results[claimType] = false;
         }
       }),
     );
 
-    if (!destroyed) {
+    // Discard results if a newer fetch started (or we were destroyed) while
+    // this one was in flight.
+    if (!destroyed && myId === fetchId) {
       setState({ claims: results, loading: false });
     }
   }
