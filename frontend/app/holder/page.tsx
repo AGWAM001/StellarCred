@@ -641,6 +641,7 @@ function ProofFlow({
   const [proof, setProof] = useState<{ proof: Uint8Array; publicInputs: Uint8Array } | null>(null);
   const [txHash, setTxHash] = useState("");
   const [error, setError] = useState<ContractError | null>(null);
+  const [errorPhase, setErrorPhase] = useState<"proving" | "submitting" | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   // elapsed time for the proving stage
   const [elapsed, setElapsed] = useState(0);
@@ -683,6 +684,7 @@ function ProofFlow({
         if (!cancelled) {
           const parsed = parseContractError((e as Error).message);
           setError(parsed);
+          setErrorPhase("proving");
           setStage("error");
           toast.error(`Proof generation failed: ${parsed.friendly}`);
         }
@@ -715,9 +717,18 @@ function ProofFlow({
     } catch (e) {
       const parsed = parseContractError((e as Error).message);
       setError(parsed);
+      setErrorPhase("submitting");
       setStage("error");
       toast.error(`Submission failed: ${parsed.friendly}`);
     }
+  }
+
+  // Re-submit an already-generated proof without re-proving.
+  async function onRetrySubmit() {
+    if (!proof) return;
+    setError(null);
+    setErrorPhase(null);
+    await onSubmit();
   }
 
   const proofDone = stage === "generated" || stage === "submitting" || stage === "confirmed";
@@ -864,7 +875,11 @@ function ProofFlow({
           >
             <div className="row" style={{ gap: "0.5rem", color: "var(--danger)", fontWeight: 600, fontSize: "0.875rem" }}>
               <IconAlertTriangle size={15} />
-              {error.code !== null ? `Contract error #${error.code}` : "Could not complete"}
+              {errorPhase === "proving"
+                ? "Proof generation failed"
+                : errorPhase === "submitting"
+                  ? "Submission failed — proof is ready to retry"
+                  : error.code !== null ? `Contract error #${error.code}` : "Could not complete"}
             </div>
             <div style={{ fontSize: "0.8125rem", marginTop: "0.45rem", lineHeight: 1.65, color: "var(--text)" }}>
               {error.friendly}
@@ -899,6 +914,17 @@ function ProofFlow({
                   </pre>
                 )}
               </div>
+            )}
+            {/* Retry submission without re-proving when the proof exists */}
+            {errorPhase === "submitting" && proof && (
+              <button
+                className="btn btn-primary"
+                style={{ marginTop: "1rem", width: "100%" }}
+                onClick={onRetrySubmit}
+              >
+                Retry submission
+                <IconArrowRight size={15} />
+              </button>
             )}
           </div>
         )}
