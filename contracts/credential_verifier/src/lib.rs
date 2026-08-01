@@ -76,16 +76,37 @@ impl CredentialVerifier {
     // The idiomatic Soroban v26 replacement is `#[contractevent]`; we use
     // value-based publish to stay consistent with the rest of the codebase.
     #[allow(deprecated)]
-    pub fn set_vk(env: Env, credential_type: Symbol, vk: Bytes) {
+    pub fn set_vk(env: Env, credential_type: Symbol, version: u32, vk: Bytes) {
         let admin = Self::require_admin(&env);
+        // Version 0 is reserved — it is the ProofRecord sentinel meaning
+        // "no version" (see ProofRegistry), and no VK may be registered at 0.
+        if version == 0 {
+            panic_with_error!(&env, Error::VkInvalid);
+        }
         if UltraHonkVerifier::new(&env, &vk).is_err() {
             panic_with_error!(&env, Error::VkInvalid);
         }
-        let key = DataKey::Vk(credential_type.clone());
+        let key = DataKey::Vk(credential_type.clone(), version);
         env.storage().persistent().set(&key, &vk);
         env.storage()
             .persistent()
             .extend_ttl(&key, VK_BUMP_THRESHOLD, VK_TTL);
+
+        // Auto-advance the latest-version pointer for this credential type so
+        // `verify_proof(None)` resolves to the newest registered VK. Re-setting
+        // an older version (out-of-order admin call) never moves it backwards.
+        let latest_key = DataKey::LatestVersion(credential_type.clone());
+        let current = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&latest_key)
+            .unwrap_or(0);
+        if version > current {
+            env.storage().persistent().set(&latest_key, &version);
+            env.storage()
+                .persistent()
+                .extend_ttl(&latest_key, VK_BUMP_THRESHOLD, VK_TTL);
+        }
 
         // Emit: topics = ("cred_ver", "vk_set", credential_type)
         //       data   = EventVkSet { admin }
@@ -97,6 +118,36 @@ impl CredentialVerifier {
             ),
             EventVkSet { admin },
         );
+    }
+
+    /// Admin-only. Marks a specific `(credential_type, version)` VK as
+    /// deprecated. New submissions against a deprecated version are rejected
+    /// by `verify_proof` (panics with `VersionDeprecated`), but the VK is not
+    /// deleted, so existing cached proofs that were verified against that
+    /// version remain readable in ProofRegistry.
+    pub fn deprecate_version(env: Env, credential_type: Symbol, version: u32) {
+        Self::require_admin(&env);
+
+        // Only versions that actually have a registered VK can be deprecated.
+        env.storage()
+            .persistent()
+            .get::<_, Bytes>(&DataKey::Vk(credential_type.clone(), version))
+            .unwrap_or_else(|| panic_with_error!(&env, Error::VkNotSet));
+
+        let dep_key = DataKey::DeprecatedVersion(credential_type, version);
+        env.storage().persistent().set(&dep_key, &true);
+        env.storage()
+            .persistent()
+            .extend_ttl(&dep_key, VK_BUMP_THRESHOLD, VK_TTL);
+    }
+
+    /// Returns the highest VK version registered for `credential_type`, or
+    /// panics with `VkNotSet` if no VK has been registered for the type yet.
+    pub fn get_latest_version(env: Env, credential_type: Symbol) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LatestVersion(credential_type))
+            .unwrap_or_else(|| panic_with_error!(&env, Error::VkNotSet))
     }
 
     /// Verify an UltraHonk proof for any registered credential type. Looks up

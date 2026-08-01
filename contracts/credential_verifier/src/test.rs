@@ -89,12 +89,14 @@ fn verifies_employment() {
     let c = setup(&env);
     c.set_vk(
         &Symbol::new(&env, "employment"),
+        &1u32,
         &Bytes::from_slice(&env, fixture!("employment", "vk")),
     );
     assert!(c.verify_proof(
         &Symbol::new(&env, "employment"),
         &Bytes::from_slice(&env, fixture!("employment", "proof")),
         &Bytes::from_slice(&env, fixture!("employment", "public_inputs")),
+        &None,
     ));
 }
 
@@ -162,6 +164,7 @@ fn set_vk_emits_event() {
 
     c.set_vk(
         &symbol_short!("kyc"),
+        &1u32,
         &Bytes::from_slice(&env, fixture!("kyc", "vk")),
     );
 
@@ -181,4 +184,80 @@ fn set_vk_emits_event() {
             ),
         ],
     );
+}
+
+// ── VK versioning tests (Issue #85) ──────────────────────────────────────────
+
+/// `get_latest_version` tracks the highest version registered per type, and
+/// registering an out-of-order older version never moves it backwards.
+#[test]
+fn latest_version_tracks_updates() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 1);
+
+    c.set_vk(&symbol_short!("kyc"), &2u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 2);
+
+    // Out-of-order registration of an older version must not regress latest.
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 2);
+}
+
+/// After a circuit upgrade (v2 registered), an old proof verified against v1
+/// still verifies — the v1 VK is retained, and `None` resolves to the new
+/// latest version.
+#[test]
+fn old_proof_still_verifies_after_upgrade() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+
+    // Register v1 and verify a proof against it explicitly.
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(1),
+    ));
+
+    // Upgrade to v2 — the old v1 proof must still verify (VK at (kyc,1) intact).
+    c.set_vk(&symbol_short!("kyc"), &2u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(1),
+    ));
+    // And `None` now resolves to v2 (latest).
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &None,
+    ));
+}
+
+/// `deprecate_version` blocks new submissions against the deprecated version.
+#[test]
+fn deprecated_version_rejects_new_submissions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+
+    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    c.deprecate_version(&symbol_short!("kyc"), &1u32);
+
+    // New submissions against the deprecated version must be rejected.
+    let res = c.try_verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(1),
+    );
+    assert!(res.is_err());
 }

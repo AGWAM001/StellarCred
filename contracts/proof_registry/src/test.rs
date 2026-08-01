@@ -465,7 +465,7 @@ fn check_claim_trusted_issuer_combines_with_threshold() {
     );
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+        .set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
@@ -478,6 +478,7 @@ fn check_claim_trusted_issuer_combines_with_threshold() {
         &symbol_short!("funds"),
         &Bytes::from_slice(&env, FUNDS_PROOF),
         &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &None,
         &9999,
     );
 
@@ -635,6 +636,7 @@ proptest! {
             threshold: Some(stored),
             revoked: false,
             issuer: None,
+            vk_version: 0,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
@@ -662,6 +664,7 @@ proptest! {
             threshold: Some(stored),
             revoked: false,
             issuer: None,
+            vk_version: 0,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
@@ -684,6 +687,7 @@ proptest! {
             threshold: stored,
             revoked: false,
             issuer: None,
+            vk_version: 0,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
@@ -715,6 +719,7 @@ proptest! {
             threshold: stored,
             revoked,
             issuer: None,
+            vk_version: 0,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
@@ -741,6 +746,7 @@ fn check_claim_boundary_values_exhaustive() {
                 threshold: Some(req),
                 revoked: false,
                 issuer: None,
+                vk_version: 0,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
@@ -759,6 +765,7 @@ fn check_claim_boundary_values_exhaustive() {
                 threshold: Some(stored),
                 revoked: false,
                 issuer: None,
+                vk_version: 0,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
@@ -777,6 +784,7 @@ fn check_claim_boundary_values_exhaustive() {
                 threshold: Some(stored),
                 revoked: false,
                 issuer: None,
+                vk_version: 0,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
@@ -799,6 +807,7 @@ fn check_claim_stored_none_with_required_threshold() {
         threshold: None, // e.g. KYC proof without numeric threshold
         revoked: false,
         issuer: None,
+        vk_version: 0,
     };
     set_proof_record(&env, &reg_id, &holder1, &cred, &record1);
 
@@ -1223,6 +1232,7 @@ fn prop_unregistered_issuer_always_rejected() {
                 &symbol_short!("kyc"),
                 &Bytes::from_slice(&env, PROOF),
                 &Bytes::from_slice(&env, PUBLIC_INPUTS),
+                &None,
                 &1000,
             );
 
@@ -1262,7 +1272,7 @@ fn prop_check_claim_monotonic_in_threshold() {
 
             let v_id = env.register(CredentialVerifier, (admin.clone(),));
             CredentialVerifierClient::new(&env, &v_id)
-                .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+                .set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
 
             let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
             let registry = ProofRegistryClient::new(&env, &pr_id);
@@ -1274,6 +1284,7 @@ fn prop_check_claim_monotonic_in_threshold() {
                 &symbol_short!("funds"),
                 &Bytes::from_slice(&env, FUNDS_PROOF),
                 &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+                &None,
                 &9999,
             );
 
@@ -1328,6 +1339,7 @@ fn prop_expired_claims_always_false() {
                 &symbol_short!("kyc"),
                 &Bytes::from_slice(&env, PROOF),
                 &Bytes::from_slice(&env, PUBLIC_INPUTS),
+                &None,
                 &expiry,
             );
 
@@ -1368,6 +1380,7 @@ fn prop_revoked_claims_always_false() {
                 &symbol_short!("kyc"),
                 &Bytes::from_slice(&env, PROOF),
                 &Bytes::from_slice(&env, PUBLIC_INPUTS),
+                &None,
                 &5000,
             );
 
