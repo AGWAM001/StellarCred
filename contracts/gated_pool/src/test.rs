@@ -132,6 +132,8 @@ fn prop_deposit_gated_by_kyc() {
             Ok(())
         })
         .unwrap();
+}
+
 #[test]
 fn withdraw_rejects_amount_exceeding_balance() {
     let env = Env::default();

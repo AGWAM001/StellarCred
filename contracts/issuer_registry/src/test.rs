@@ -2,7 +2,6 @@
 
 use super::*;
 use proptest::prelude::*;
-use soroban_sdk::{symbol_short, testutils::Address as _, vec, Address, BytesN, Env};
 use soroban_sdk::{symbol_short, testutils::{Address as _, Events as _}, vec, Address, BytesN, Env, IntoVal};
 
 fn setup(env: &Env) -> (Address, IssuerRegistryClient<'_>) {
@@ -149,6 +148,8 @@ fn prop_unregistered_issuer_never_valid() {
         Ok(())
     })
     .unwrap();
+}
+
 #[test]
 fn register_issuer_emits_event() {
     let env = Env::default();

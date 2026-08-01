@@ -1376,6 +1376,7 @@ fn prop_revoked_claims_always_false() {
             Ok(())
         })
         .unwrap();
+}
 
 // ── migrate_record tests ─────────────────────────────────────────────────────
 
