@@ -302,12 +302,6 @@ export async function computeAggregateWitness(
     num_credentials: "2",
   };
 
-  // NOTE: /api/witness currently has no "aggregate" case — it must stage
-  // public/circuits/aggregate.json (via circuits/scripts/build.sh
-  // aggregate_proof) and add the type to buildInputs/circuitFor plus a
-  // validateWitnessCredential case that accepts these prefixed keys. Until
-  // then, this payload is complete but the server cannot execute it yet.
-
   const res = await fetch("/api/witness", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

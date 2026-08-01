@@ -2,15 +2,15 @@
 //
 // Recursive proof aggregator: proves multiple credential claims in a single
 // circuit so only ONE on-chain verification call is needed for N credentials.
-// Start with N=2 (KYC + age) as a proof of concept; designed to generalise to N≤5.
+// Start with N=2 (KYC + age) as a proof of concept; designed to generalise to N<=5.
 //
 // Rather than calling Noir's std::recursion::verify_proof (whose API is still
 // evolving rapidly across beta releases), this circuit re-verifies all inner
 // claims directly: the same Poseidon2 commitment check and secp256k1 ECDSA
 // signature verification that each inner circuit performs, bundled together.
 //
-// This produces the same end result — a single UltraHonk proof covering N
-// credentials — and is compatible with any Noir version that supports the
+// This produces the same end result -- a single UltraHonk proof covering N
+// credentials -- and is compatible with any Noir version that supports the
 // poseidon and ecdsa_secp256k1 stdlib modules. The outer proof is verified
 // on-chain via submit_aggregate_proof which atomically stores all claims.
 //
@@ -25,37 +25,37 @@ use dep::poseidon::poseidon2::Poseidon2;
 use std::ecdsa_secp256k1::verify_signature;
 
 fn main(
-    // ── KYC credential (private) ───────────────────────────────────────────
+    // -- KYC credential (private) ------------------------------------------
     kyc_secret: Field,
     kyc_salt: Field,
     kyc_sig: [u8; 64],
-    // ── KYC credential (public) ────────────────────────────────────────────
+    // -- KYC credential (public) -------------------------------------------
     kyc_commitment: pub Field,
     kyc_issuer_x: pub [u8; 32],
     kyc_issuer_y: pub [u8; 32],
 
-    // ── Age credential (private) ───────────────────────────────────────────
+    // -- Age credential (private) ------------------------------------------
     age_date_of_birth: u64,
     age_salt: Field,
     age_sig: [u8; 64],
-    // ── Age credential (public) ────────────────────────────────────────────
+    // -- Age credential (public) -------------------------------------------
     age_commitment: pub Field,
     age_issuer_x: pub [u8; 32],
     age_issuer_y: pub [u8; 32],
     age_current_date: pub u64,
     age_threshold_years: pub u64,
 
-    // ── Metadata ───────────────────────────────────────────────────────────
+    // -- Metadata -----------------------------------------------------------
     // Number of credentials packed in this proof (always 2 for PoC).
     // Exposed publicly so the contract knows how many claims to extract.
     num_credentials: pub Field,
 ) {
-    // ── Verify KYC credential ──────────────────────────────────────────────
+    // -- Verify KYC credential ----------------------------------------------
     assert(Poseidon2::hash([kyc_secret, kyc_salt], 2) == kyc_commitment);
     let kyc_z: [u8; 32] = kyc_commitment.to_be_bytes();
     assert(verify_signature(kyc_issuer_x, kyc_issuer_y, kyc_sig, kyc_z));
 
-    // ── Verify age credential ──────────────────────────────────────────────
+    // -- Verify age credential ----------------------------------------------
     assert(Poseidon2::hash([age_date_of_birth as Field, age_salt], 2) == age_commitment);
     let age_z: [u8; 32] = age_commitment.to_be_bytes();
     assert(verify_signature(age_issuer_x, age_issuer_y, age_sig, age_z));
@@ -63,6 +63,6 @@ fn main(
     let age_years = (age_current_date - age_date_of_birth) / 365;
     assert(age_years >= age_threshold_years);
 
-    // ── Metadata constraint ────────────────────────────────────────────────
+    // -- Metadata constraint ------------------------------------------------
     assert(num_credentials == 2);
 }
