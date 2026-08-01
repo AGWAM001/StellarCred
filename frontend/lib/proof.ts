@@ -202,8 +202,11 @@ export async function computeWitness(
 export async function proveWithBackend(
   type: CredentialType,
   witness: Uint8Array,
+  onStep?: (step: "circuit" | "proof") => void,
 ): Promise<GeneratedProof> {
+  if (onStep) onStep("circuit");
   const backend = await getBackend(type);
+  if (onStep) onStep("proof");
   const { proof, publicInputs } = await backend.generateProof(witness, {
     keccak: true,
   });
