@@ -685,7 +685,7 @@ function ProofProgress({ steps }: { steps: ProgressStep[] }) {
 
 // ── ProofFlow ─────────────────────────────────────────────────────────────────
 
-type Stage = "witness" | "circuit" | "proof" | "generated" | "submitting" | "confirmed";
+type Stage = "witness" | "circuit" | "proof" | "proving" | "generated" | "submitting" | "confirmed" | "error";
 
 function ProofFlow({
   cred,
