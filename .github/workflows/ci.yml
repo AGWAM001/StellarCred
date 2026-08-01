@@ -24,16 +24,16 @@ jobs:
           version: 9
       - name: Lint commits in PR
         run: |
-          # Lint each commit individually, skipping bot and merge commits
+          # Lint each non-bot, non-merge commit individually
           git log --format="%H %ae" \
             ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} \
             | grep -v '\[bot\]' \
             | awk '{print $1}' \
             | while IFS= read -r sha; do
                 msg=$(git log -1 --format="%s" "$sha")
-                # Skip merge commits
                 case "$msg" in Merge*) continue ;; esac
-                echo "$msg" | pnpm dlx @commitlint/cli --verbose --stdin || exit 1
+                echo "$msg" > /tmp/commitlint_msg
+                pnpm dlx @commitlint/cli --edit /tmp/commitlint_msg --verbose || exit 1
               done
 
   contracts:
