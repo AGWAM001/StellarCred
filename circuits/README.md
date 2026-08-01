@@ -21,8 +21,8 @@ signature verification** → **type-specific threshold or membership check**.
 | `income_proof`         | 588                | 1 blackbox¹    | 4              | ~577                      | ~6 (≥ comparison) | +6 opcodes vs kyc for `income ≥ threshold`. |
 | `funds_proof`          | 588                | 1 blackbox¹    | 4              | ~577                      | ~6 (≥ comparison) | Identical profile to income_proof. |
 | `accreditation_proof`  | 588                | 1 blackbox¹    | 4              | ~577                      | ~6 (≥ comparison) | Identical profile to income_proof. |
-| `age_proof`            | 601                | 1 blackbox¹    | 4              | ~577                      | ~20 (sub, div, ≥) | +19 vs kyc; division by 365 is the delta. |
-| `jurisdiction_proof`   | 607                | 1 blackbox¹    | 4              | ~577                      | ~26 (8 × ≠ loop) | +25 vs kyc; unrolled loop over 8 entries. |
+| `age_proof`            | 601                | 1 blackbox¹    | 4              | ~577                      | ~19 (sub, div, ≥) | +19 vs kyc; division by 365 is the delta. |
+| `jurisdiction_proof`   | 607                | 1 blackbox¹    | 4              | ~577                      | ~25 (8 × ≠ loop) | +25 vs kyc; unrolled loop over 8 entries. |
 
 > ¹ ECDSA secp256k1 verification uses a single ACIR blackbox opcode (`EcdsaSecp256k1`),
 > but expands to an estimated ~30,000 backend gates in Barretenberg (rough
@@ -159,9 +159,11 @@ constraints.
 threshold comparison.
 
 **Finding:** The division by 365 is the sole differentiator from other threshold
-circuits (+13 opcodes for the division over a plain comparison). In Noir, integer
-division uses the `directive_integer_quotient` directive (8 opcodes) and generates
-additional constraints.
+circuits (+13 opcodes over a plain comparison). In Noir, integer division lowers
+to the unconstrained `directive_integer_quotient` witness hint (8 opcodes —
+listed separately and not counted in the ACIR total, see the note in "What
+drives the ~577 opcodes?") plus the **constrained range checks** that bound the
+quotient and remainder; those range checks are what the extra opcodes come from.
 
 **Optimization suggestion:** Replace `(current_date - date_of_birth) / 365` with
 a **multiplication-based check**:
