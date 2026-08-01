@@ -16,6 +16,7 @@ import {
   IconCpu,
   IconCloudUpload,
   IconStack2,
+  IconInfoCircle,
   IconQrcode,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
@@ -48,6 +49,7 @@ import {
 import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
 import { usePreviewMode } from "@/lib/wallet-context";
 import CopyButton from "@/components/CopyButton";
+import CredentialDetailModal from "@/components/CredentialDetailModal";
 import { useToast } from "@/components/Toast";
 import { QrScanner } from "@/components/QrScanner";
 import { TransferExportModal } from "@/components/TransferExportModal";
@@ -80,6 +82,7 @@ function CredCard({
   address,
   onProve,
   onRemove,
+  onInspect,
   onTransfer,
   isPreview,
   selection,
@@ -88,7 +91,8 @@ function CredCard({
   address: string;
   onProve: () => void;
   onRemove: () => void;
-  onTransfer: () => void;
+  onInspect: () => void;
+  onTransfer?: () => void;
   isPreview?: boolean;
   /** Batch selection controls — omitted on cards that can't be batched. */
   selection?: {
@@ -103,59 +107,46 @@ function CredCard({
   return (
     <div className="card" style={{ padding: "1rem 1.25rem" }}>
       <div className="between" style={{ alignItems: "center", gap: "0.75rem" }}>
-        {/* left: selection + credential info */}
-        <div className="row" style={{ gap: "0.75rem", alignItems: "center", minWidth: 0 }}>
-          {selection && (
-            <input
-              type="checkbox"
-              aria-label={`Include ${c.title} in batch`}
-              checked={selection.checked}
-              // A blocked card stays clickable so the click can explain why it
-              // was refused — a silently disabled checkbox teaches nothing.
-              onChange={selection.onToggle}
-              title={selection.blockedReason ?? undefined}
-              style={{
-                width: 15,
-                height: 15,
-                flexShrink: 0,
-                cursor: "pointer",
-                accentColor: "var(--accent)",
-                opacity: !selection.checked && selection.blockedReason ? 0.4 : 1,
-              }}
-            />
-          )}
-          <div style={{ minWidth: 0 }}>
-            <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{c.title}</span>
-              <span className="mono faint" style={{ fontSize: "0.7rem" }}>{c.claim}</span>
-            </div>
-            <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem" }}>
-              {c.issuer} · <span>{truncateHash(c.commitment)}</span>
-              {status === "proved" && (
-                <>
-                  {" · "}
-                  <span style={{ color: "var(--accent)", opacity: 0.75 }}>
-                    expires in {daysRemaining(c)}d
-                  </span>
-                  {c.provedTxHash && (
-                    <>
-                      {" · "}
-                      <a
-                        href={EXPLORER_TX(c.provedTxHash)}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: "0.15rem" }}
-                      >
-                        {c.provedTxHash.slice(0, 6)}…<IconExternalLink size={10} />
-                      </a>
-                    </>
-                  )}
-                </>
-              )}
-              {status === "expired" && (
-                <> · <span style={{ color: "var(--danger)", opacity: 0.8 }}>expired</span></>
-              )}
-            </div>
+        {/* left: credential info */}
+        <div style={{ minWidth: 0 }}>
+          <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{c.title}</span>
+            <span className="mono faint" style={{ fontSize: "0.7rem" }}>{c.claim}</span>
+          </div>
+          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+            {c.issuer} · <span>{truncateHash(c.commitment)}</span>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={onInspect}
+              title="View details"
+              style={{ padding: "0.1rem 0.2rem", color: "var(--faint)", lineHeight: 0 }}
+            >
+              <IconInfoCircle size={12} />
+            </button>
+            {status === "proved" && (
+              <>
+                {" · "}
+                <span style={{ color: "var(--accent)", opacity: 0.75 }}>
+                  expires in {daysRemaining(c)}d
+                </span>
+                {c.provedTxHash && (
+                  <>
+                    {" · "}
+                    <a
+                      href={EXPLORER_TX(c.provedTxHash)}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: "0.15rem" }}
+                    >
+                      {c.provedTxHash.slice(0, 6)}…<IconExternalLink size={10} />
+                    </a>
+                  </>
+                )}
+              </>
+            )}
+            {status === "expired" && (
+              <> · <span style={{ color: "var(--danger)", opacity: 0.8 }}>expired</span></>
+            )}
           </div>
         </div>
 
@@ -174,14 +165,16 @@ function CredCard({
              status === "expired" ? "Re-prove" :
                                     "Generate proof"}
           </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            title="Transfer to another device"
-            onClick={onTransfer}
-            style={{ padding: "0.3rem 0.4rem", color: "var(--faint)" }}
-          >
-            <IconQrcode size={13} />
-          </button>
+          {onTransfer && (
+            <button
+              className="btn btn-ghost btn-sm"
+              title="Transfer to another device"
+              onClick={onTransfer}
+              style={{ padding: "0.3rem 0.4rem", color: "var(--faint)" }}
+            >
+              <IconQrcode size={13} />
+            </button>
+          )}
           <button
             className="btn btn-ghost btn-sm"
             title="Remove"
@@ -241,9 +234,8 @@ function HolderInner() {
   const [creds, setCreds] = useState<Credential[]>([]);
   const [view, setView] = useState<PageView>({ kind: "list" });
   const [importing, setImporting] = useState(false);
-  const [transferCred, setTransferCred] = useState<Credential | null>(null);
-  const [importScanning, setImportScanning] = useState(false);
   const [importPayload, setImportPayload] = useState<string | null>(null);
+  const [detailCred, setDetailCred] = useState<Credential | null>(null);
 
   useEffect(() => setCreds(loadCredentials()), []);
 
@@ -423,7 +415,8 @@ function HolderInner() {
                   address={address}
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
-                  onTransfer={() => setTransferCred(c)}
+                  onInspect={() => setDetailCred(c)}
+                  onTransfer={() => {}}
                   isPreview={isPreview}
                   selection={
                     canBatch
@@ -503,7 +496,8 @@ function HolderInner() {
                   address={address}
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
-                  onTransfer={() => setTransferCred(c)}
+                  onInspect={() => setDetailCred(c)}
+                  onTransfer={() => {}}
                   isPreview={isPreview}
                 />
               ))}
@@ -532,7 +526,7 @@ function HolderInner() {
               </button>
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => setImportScanning(true)}
+                onClick={() => setImporting(true)}
               >
                 <IconQrcode size={14} />
                 Scan QR
@@ -542,41 +536,13 @@ function HolderInner() {
         </div>
       )}
 
-      {transferCred && (
-        <TransferExportModal cred={transferCred} onClose={() => setTransferCred(null)} />
-      )}
-
-      {importScanning && (
-        <QrScanner
-          title="Scan a transfer code"
-          hint="Point your camera at a StellarCred credential-transfer QR code."
-          onScan={(text) => {
-            setImportScanning(false);
-            let payload: string | null = null;
-            try {
-              payload = new URL(text, window.location.origin).searchParams.get(IMPORT_PARAM);
-            } catch {
-              // not a URL — fall through, payload stays null
-            }
-            if (!payload) {
-              toast.error("That QR code isn't a valid credential-transfer code.");
-              return;
-            }
-            setImportPayload(payload);
+      {detailCred && (
+        <CredentialDetailModal
+          credential={{
+            ...detailCred,
+            claimParams: detailCred.claimParams as Record<string, unknown> | undefined,
           }}
-          onClose={() => setImportScanning(false)}
-        />
-      )}
-
-      {importPayload && (
-        <TransferImportModal
-          payload={importPayload}
-          onImported={(c) => {
-            setCreds(saveCredential(c));
-            setImportPayload(null);
-            toast.success(`${c.title} imported`);
-          }}
-          onClose={() => setImportPayload(null)}
+          onClose={() => setDetailCred(null)}
         />
       )}
     </>
