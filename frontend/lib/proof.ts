@@ -232,18 +232,41 @@ export interface AggregateInput {
   age: Record<string, unknown>;
 }
 
+// Resolves a required aggregate-circuit input from one of two shapes the inner
+// credentials may arrive in (e.g. "secret" vs "value", "date_of_birth" vs
+// "value"). Throws with a clear message when the field is missing from both
+// keys — never silently serializes an `undefined` into the witness payload,
+// which would otherwise surface as a confusing backend error.
+function resolveAggregateField(
+  credential: Record<string, unknown>,
+  key: string,
+  alias?: string,
+): unknown {
+  const value = credential[key] ?? (alias ? credential[alias] : undefined);
+  if (value === undefined || value === null) {
+    throw new Error(
+      `Aggregate proof: missing required field "${key}"${
+        alias ? ` (or "${alias}")` : ""
+      } in credential inputs.`,
+    );
+  }
+  return value;
+}
+
 export async function computeAggregateWitness(
   inputs: AggregateInput,
 ): Promise<Uint8Array> {
   // Build the merged credential object with prefixed keys matching the aggregate
-  // circuit's parameter names (kyc_secret, age_date_of_birth, etc.).
+  // circuit's parameter names (kyc_secret, age_date_of_birth, etc.). Every
+  // required field is validated up front so a malformed input can't become an
+  // undefined witness value.
   const aggregateCredential = {
-    kyc_secret: inputs.kyc.value ?? inputs.kyc.secret,
-    kyc_salt: inputs.kyc.salt,
-    kyc_sig: inputs.kyc.sig,
-    age_date_of_birth: inputs.age.date_of_birth ?? inputs.age.value,
-    age_salt: inputs.age.salt,
-    age_sig: inputs.age.sig,
+    kyc_secret: resolveAggregateField(inputs.kyc, "value", "secret"),
+    kyc_salt: resolveAggregateField(inputs.kyc, "salt"),
+    kyc_sig: resolveAggregateField(inputs.kyc, "sig"),
+    age_date_of_birth: resolveAggregateField(inputs.age, "date_of_birth", "value"),
+    age_salt: resolveAggregateField(inputs.age, "salt"),
+    age_sig: resolveAggregateField(inputs.age, "sig"),
   };
 
   const res = await fetch("/api/witness", {
