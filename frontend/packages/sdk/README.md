@@ -9,7 +9,19 @@ Protocols call one function. No API key, no backend, no personal data handling â
 ```bash
 npm install @stellarcred/sdk
 ```
+## API Reference
 
+Generate the SDK API documentation locally:
+
+```bash
+pnpm docs:api
+```
+
+The generated documentation is written to:
+
+```
+docs/api/
+```
 ## Quick start
 
 ```ts
@@ -85,7 +97,13 @@ Returns all active claims a wallet has proved, across all known credential types
 
 ```ts
 const claims = await StellarCred.getClaims(wallet);
-// [{ type: "kyc", verifiedAt: 1719000000, expiry: 1726776000 }, ...]
+// {
+//   kyc:          { verified: true,  expiry: 1780000000 },
+//   age:          { verified: true,  threshold: 21, expiry: 1780000000 },
+//   income:       { verified: false },
+//   jurisdiction: { verified: true,  expiry: 1780000000 },
+//   funds:        { verified: false },
+// }
 ```
 
 ### `watchClaim(wallet, claimType, opts?)`
@@ -122,7 +140,7 @@ const stop = StellarCred.watchClaim(wallet, 'funds', {
 
 ### `buildVerifyUrl(options)`
 
-Builds a StellarCred verification URL to redirect users to. After verifying, StellarCred returns the user to `returnUrl` with `?sc_verified=true&sc_wallet=<address>` appended.
+Builds a StellarCred verification URL to redirect users to. After verifying, StellarCred returns the user to `returnUrl` with `?sc_verified=true&sc_wallet=<address>&sc_claims=<claim-types>` appended. `sc_claims` is a comma-separated list of the claim types issued in the current session (not all-time claims), allowing protocols to optimistically update their UI before an on-chain read completes.
 
 ```ts
 // Basic â€” redirect to verify KYC
