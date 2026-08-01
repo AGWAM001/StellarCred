@@ -6,30 +6,63 @@ import {
 } from "./core";
 import type { ClaimType } from "./index";
 
-interface UseStellarCredOptions {
+/**
+ * Configuration options for the `useStellarCred` React hook.
+ *
+ * @example
+ * ```tsx
+ * const { claims } = useStellarCred(wallet, {
+ *   claims: ["kyc", "age"],
+ *   minThresholds: { age: 21 },
+ * });
+ * ```
+ */
+export interface UseStellarCredOptions {
   claims?: ClaimType[];
+    /**
+   * Minimum thresholds for parameterized claims.
+   *
+   * Example:
+   * {
+   *   age: 21,
+   *   funds: 50000,
+   * }
+   */
   minThresholds?: Partial<Record<ClaimType, number>>;
 }
 
-interface UseStellarCredResult {
+/**
+ * Result returned by the `useStellarCred` React hook.
+ *
+ * @example
+ * ```tsx
+ * const { claims, loading, error, refetch } = useStellarCred(wallet);
+ * ```
+ */
+export interface UseStellarCredResult {
   claims: Partial<Record<ClaimType, boolean>> | null;
   loading: boolean;
   error: Error | null;
   refetch: () => void;
 }
 
-const EMPTY_STATE: ClaimGateState = {
-  claims: null,
-  loading: true,
-  error: null,
-};
-
 /**
- * React hook for checking StellarCred claims.
+ * React hook for checking StellarCred claims for a wallet.
  *
- * Re-implemented on top of the framework-agnostic `createClaimGate` core to
- * prove the core is sufficient for any framework. No behavior change versus
- * the previous implementation.
+ * The hook automatically fetches claim verification status when the wallet
+ * changes and exposes loading, error, and refetch state.
+ *
+ * @param wallet Stellar wallet address, or `null` when disconnected.
+ * @param options Optional configuration for which claims to check.
+ *
+ * @returns Current claim status, loading state, any error, and a refetch function.
+ *
+ * @example
+ * ```tsx
+ * const { claims, loading } = useStellarCred(wallet, {
+ *   claims: ["kyc", "age"],
+ * });
+ * ```
  */
 export function useStellarCred(
   wallet: string | null,
@@ -38,17 +71,15 @@ export function useStellarCred(
   const [state, setState] = useState<ClaimGateState>(EMPTY_STATE);
   const gateRef = useRef<ClaimGate | null>(null);
 
-  const refetch = useCallback(() => {
-    gateRef.current?.refetch();
-  }, []);
+    try {
+      const typesToCheck: ClaimType[] =
+        options?.claims || ["kyc", "age", "jurisdiction", "income", "funds", "accreditation"];
 
-  useEffect(() => {
-    const gate = createClaimGate({
-      wallet,
-      claims: options?.claims,
-      minThresholds: options?.minThresholds,
-    });
-    gateRef.current = gate;
+      // One batched read shares a single client across all types; per-type
+      // failures resolve to `false` inside `hasClaims`.
+      const results = await StellarCred.hasClaims(wallet, typesToCheck, {
+        minThresholds: options?.minThresholds,
+      });
 
     const unsub = gate.subscribe(setState);
 
