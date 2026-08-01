@@ -9,13 +9,16 @@ import {
   IconCircle,
   IconArrowRight,
   IconArrowLeft,
+  IconQrcode,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { ConfigBanner } from "@/components/ConfigBanner";
+import { usePreviewMode } from "@/lib/wallet-context";
 import { checkClaim } from "@/lib/contracts";
 import { getProtocol } from "@/lib/protocols";
+import { QrCodeModal } from "@/components/QrCodeModal";
 
 function ProtocolDetailInner() {
   const { id } = useParams<{ id: string }>();
@@ -25,12 +28,14 @@ function ProtocolDetailInner() {
   const scVerified = searchParams.get("sc_verified") === "true";
   const scWallet = searchParams.get("sc_wallet");
   const activeWallet = address ?? scWallet ?? null;
+  const isPreview = usePreviewMode();
 
   const protocol = getProtocol(id);
 
   const [statuses, setStatuses] = useState<boolean[]>([]);
   const [checked, setChecked] = useState(false);
   const [inputValue, setInputValue] = useState(protocol?.inputDefault ?? "");
+  const [showQr, setShowQr] = useState(false);
 
   useEffect(() => {
     if (!protocol) return;
@@ -38,6 +43,11 @@ function ProtocolDetailInner() {
   }, [protocol]);
 
   useEffect(() => {
+    if (isPreview && protocol) {
+      setChecked(true);
+      setStatuses(protocol.requirements.map(() => true));
+      return;
+    }
     if (!activeWallet || !protocol) {
       setChecked(false);
       setStatuses(protocol?.requirements.map(() => false) ?? []);
@@ -170,18 +180,36 @@ function ProtocolDetailInner() {
             ))}
           </div>
 
-          {checked && !eligible && (
-            <Link
-              href={protocol.verifyUrl}
-              className="btn btn-secondary"
-              style={{ width: "100%" }}
-            >
-              Get verified
-              <IconArrowRight size={14} />
-            </Link>
+          {checked && !eligible && !isPreview && (
+            <div className="row" style={{ gap: "0.5rem" }}>
+              <Link
+                href={protocol.verifyUrl}
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+              >
+                Get verified
+                <IconArrowRight size={14} />
+              </Link>
+              <button
+                className="btn btn-secondary btn-sm"
+                title="Scan to verify on another device"
+                onClick={() => setShowQr(true)}
+              >
+                <IconQrcode size={16} />
+              </button>
+            </div>
           )}
 
-          {!activeWallet && (
+          {showQr && (
+            <QrCodeModal
+              title="Verify on another device"
+              value={typeof window !== "undefined" ? new URL(protocol.verifyUrl, window.location.origin).toString() : protocol.verifyUrl}
+              hint={`Scan with a phone to continue this ${protocol.name} verification request there.`}
+              onClose={() => setShowQr(false)}
+            />
+          )}
+
+          {!activeWallet && !isPreview && (
             <p className="faint" style={{ marginTop: "0.75rem", fontSize: "0.8rem" }}>
               Connect your wallet to check eligibility.
             </p>
@@ -205,8 +233,9 @@ function ProtocolDetailInner() {
             )}
           </div>
 
-          <label className="field-label">{protocol.inputLabel}</label>
+          <label className="field-label" htmlFor="protocol-input">{protocol.inputLabel}</label>
           <input
+            id="protocol-input"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             disabled={!eligible}
@@ -221,9 +250,9 @@ function ProtocolDetailInner() {
               opacity: eligible ? 1 : 0.45,
               transition: "opacity 0.4s var(--ease)",
             }}
-            disabled={!eligible}
+            disabled={!eligible || isPreview}
           >
-            {eligible ? protocol.actionLabel : (
+            {isPreview ? "Connect wallet to check access" : eligible ? protocol.actionLabel : (
               <><IconLock size={14} /> Prove eligibility first</>
             )}
           </button>

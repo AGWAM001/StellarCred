@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -14,25 +15,46 @@ import {
   IconServer,
   IconCpu,
   IconCloudUpload,
+  IconStack2,
+  IconInfoCircle,
+  IconQrcode,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { Check } from "@/components/Check";
 import { ConfigBanner } from "@/components/ConfigBanner";
+import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import { truncateHash } from "@/lib/format";
 import { EXPLORER_TX } from "@/lib/stellar";
 import { computeWitness, proveWithBackend } from "@/lib/proof";
-import { submitProof, parseContractError, type ContractError } from "@/lib/contracts";
+import { useWarmProver } from "@/lib/use-warm-prover";
+import {
+  submitProof,
+  submitProofsBatch,
+  MAX_BATCH_SIZE,
+  parseContractError,
+  type ContractError,
+  type ProofSubmissionParams,
+} from "@/lib/contracts";
 import {
   type Credential,
   loadCredentials,
   saveCredential,
   removeCredential,
   markProved,
+  markAllProved,
   parseCredential,
 } from "@/lib/credential";
+import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
+import { usePreviewMode } from "@/lib/wallet-context";
 import CopyButton from "@/components/CopyButton";
+import CredentialDetailModal from "@/components/CredentialDetailModal";
+import { useToast } from "@/components/Toast";
+import { QrScanner } from "@/components/QrScanner";
+import { TransferExportModal } from "@/components/TransferExportModal";
+import { TransferImportModal } from "@/components/TransferImportModal";
+import { IMPORT_PARAM } from "@/lib/transfer";
 
 // Parse "90 days", "30 days" etc from the credential's expiry string.
 function credTtlSecs(cred: Credential): number {
@@ -60,11 +82,25 @@ function CredCard({
   address,
   onProve,
   onRemove,
+  onInspect,
+  onTransfer,
+  isPreview,
+  selection,
 }: {
   c: Credential;
   address: string;
   onProve: () => void;
   onRemove: () => void;
+  onInspect: () => void;
+  onTransfer?: () => void;
+  isPreview?: boolean;
+  /** Batch selection controls — omitted on cards that can't be batched. */
+  selection?: {
+    checked: boolean;
+    /** Why this card can't currently be added, or null when it can. */
+    blockedReason: string | null;
+    onToggle: () => void;
+  };
 }) {
   const status = proofStatus(c);
 
@@ -77,8 +113,16 @@ function CredCard({
             <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{c.title}</span>
             <span className="mono faint" style={{ fontSize: "0.7rem" }}>{c.claim}</span>
           </div>
-          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem" }}>
+          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem", display: "flex", alignItems: "center", gap: "0.35rem" }}>
             {c.issuer} · <span>{truncateHash(c.commitment)}</span>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={onInspect}
+              title="View details"
+              style={{ padding: "0.1rem 0.2rem", color: "var(--faint)", lineHeight: 0 }}
+            >
+              <IconInfoCircle size={12} />
+            </button>
             {status === "proved" && (
               <>
                 {" · "}
@@ -107,7 +151,8 @@ function CredCard({
         </div>
 
         {/* right: badges + button + trash */}
-        <div className="row" style={{ gap: "0.4rem", flexShrink: 0 }}>
+        <div className="card-actions">
+          {isPreview && <Badge variant="pending">Preview</Badge>}
           <Badge variant="verified" dot={false}>Held</Badge>
           {status === "proved" && <Badge variant="verified" dot={false}>On-chain</Badge>}
           <button
@@ -120,6 +165,16 @@ function CredCard({
              status === "expired" ? "Re-prove" :
                                     "Generate proof"}
           </button>
+          {onTransfer && (
+            <button
+              className="btn btn-ghost btn-sm"
+              title="Transfer to another device"
+              onClick={onTransfer}
+              style={{ padding: "0.3rem 0.4rem", color: "var(--faint)" }}
+            >
+              <IconQrcode size={13} />
+            </button>
+          )}
           <button
             className="btn btn-ghost btn-sm"
             title="Remove"
@@ -165,16 +220,117 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ── Holder page ───────────────────────────────────────────────────────────────
 
-export default function HolderPage() {
-  const { address } = useWallet();
+type PageView =
+  | { kind: "list" }
+  | { kind: "single"; cred: Credential }
+  | { kind: "batch"; creds: Credential[] };
+
+function HolderInner() {
+  const { address, connect } = useWallet();
+  const isPreview = usePreviewMode();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const toast = useToast();
   const [creds, setCreds] = useState<Credential[]>([]);
-  const [proving, setProving] = useState<Credential | null>(null);
+  const [view, setView] = useState<PageView>({ kind: "list" });
   const [importing, setImporting] = useState(false);
+  const [importPayload, setImportPayload] = useState<string | null>(null);
+  const [detailCred, setDetailCred] = useState<Credential | null>(null);
 
   useEffect(() => setCreds(loadCredentials()), []);
 
-  const unproved = creds.filter((c) => proofStatus(c) !== "proved");
-  const proved   = creds.filter((c) => proofStatus(c) === "proved");
+  // A transfer QR opened directly (native camera app -> /holder?import=...)
+  // lands here with the payload already in the URL — prompt for the
+  // passphrase immediately, and strip it from the URL so a refresh or the
+  // back button doesn't re-trigger the prompt or leave ciphertext in history.
+  useEffect(() => {
+    const payload = searchParams.get(IMPORT_PARAM);
+    if (!payload) return;
+    setImportPayload(payload);
+    router.replace("/holder");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const displayCreds = isPreview ? PREVIEW_CREDENTIALS : creds;
+  const unproved = displayCreds.filter((c) => proofStatus(c) !== "proved");
+  const proved   = displayCreds.filter((c) => proofStatus(c) === "proved");
+
+  // Warm the UltraHonk backend for whatever credential types the user still
+  // needs to prove, in the background, once the wallet is actually connected
+  // (never in preview mode — there's nothing real to prove yet). Only the
+  // types actually present in `unproved` are warmed, not all seven circuits,
+  // to avoid paying wasm-init cost for types the user has no credential for.
+  const unprovedTypes = Array.from(new Set(unproved.map((c) => c.type)));
+  useWarmProver(unprovedTypes, Boolean(address));
+
+  // ── Batch selection ────────────────────────────────────────────────────────
+  // The holder picks which unproved credentials go into one transaction. Both
+  // on-chain limits are enforced here, before anything is proved: at most
+  // MAX_BATCH_SIZE entries, and no two of the same credential type (the
+  // registry writes one slot per (holder, credential_type), so a duplicate
+  // would overwrite its sibling — the contract rejects the batch outright).
+  const [selectedCommitments, setSelectedCommitments] = useState<string[]>([]);
+
+  const selectedCreds = unproved.filter((c) => selectedCommitments.includes(c.commitment));
+  const selectedTypes = new Set(selectedCreds.map((c) => c.type));
+  const atBatchLimit = selectedCreds.length >= MAX_BATCH_SIZE;
+
+  // Drop selections that are no longer selectable — a credential that was
+  // removed, transferred away, or has just been proved. `unproved` is rebuilt
+  // on every render, so the effect keys off its commitments instead, and only
+  // ever sets state when something actually fell out of the list.
+  const unprovedKey = unproved.map((c) => c.commitment).join(",");
+  useEffect(() => {
+    const live = new Set(unprovedKey ? unprovedKey.split(",") : []);
+    setSelectedCommitments((prev) => {
+      const next = prev.filter((h) => live.has(h));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [unprovedKey]);
+
+  /** Why `c` cannot be added to the current selection, or null if it can. */
+  function blockedReason(c: Credential): string | null {
+    if (selectedCommitments.includes(c.commitment)) return null;
+    if (selectedTypes.has(c.type)) {
+      return `A batch can hold only one ${c.type} credential — the registry keeps one proof per credential type.`;
+    }
+    if (atBatchLimit) {
+      return `A batch holds at most ${MAX_BATCH_SIZE} credentials. Deselect one to swap it out.`;
+    }
+    return null;
+  }
+
+  function toggleSelected(c: Credential) {
+    if (selectedCommitments.includes(c.commitment)) {
+      setSelectedCommitments((prev) => prev.filter((h) => h !== c.commitment));
+      return;
+    }
+    const blocked = blockedReason(c);
+    if (blocked) {
+      toast.error(blocked);
+      return;
+    }
+    setSelectedCommitments((prev) => [...prev, c.commitment]);
+  }
+
+  /** Fill the selection with the first eligible credential of each type. */
+  function selectEligible() {
+    const picked: string[] = [];
+    const types = new Set<string>();
+    for (const c of unproved) {
+      if (picked.length >= MAX_BATCH_SIZE) break;
+      if (types.has(c.type)) continue;
+      types.add(c.type);
+      picked.push(c.commitment);
+    }
+    setSelectedCommitments(picked);
+  }
+
+  // Selecting is only offered when a batch is actually possible: a connected
+  // wallet and at least two credentials of distinct types.
+  const distinctUnprovedTypes = new Set(unproved.map((c) => c.type)).size;
+  const canBatch = Boolean(address) && distinctUnprovedTypes >= 2;
+  const canSubmitBatch = selectedCreds.length >= 2;
 
   return (
     <>
@@ -188,12 +344,43 @@ export default function HolderPage() {
 
       <ConfigBanner />
 
-      {proving ? (
+      {isPreview && (
+        <div
+          style={{
+            padding: "0.85rem 1rem",
+            borderRadius: "var(--radius)",
+            background: "rgba(62,207,142,0.1)",
+            border: "1px solid rgba(62,207,142,0.3)",
+            color: "var(--text)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "1.5rem",
+          }}
+        >
+          <span style={{ fontSize: "0.875rem", fontWeight: 500 }}>
+            Connect wallet to use your real credentials
+          </span>
+          <button className="btn btn-primary btn-sm" onClick={connect}>
+            Connect Wallet
+          </button>
+        </div>
+      )}
+
+      {view.kind === "single" ? (
+
         <ProofFlow
-          cred={proving}
+          cred={view.cred}
           holder={address}
-          onBack={() => setProving(null)}
-          onProved={(txHash) => setCreds(markProved(proving.commitment, txHash))}
+          onBack={() => setView({ kind: "list" })}
+          onProved={(txHash) => setCreds(markProved(view.cred.commitment, txHash))}
+        />
+      ) : view.kind === "batch" ? (
+        <BatchProofFlow
+          creds={view.creds}
+          holder={address}
+          onBack={() => setView({ kind: "list" })}
+          onProved={(txHash, commitments) => setCreds(markAllProved(commitments, txHash))}
         />
       ) : (
         <div className="stack reveal" style={{ gap: "1.5rem" }}>
@@ -226,10 +413,75 @@ export default function HolderPage() {
                   key={c.commitment}
                   c={c}
                   address={address}
-                  onProve={() => setProving(c)}
+                  onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
+                  onInspect={() => setDetailCred(c)}
+                  onTransfer={() => {}}
+                  isPreview={isPreview}
+                  selection={
+                    canBatch
+                      ? {
+                          checked: selectedCommitments.includes(c.commitment),
+                          blockedReason: blockedReason(c),
+                          onToggle: () => toggleSelected(c),
+                        }
+                      : undefined
+                  }
                 />
               ))}
+
+              {/* Batch bar — select up to MAX_BATCH_SIZE credentials of
+                  distinct types and prove them in one transaction. */}
+              {canBatch && (
+                <div
+                  className="between"
+                  style={{
+                    alignItems: "center",
+                    gap: "0.75rem",
+                    flexWrap: "wrap",
+                    marginTop: "0.25rem",
+                  }}
+                >
+                  <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                    <button
+                      id="prove-all-btn"
+                      className="btn btn-primary"
+                      style={{ gap: "0.45rem", display: "inline-flex", alignItems: "center" }}
+                      disabled={!canSubmitBatch}
+                      title={
+                        canSubmitBatch
+                          ? undefined
+                          : "Select at least 2 credentials to prove them together"
+                      }
+                      onClick={() => setView({ kind: "batch", creds: selectedCreds })}
+                    >
+                      <IconStack2 size={15} />
+                      {selectedCreds.length > 0
+                        ? `Prove ${selectedCreds.length} selected in one transaction`
+                        : "Prove several in one transaction"}
+                    </button>
+                    {selectedCreds.length > 0 ? (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setSelectedCommitments([])}
+                      >
+                        Clear
+                      </button>
+                    ) : (
+                      <button className="btn btn-ghost btn-sm" onClick={selectEligible}>
+                        Select eligible
+                      </button>
+                    )}
+                  </div>
+                  <span className="faint" style={{ fontSize: "0.75rem" }}>
+                    {atBatchLimit
+                      ? `Batch full — ${MAX_BATCH_SIZE} of ${MAX_BATCH_SIZE} selected.`
+                      : selectedCreds.length === 0
+                        ? `Select up to ${MAX_BATCH_SIZE} credentials, one per credential type.`
+                        : `${selectedCreds.length} of ${MAX_BATCH_SIZE} selected · one per credential type.`}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -242,8 +494,11 @@ export default function HolderPage() {
                   key={c.commitment}
                   c={c}
                   address={address}
-                  onProve={() => setProving(c)}
+                  onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
+                  onInspect={() => setDetailCred(c)}
+                  onTransfer={() => {}}
+                  isPreview={isPreview}
                 />
               ))}
             </div>
@@ -261,18 +516,45 @@ export default function HolderPage() {
               onCancel={() => setImporting(false)}
             />
           ) : (
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ alignSelf: "flex-start" }}
-              onClick={() => setImporting(true)}
-            >
-              <IconPlus size={14} />
-              Import credential JSON
-            </button>
+            <div className="row" style={{ gap: "0.5rem" }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setImporting(true)}
+              >
+                <IconPlus size={14} />
+                Import credential JSON
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setImporting(true)}
+              >
+                <IconQrcode size={14} />
+                Scan QR
+              </button>
+            </div>
           )}
         </div>
       )}
+
+      {detailCred && (
+        <CredentialDetailModal
+          credential={{
+            ...detailCred,
+            claimParams: detailCred.claimParams as Record<string, unknown> | undefined,
+          }}
+          onClose={() => setDetailCred(null)}
+        />
+      )}
     </>
+  );
+}
+
+// useSearchParams() must be inside a Suspense boundary in the App Router.
+export default function HolderPage() {
+  return (
+    <Suspense fallback={null}>
+      <HolderInner />
+    </Suspense>
   );
 }
 
@@ -325,13 +607,17 @@ function ProofFlow({
   const [proof, setProof] = useState<{ proof: Uint8Array; publicInputs: Uint8Array } | null>(null);
   const [txHash, setTxHash] = useState("");
   const [error, setError] = useState<ContractError | null>(null);
+  const [errorPhase, setErrorPhase] = useState<"proving" | "submitting" | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   // elapsed time for the proving stage
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const toast = useToast();
+  const { networkMismatch } = useWallet();
 
   useEffect(() => {
     let cancelled = false;
+    toast.info(`Generating proof for ${cred.title}…`);
     (async () => {
       try {
         // Stage 1: witness (server)
@@ -358,11 +644,15 @@ function ProofFlow({
 
         setProof(result);
         setStage("generated");
+        toast.success(`Proof generated for ${cred.title}`);
       } catch (e) {
         clearInterval(timerRef.current!);
         if (!cancelled) {
-          setError(parseContractError((e as Error).message));
+          const parsed = parseContractError((e as Error).message);
+          setError(parsed);
+          setErrorPhase("proving");
           setStage("error");
+          toast.error(`Proof generation failed: ${parsed.friendly}`);
         }
       }
     })();
@@ -370,11 +660,13 @@ function ProofFlow({
       cancelled = true;
       clearInterval(timerRef.current!);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cred]);
 
   async function onSubmit() {
-    if (!proof) return;
+    if (!proof || networkMismatch) return;
     setStage("submitting");
+    toast.info(`Submitting proof for ${cred.title} to Stellar…`);
     try {
       const hash = await submitProof({
         holder,
@@ -387,10 +679,22 @@ function ProofFlow({
       setTxHash(hash);
       onProved(hash);
       setStage("confirmed");
+      toast.success(`Proof confirmed on-chain for ${cred.title}`, { txHash: hash });
     } catch (e) {
-      setError(parseContractError((e as Error).message));
+      const parsed = parseContractError((e as Error).message);
+      setError(parsed);
+      setErrorPhase("submitting");
       setStage("error");
+      toast.error(`Submission failed: ${parsed.friendly}`);
     }
+  }
+
+  // Re-submit an already-generated proof without re-proving.
+  async function onRetrySubmit() {
+    if (!proof) return;
+    setError(null);
+    setErrorPhase(null);
+    await onSubmit();
   }
 
   const proofDone = stage === "generated" || stage === "submitting" || stage === "confirmed";
@@ -468,7 +772,7 @@ function ProofFlow({
           <ProofStep
             icon={<IconCloudUpload size={14} stroke={1.8} />}
             title="Submit to Stellar"
-            subtitle="ProofRegistry.submit_proof · Freighter signature"
+            subtitle="ProofRegistry.submit_proof · wallet signature"
             state={
               stage === "submitting" ? "active" :
               submitDone             ? "done"   : "idle"
@@ -501,14 +805,28 @@ function ProofFlow({
 
         {/* CTA */}
         {stage === "generated" && (
-          <button
-            className="btn btn-primary"
-            style={{ marginTop: "1.5rem", width: "100%" }}
-            onClick={onSubmit}
-          >
-            Submit to Stellar
-            <IconArrowRight size={15} />
-          </button>
+          <>
+            {networkMismatch && (
+              <div style={{ marginTop: "1.5rem" }}>
+                <NetworkMismatchBanner />
+              </div>
+            )}
+            <button
+              className="btn btn-primary"
+              style={{
+                marginTop: networkMismatch ? 0 : "1.5rem",
+                width: "100%",
+                opacity: networkMismatch ? 0.5 : 1,
+                cursor: networkMismatch ? "not-allowed" : "pointer",
+              }}
+              onClick={onSubmit}
+              disabled={networkMismatch}
+              title={networkMismatch ? "Switch your wallet to the correct network to submit" : undefined}
+            >
+              Submit to Stellar
+              <IconArrowRight size={15} />
+            </button>
+          </>
         )}
 
         {stage === "error" && error && (
@@ -523,7 +841,11 @@ function ProofFlow({
           >
             <div className="row" style={{ gap: "0.5rem", color: "var(--danger)", fontWeight: 600, fontSize: "0.875rem" }}>
               <IconAlertTriangle size={15} />
-              {error.code !== null ? `Contract error #${error.code}` : "Could not complete"}
+              {errorPhase === "proving"
+                ? "Proof generation failed"
+                : errorPhase === "submitting"
+                  ? "Submission failed — proof is ready to retry"
+                  : error.code !== null ? `Contract error #${error.code}` : "Could not complete"}
             </div>
             <div style={{ fontSize: "0.8125rem", marginTop: "0.45rem", lineHeight: 1.65, color: "var(--text)" }}>
               {error.friendly}
@@ -559,6 +881,17 @@ function ProofFlow({
                 )}
               </div>
             )}
+            {/* Retry submission without re-proving when the proof exists */}
+            {errorPhase === "submitting" && proof && (
+              <button
+                className="btn btn-primary"
+                style={{ marginTop: "1rem", width: "100%" }}
+                onClick={onRetrySubmit}
+              >
+                Retry submission
+                <IconArrowRight size={15} />
+              </button>
+            )}
           </div>
         )}
 
@@ -587,6 +920,411 @@ function ProofFlow({
         )}
       </div>
     </div>
+  );
+}
+
+// ── BatchProofFlow ────────────────────────────────────────────────────────────
+
+/** State of one credential's local proving steps. */
+type CredProofState =
+  | { status: "pending" }
+  | { status: "witness" }
+  | { status: "proving"; elapsed: number }
+  | { status: "ready"; proof: { proof: Uint8Array; publicInputs: Uint8Array } }
+  | { status: "error"; message: string };
+
+type BatchStage = "generating" | "submitting" | "confirmed" | "error";
+
+function BatchProofFlow({
+  creds,
+  holder,
+  onBack,
+  onProved,
+}: {
+  creds: Credential[];
+  holder: string;
+  onBack: () => void;
+  onProved: (txHash: string, commitments: string[]) => void;
+}) {
+  const [credStates, setCredStates] = useState<CredProofState[]>(
+    () => creds.map(() => ({ status: "pending" as const })),
+  );
+  const [batchStage, setBatchStage] = useState<BatchStage>("generating");
+  const [txHash, setTxHash] = useState("");
+  const [batchError, setBatchError] = useState<ContractError | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
+  const toast = useToast();
+  const { networkMismatch } = useWallet();
+  const generatedProofs = useRef<Array<{ proof: Uint8Array; publicInputs: Uint8Array } | null>>(
+    creds.map(() => null),
+  );
+  // Stable refs so the submission effect always reads the latest values
+  // even if the parent re-renders between proof generation and submission.
+  const credsRef = useRef(creds);
+  const holderRef = useRef(holder);
+  useEffect(() => { credsRef.current = creds; }, [creds]);
+  useEffect(() => { holderRef.current = holder; }, [holder]);
+
+  // Generate proofs for all credentials in sequence.
+  useEffect(() => {
+    let cancelled = false;
+    toast.info(`Generating ${creds.length} proofs…`);
+
+    (async () => {
+      for (let i = 0; i < creds.length; i++) {
+        if (cancelled) return;
+        const cred = creds[i];
+
+        // Witness
+        setCredStates((prev) => {
+          const next = [...prev];
+          next[i] = { status: "witness" };
+          return next;
+        });
+
+        let witness: Uint8Array;
+        try {
+          witness = await computeWitness(cred.type, cred as unknown as Record<string, unknown>);
+        } catch (e) {
+          if (cancelled) return;
+          setCredStates((prev) => {
+            const next = [...prev];
+            next[i] = { status: "error", message: (e as Error).message };
+            return next;
+          });
+          setBatchStage("error");
+          const parsed = parseContractError((e as Error).message);
+          setBatchError(parsed);
+          toast.error(`Proof generation failed for ${cred.title}: ${parsed.friendly}`);
+          return;
+        }
+
+        if (cancelled) return;
+
+        // Proving
+        const start = Date.now();
+        const timer = setInterval(() => {
+          setCredStates((prev) => {
+            const next = [...prev];
+            if (next[i].status === "proving") {
+              next[i] = { status: "proving", elapsed: Math.floor((Date.now() - start) / 1000) };
+            }
+            return next;
+          });
+        }, 1000);
+        setCredStates((prev) => {
+          const next = [...prev];
+          next[i] = { status: "proving", elapsed: 0 };
+          return next;
+        });
+
+        let result: { proof: Uint8Array; publicInputs: Uint8Array };
+        try {
+          result = await proveWithBackend(cred.type, witness);
+        } catch (e) {
+          clearInterval(timer);
+          if (cancelled) return;
+          setCredStates((prev) => {
+            const next = [...prev];
+            next[i] = { status: "error", message: (e as Error).message };
+            return next;
+          });
+          setBatchStage("error");
+          const parsed = parseContractError((e as Error).message);
+          setBatchError(parsed);
+          toast.error(`Proof generation failed for ${cred.title}: ${parsed.friendly}`);
+          return;
+        }
+
+        clearInterval(timer);
+        if (cancelled) return;
+
+        generatedProofs.current[i] = result;
+        setCredStates((prev) => {
+          const next = [...prev];
+          next[i] = { status: "ready", proof: result };
+          return next;
+        });
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // All proofs ready — fire the batch submission automatically, but never
+  // while the connected wallet is on the wrong network: submission would
+  // fail after the (expensive) proofs are already generated. Once ready,
+  // this effect re-fires the moment `networkMismatch` clears — no separate
+  // retry button needed, matching this flow's fully-automatic submission.
+  const allReady =
+    batchStage === "generating" &&
+    credStates.length > 0 &&
+    credStates.every((s) => s.status === "ready");
+  const blockedByNetwork = allReady && networkMismatch;
+
+  useEffect(() => {
+    if (!allReady || networkMismatch) return;
+    toast.success(`Generated ${creds.length} proofs`);
+    setBatchStage("submitting");
+
+    const currentCreds = credsRef.current;
+    const currentHolder = holderRef.current;
+    const submissions: ProofSubmissionParams[] = currentCreds.map((cred, i) => {
+      const p = generatedProofs.current[i]!;
+      return {
+        issuerId: cred.issuerId,
+        credentialType: cred.type,
+        proof: p.proof,
+        publicInputs: p.publicInputs,
+        ttlSecs: credTtlSecs(cred),
+      };
+    });
+
+    toast.info(`Submitting ${currentCreds.length} proofs to Stellar…`);
+    submitProofsBatch({ holder: currentHolder, submissions })
+      .then((hash) => {
+        setTxHash(hash);
+        setBatchStage("confirmed");
+        onProved(hash, currentCreds.map((c) => c.commitment));
+        toast.success(`All ${currentCreds.length} proofs confirmed on-chain`, { txHash: hash });
+      })
+      .catch((e) => {
+        const parsed = parseContractError((e as Error).message);
+        setBatchError(parsed);
+        setBatchStage("error");
+        toast.error(`Batch submission failed: ${parsed.friendly}`);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allReady, networkMismatch, onProved]);
+
+  const isSubmitting = batchStage === "submitting";
+  const isConfirmed = batchStage === "confirmed";
+  const isError = batchStage === "error";
+
+  return (
+    <div className="reveal" style={{ maxWidth: 560, margin: "0 auto" }}>
+      <button className="btn btn-ghost btn-sm" onClick={onBack} style={{ marginBottom: "1.5rem" }}>
+        <IconArrowLeft size={14} />
+        All credentials
+      </button>
+
+      <div className="card" style={{ padding: "1.75rem" }}>
+        <div style={{ marginBottom: "1.5rem" }}>
+          <span className="eyebrow" style={{ marginBottom: "0.5rem", display: "block" }}>
+            Batch proving
+          </span>
+          <h2 style={{ marginBottom: "0.25rem" }}>
+            Prove all {creds.length} credentials
+          </h2>
+          <span className="faint" style={{ fontSize: "0.8rem" }}>
+            Proofs are generated in your browser, then submitted in a single on-chain transaction.
+          </span>
+        </div>
+
+        {/* Per-credential progress rows */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1.5rem" }}>
+          {creds.map((cred, i) => {
+            const cs = credStates[i] ?? { status: "pending" };
+            return (
+              <BatchCredRow
+                key={cred.commitment}
+                cred={cred}
+                state={cs}
+                isLast={i === creds.length - 1}
+              />
+            );
+          })}
+        </div>
+
+        {/* Submission step */}
+        <ProofStep
+          icon={<IconCloudUpload size={14} stroke={1.8} />}
+          title="Submit batch to Stellar"
+          subtitle={`ProofRegistry.submit_proofs_batch · ${creds.length} credentials · single wallet signature`}
+          state={
+            isSubmitting ? "active" :
+            isConfirmed  ? "done"   : "idle"
+          }
+          last
+          detail={
+            isSubmitting ? (
+              <AnimatedDots text="Writing all proofs to ProofRegistry" style={{ marginTop: "0.35rem" }} />
+            ) : isConfirmed ? (
+              <div
+                className="row"
+                style={{ gap: "0.5rem", marginTop: "0.3rem", alignItems: "center" }}
+              >
+                <a
+                  href={EXPLORER_TX(txHash)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="row accent"
+                  style={{ gap: "0.3rem", fontSize: "0.775rem" }}
+                >
+                  {txHash.slice(0, 8)}...{txHash.slice(-6)}
+                  <IconExternalLink size={12} />
+                </a>
+                <CopyButton value={txHash} />
+              </div>
+            ) : null
+          }
+        />
+
+        {/* Network mismatch — proofs are ready but submission is blocked */}
+        {blockedByNetwork && (
+          <div style={{ marginTop: "1.5rem" }}>
+            <NetworkMismatchBanner />
+          </div>
+        )}
+
+        {/* Error banner */}
+        {isError && batchError && (
+          <div
+            style={{
+              marginTop: "1.5rem",
+              padding: "0.9rem 1.1rem",
+              borderRadius: "var(--radius)",
+              border: "1px solid rgba(240,96,77,0.3)",
+              background: "rgba(240,96,77,0.06)",
+            }}
+          >
+            <div className="row" style={{ gap: "0.5rem", color: "var(--danger)", fontWeight: 600, fontSize: "0.875rem" }}>
+              <IconAlertTriangle size={15} />
+              {batchError.code !== null ? `Contract error #${batchError.code}` : "Batch failed"}
+            </div>
+            <div style={{ fontSize: "0.8125rem", marginTop: "0.45rem", lineHeight: 1.65, color: "var(--text)" }}>
+              {batchError.friendly}
+            </div>
+            {batchError.raw !== batchError.friendly && (
+              <div style={{ marginTop: "0.6rem" }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setShowRaw((v) => !v)}
+                  style={{ fontSize: "0.72rem", padding: "0.2rem 0.5rem", color: "var(--faint)" }}
+                >
+                  {showRaw ? "Hide" : "Show"} raw error
+                </button>
+                {showRaw && (
+                  <pre
+                    className="mono"
+                    style={{
+                      marginTop: "0.5rem",
+                      fontSize: "0.68rem",
+                      color: "var(--faint)",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-all",
+                      lineHeight: 1.5,
+                      maxHeight: 180,
+                      overflowY: "auto",
+                      background: "rgba(0,0,0,0.2)",
+                      padding: "0.6rem",
+                      borderRadius: "calc(var(--radius) - 2px)",
+                    }}
+                  >
+                    {batchError.raw}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Confirmed success banner */}
+        {isConfirmed && (
+          <div
+            className="reveal"
+            style={{
+              marginTop: "1.5rem",
+              padding: "1.25rem",
+              borderRadius: "var(--radius)",
+              background: "rgba(62,207,142,0.07)",
+              border: "1px solid rgba(62,207,142,0.2)",
+              display: "flex",
+              alignItems: "center",
+              gap: "1rem",
+            }}
+          >
+            <Check size={44} run />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.9375rem" }}>
+                All {creds.length} proofs verified on-chain
+              </div>
+              <div className="muted" style={{ fontSize: "0.8375rem", marginTop: "0.25rem", lineHeight: 1.5 }}>
+                Every credential is now live on Stellar — submitted in a single transaction.
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── BatchCredRow ──────────────────────────────────────────────────────────────
+
+function BatchCredRow({
+  cred,
+  state,
+  isLast,
+}: {
+  cred: Credential;
+  state: CredProofState;
+  isLast: boolean;
+}) {
+  const isPending = state.status === "pending";
+  const isWitness = state.status === "witness";
+  const isProving = state.status === "proving";
+  const isReady   = state.status === "ready";
+  const isErr     = state.status === "error";
+
+  const stepState: "idle" | "active" | "done" =
+    isReady ? "done" :
+    isProving || isWitness ? "active" :
+    isErr ? "idle" :
+    "idle";
+
+  const detail = isWitness ? (
+    <AnimatedDots text="Computing witness" style={{ marginTop: "0.25rem" }} />
+  ) : isProving ? (
+    <div style={{ marginTop: "0.35rem", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+      <ProvingBar />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: "0.72rem", color: "var(--muted)" }}>Generating proof in browser…</span>
+        <span className="mono" style={{ fontSize: "0.7rem", color: "var(--faint)" }}>
+          {(state as { status: "proving"; elapsed: number }).elapsed}s
+        </span>
+      </div>
+    </div>
+  ) : isReady ? (
+    <div style={{ marginTop: "0.2rem" }}>
+      <span className="mono" style={{ fontSize: "0.72rem", color: "var(--accent)" }}>
+        π {truncateHash("0x" + toHex((state as { status: "ready"; proof: { proof: Uint8Array; publicInputs: Uint8Array } }).proof.proof))}
+      </span>
+      <span className="mono faint" style={{ fontSize: "0.7rem", marginLeft: "0.4rem" }}>
+        {(state as { status: "ready"; proof: { proof: Uint8Array; publicInputs: Uint8Array } }).proof.proof.length.toLocaleString()} bytes
+      </span>
+    </div>
+  ) : isErr ? (
+    <span style={{ fontSize: "0.72rem", color: "var(--danger)", marginTop: "0.2rem", display: "block" }}>
+      {(state as { status: "error"; message: string }).message.slice(0, 80)}
+    </span>
+  ) : null;
+
+  const icon =
+    isPending ? <span style={{ fontSize: "0.65rem", color: "var(--faint)" }}>{cred.type.slice(0, 3)}</span> :
+    isErr     ? <IconAlertTriangle size={13} /> :
+                <IconCpu size={13} stroke={1.8} />;
+
+  return (
+    <ProofStep
+      icon={icon}
+      title={cred.title}
+      subtitle={cred.claim}
+      state={stepState}
+      detail={detail}
+      last={isLast}
+    />
   );
 }
 

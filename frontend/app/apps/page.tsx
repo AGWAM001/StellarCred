@@ -8,6 +8,7 @@ import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { ConfigBanner } from "@/components/ConfigBanner";
+import { usePreviewMode } from "@/lib/wallet-context";
 import { checkClaim } from "@/lib/contracts";
 import { PROTOCOLS, type Protocol } from "@/lib/protocols";
 import { CREDENTIAL_TYPES } from "@/lib/stellar";
@@ -31,8 +32,14 @@ function ProtocolCard({
   const [statuses, setStatuses] = useState<boolean[]>(protocol.requirements.map(() => false));
   const [checked, setChecked] = useState(false);
   const eligible = statuses.every(Boolean);
+  const isPreview = usePreviewMode();
 
   useEffect(() => {
+    if (isPreview) {
+      setChecked(true);
+      setStatuses(protocol.requirements.map(() => true));
+      return;
+    }
     if (!activeWallet) {
       setChecked(false);
       setStatuses(protocol.requirements.map(() => false));
@@ -58,6 +65,15 @@ function ProtocolCard({
     <div
       className="card protocol-card"
       onClick={() => router.push(`/apps/${protocol.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(`/apps/${protocol.id}`);
+        }
+      }}
+      role="link"
+      tabIndex={0}
+      aria-label={`Open ${protocol.name} — ${protocol.tagline}`}
       style={{ display: "flex", flexDirection: "column", gap: 0, cursor: "pointer" }}
     >
       <div className="between" style={{ marginBottom: "0.35rem" }}>
@@ -131,7 +147,7 @@ function ProtocolCard({
 }
 
 function AppsInner() {
-  const { address } = useWallet();
+  const { address, connect } = useWallet();
   const searchParams = useSearchParams();
   const scVerified = searchParams.get("sc_verified") === "true";
   const scWallet = searchParams.get("sc_wallet");
@@ -184,7 +200,7 @@ function AppsInner() {
         }}
       >
         <strong style={{ color: "var(--text)" }}>Any protocol, any claim.</strong>{" "}
-        Each app below gates access on a different credential type � one read-only call to{" "}
+        Each app below gates access on a different credential type — one read-only call to{" "}
         <span className="mono" style={{ fontSize: "0.75rem" }}>ProofRegistry.is_verified</span>.
         The protocol never sees the credential, the commitment, or the proof itself.
       </div>
@@ -226,6 +242,7 @@ function AppsInner() {
           />
           <input
             type="text"
+            aria-label="Search apps by name, description, or tagline"
             placeholder="Search apps by name, description, or tagline..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
