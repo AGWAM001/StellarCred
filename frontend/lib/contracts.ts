@@ -36,6 +36,9 @@ const PROOF_REGISTRY_ERRORS: Record<number, string> = {
   3: "Not authorised — wallet signature missing or wrong account.",
   4: "Issuer not trusted — the issuer address isn't registered for this credential type.",
   5: "Issuer key mismatch — this credential was signed with a key that doesn't match what's registered on-chain. Re-issue the credential and try again.",
+  6: "Duplicate credential type — a proof for this claim type is already on-chain for this wallet. Revoke or wait for expiry before submitting again.",
+  7: "Credential revoked — the issuer has revoked this credential. Re-issue through the verify flow.",
+  8: "Credential expired — the on-chain proof has passed its validity window. Re-issue to get a fresh proof.",
 };
 
 export interface ContractError {
@@ -55,7 +58,7 @@ export function parseContractError(raw: string): ContractError {
     };
   }
   if (raw.includes("Error(Auth")) {
-    return { code: null, friendly: "Wallet authorisation failed — approve the transaction in Freighter.", raw };
+    return { code: null, friendly: "Wallet authorisation failed — approve the transaction in your wallet.", raw };
   }
   if (raw.includes("Error(WasmVm")) {
     return { code: null, friendly: "Contract execution failed — the proof or inputs were malformed.", raw };
@@ -181,12 +184,18 @@ export interface ProofSubmissionParams {
 }
 
 /**
+ * Mirrors `ProofRegistry::MAX_BATCH_SIZE`. Kept here so the UI can enforce the
+ * same cap before it spends time generating proofs the contract would reject.
+ */
+export const MAX_BATCH_SIZE = 5;
+
+/**
  * Submit multiple proofs in a single atomic transaction via
  * ProofRegistry.submit_proofs_batch.
  *
  * All proofs are verified on-chain before anything is stored. If any one proof
- * fails, the entire call reverts. Max batch size is 5 (enforced by the
- * contract).
+ * fails, the entire call reverts. Max batch size is {@link MAX_BATCH_SIZE}
+ * (enforced by the contract, and re-checked here).
  *
  * Returns the confirmed transaction hash.
  */
@@ -195,6 +204,27 @@ export async function submitProofsBatch(params: {
   submissions: ProofSubmissionParams[];
 }): Promise<string> {
   const { holder, submissions } = params;
+
+  // Both are contract-enforced; failing here costs the caller nothing, whereas
+  // failing on-chain costs a signature and a fee for a transaction that reverts.
+  if (submissions.length === 0) {
+    throw new Error("Batch submission requires at least one proof.");
+  }
+  if (submissions.length > MAX_BATCH_SIZE) {
+    throw new Error(
+      `Batch submission accepts at most ${MAX_BATCH_SIZE} proofs, received ${submissions.length}.`,
+    );
+  }
+  const types = new Set<string>();
+  for (const s of submissions) {
+    if (types.has(s.credentialType)) {
+      // The registry stores one slot per (holder, credential_type), so a
+      // duplicate type in one batch is rejected rather than overwritten.
+      throw new Error(`Batch submission contains two ${s.credentialType} proofs.`);
+    }
+    types.add(s.credentialType);
+  }
+
   if (!CONTRACTS.proofRegistry) {
     throw new Error(
       "ProofRegistry contract id not set. Deploy the contracts and fill NEXT_PUBLIC_PROOF_REGISTRY_ID.",

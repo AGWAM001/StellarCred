@@ -12,10 +12,23 @@
 //! `proof` and `public_inputs` are the opaque byte blobs emitted by `bb`.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, Address,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
     Bytes, Env, Symbol,
 };
 use ultrahonk_soroban_verifier::{UltraHonkVerifier, PROOF_BYTES};
+
+// ── Event types ──────────────────────────────────────────────────────────────
+// Topics follow the convention: (contract, action, credential_type).
+// `contract` is always `symbol_short!("cred_ver")` for CredentialVerifier events.
+
+/// Payload emitted when a verification key is registered or replaced.
+/// Topics: ("cred_ver", "vk_set", credential_type)
+#[contracttype]
+#[derive(Clone)]
+pub struct EventVkSet {
+    /// The admin address that performed the update.
+    pub admin: Address,
+}
 
 // Persistent-entry lifetime management (~5s ledgers). VKs are long-lived.
 const DAY_IN_LEDGERS: u32 = 17280;
@@ -56,32 +69,34 @@ impl CredentialVerifier {
         env.storage().instance().set(&DataKey::Admin, &admin);
     }
 
-    /// Register a verification key for a credential circuit at the given version.
-    /// Admin-only. The VK is validated by parsing it before storage, rejecting
-    /// malformed keys at set time.
-    ///
-    /// If `version` is greater than the currently-tracked latest version for
-    /// `credential_type`, the latest-version pointer is updated automatically.
-    pub fn set_vk(env: Env, credential_type: Symbol, version: u32, vk: Bytes) {
-        Self::require_admin(&env);
+    /// Register/replace the verification key for a credential circuit. Admin-only.
+    /// The VK is validated by parsing it before storage, rejecting malformed keys
+    /// at set time.
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here.
+    // The idiomatic Soroban v26 replacement is `#[contractevent]`; we use
+    // value-based publish to stay consistent with the rest of the codebase.
+    #[allow(deprecated)]
+    pub fn set_vk(env: Env, credential_type: Symbol, vk: Bytes) {
+        let admin = Self::require_admin(&env);
         if UltraHonkVerifier::new(&env, &vk).is_err() {
             panic_with_error!(&env, Error::VkInvalid);
         }
-        let key = DataKey::Vk(credential_type.clone(), version);
+        let key = DataKey::Vk(credential_type.clone());
         env.storage().persistent().set(&key, &vk);
         env.storage()
             .persistent()
             .extend_ttl(&key, VK_BUMP_THRESHOLD, VK_TTL);
 
-        // Update the latest-version pointer when registering a newer version.
-        let latest_key = DataKey::LatestVersion(credential_type);
-        let current: u32 = env.storage().persistent().get(&latest_key).unwrap_or(0);
-        if version > current {
-            env.storage().persistent().set(&latest_key, &version);
-            env.storage()
-                .persistent()
-                .extend_ttl(&latest_key, VK_BUMP_THRESHOLD, VK_TTL);
-        }
+        // Emit: topics = ("cred_ver", "vk_set", credential_type)
+        //       data   = EventVkSet { admin }
+        env.events().publish(
+            (
+                symbol_short!("cred_ver"),
+                symbol_short!("vk_set"),
+                credential_type,
+            ),
+            EventVkSet { admin },
+        );
     }
 
     /// Verify an UltraHonk proof for any registered credential type. Looks up
@@ -135,34 +150,14 @@ impl CredentialVerifier {
         }
     }
 
-    /// Mark a VK version as deprecated. Admin-only. New proof submissions against
-    /// this version will be rejected (`VersionDeprecated`), but the VK is not
-    /// deleted so old proofs already stored by ProofRegistry remain readable.
-    pub fn deprecate_version(env: Env, credential_type: Symbol, version: u32) {
-        Self::require_admin(&env);
-        let key = DataKey::DeprecatedVersion(credential_type, version);
-        env.storage().persistent().set(&key, &true);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, VK_BUMP_THRESHOLD, VK_TTL);
-    }
-
-    /// Returns the highest registered VK version for `credential_type`, or 0 if
-    /// no VK has been registered yet.
-    pub fn get_latest_version(env: Env, credential_type: Symbol) -> u32 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::LatestVersion(credential_type))
-            .unwrap_or(0)
-    }
-
-    fn require_admin(env: &Env) {
+    fn require_admin(env: &Env) -> Address {
         let admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized));
         admin.require_auth();
+        admin
     }
 }
 
