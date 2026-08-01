@@ -1,10 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import {
-  createClaimGate,
-  type ClaimGate,
-  type ClaimGateState,
-} from "./core";
-import type { ClaimType } from "./index";
+import { StellarCred, type ClaimType } from "./index";
 
 /**
  * Configuration options for the `useStellarCred` React hook.
@@ -68,8 +63,20 @@ export function useStellarCred(
   wallet: string | null,
   options?: UseStellarCredOptions
 ): UseStellarCredResult {
-  const [state, setState] = useState<ClaimGateState>(EMPTY_STATE);
-  const gateRef = useRef<ClaimGate | null>(null);
+  const [claims, setClaims] = useState<Partial<Record<ClaimType, boolean>> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const mountedRef = useRef(true);
+
+  const fetchClaims = useCallback(async () => {
+    if (!wallet) {
+      setClaims(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
 
     try {
       const typesToCheck: ClaimType[] =
@@ -81,19 +88,27 @@ export function useStellarCred(
         minThresholds: options?.minThresholds,
       });
 
-    const unsub = gate.subscribe(setState);
+      if (mountedRef.current) {
+        setClaims(results);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err : new Error("Failed to check claims"));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [wallet, JSON.stringify(options?.claims)]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchClaims();
     return () => {
-      unsub();
-      gate.destroy();
+      mountedRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallet, JSON.stringify(options?.claims), JSON.stringify(options?.minThresholds)]);
+  }, [fetchClaims]);
 
-  return {
-    claims: state.claims,
-    loading: state.loading,
-    error: state.error,
-    refetch,
-  };
+  return { claims, loading, error, refetch: fetchClaims };
 }
