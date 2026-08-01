@@ -296,7 +296,7 @@ import type { ClaimGate, ClaimGateState, ClaimGateConfig } from "@stellarcred/sd
 
 ### React
 
-The existing `useStellarCred` React hook is built on top of `createClaimGate`. It has the same behavior as before — just implemented on the shared core.
+The existing `useStellarCred` React hook is a React wrapper around the batched `hasClaims` read. It is a separate implementation from `createClaimGate` (the framework-agnostic per-claim gate) — both expose the same claim status, so pick whichever fits your framework.
 
 ```ts
 import { useStellarCred } from "@stellarcred/sdk";

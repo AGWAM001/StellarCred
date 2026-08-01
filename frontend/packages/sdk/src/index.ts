@@ -88,5 +88,7 @@ export default StellarCred;
 export { createClaimGate } from "./core";
 export type { ClaimGateConfig, ClaimGateState, ClaimGateListener, ClaimGate } from "./core";
 
-// React hook — re-implemented on top of createClaimGate.
+// React hook — React wrapper around the batched `hasClaims` read. It is an
+// independent implementation from `createClaimGate` (which performs per-claim
+// `hasClaim` reads), so keep the two behaviourally in sync.
 export { useStellarCred } from "./react";
