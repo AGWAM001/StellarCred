@@ -833,11 +833,11 @@ function ProofFlow({
             title="UltraHonk proof"
             subtitle="BN254 · keccak transcript · browser WASM"
             state={
-              stage === "proving"  ? "active" :
+              (stage === "proving" || stage === "circuit" || stage === "proof") ? "active" :
               proofDone            ? "done"   : "idle"
             }
             detail={
-              stage === "proving" ? (
+              (stage === "proving" || stage === "circuit" || stage === "proof") ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.65rem" }}>
                   <ProvingBar />
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -847,6 +847,18 @@ function ProofFlow({
                     <span className="mono" style={{ fontSize: "0.72rem", color: "var(--faint)" }}>
                       {elapsed}s
                     </span>
+                  </div>
+                  <div style={{ margin: "0.5rem 0" }}>
+                    <ProofProgress steps={[
+                      {
+                        label: "Load circuit WASM",
+                        status: stage === "circuit" ? "active" : (stage === "proof" || proofDone) ? "done" : "pending",
+                      },
+                      {
+                        label: "Generate ultraplonk proof",
+                        status: stage === "proof" ? "active" : proofDone ? "done" : "pending",
+                      }
+                    ]} />
                   </div>
                   <span style={{ fontSize: "0.72rem", color: "var(--faint)" }}>
                     First run loads the WASM prover (~5–15 s)
