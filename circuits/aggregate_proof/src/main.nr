@@ -15,10 +15,11 @@
 // on-chain via submit_aggregate_proof which atomically stores all claims.
 //
 // Public input layout (concatenated 32-byte big-endian fields):
-//   fields 0..64  : KYC proof (commitment + issuer_x[32] + issuer_y[32])
+//   fields 0..64  : KYC proof (commitment + issuer_x[32] + issuer_y[32])   = 65
 //   fields 65..131: age proof (commitment + issuer_x[32] + issuer_y[32]
-//                   + current_date + threshold_years)
-// Total: 65 + 67 = 132 public fields
+//                   + current_date + threshold_years)                       = 67
+//   field  132    : num_credentials (last field, pub)                        = 1
+// Total: 65 + 67 + 1 = 133 public fields
 
 use dep::poseidon::poseidon2::Poseidon2;
 use std::ecdsa_secp256k1::verify_signature;

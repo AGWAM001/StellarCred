@@ -387,6 +387,94 @@ impl ProofRegistry {
         }
     }
 
+    /// Verify an aggregate proof that bundles N credential proofs into a single
+    /// UltraHonk proof, and atomically store all N claims. This reduces on-chain
+    /// verification from N separate `submit_proof` calls to 1.
+    ///
+    /// The aggregate circuit (N=2 PoC: KYC + age) packs the public inputs as:
+    ///   [kyc_fields(65) | age_fields(67) | num_credentials(1)] = 133 fields.
+    /// Each inner credential's issuer must be independently registered and
+    /// trusted for its credential type; the outer proof must verify against
+    /// the "aggregate" VK registered on the CredentialVerifier.
+    ///
+    /// Emits one "submitted" event per stored credential, mirroring
+    /// `submit_proofs_batch`.
+    #[allow(deprecated)]
+    pub fn submit_aggregate_proof(
+        env: Env,
+        holder: Address,
+        issuer_ids: Vec<Address>,
+        credential_types: Vec<Symbol>,
+        proof: Bytes,
+        public_inputs: Bytes,
+        expiry: u64,
+    ) {
+        holder.require_auth();
+
+        // 1. Verify the outer aggregate proof against the aggregate VK.
+        let verifier = VerifierClient::new(&env, &Self::verifier(&env));
+        if !verifier.verify_proof(&symbol_short!("aggregate"), &proof, &public_inputs) {
+            panic_with_error!(&env, Error::VerificationFailed);
+        }
+
+        // 2. Validate the layout: the num_credentials field (last public-input
+        //    field) must match the supplied type count, and the issuer/type
+        //    vectors must be the same length.
+        let num = Self::read_u64_field(&public_inputs, AGG_FIELD_NUM_CREDENTIALS);
+        if num != credential_types.len() as u64
+            || num < 2
+            || num > MAX_BATCH_SIZE as u64
+            || issuer_ids.len() != credential_types.len()
+        {
+            panic_with_error!(&env, Error::AggregateLayoutInvalid);
+        }
+
+        let registry = IssuerClient::new(&env, &Self::issuer_registry(&env));
+        let now = env.ledger().timestamp();
+
+        // 3. For each inner credential, validate issuer trust and pubkey, then
+        //    atomically store the claim. Public-input field offsets advance by
+        //    each credential's field width.
+        let mut field_offset: u32 = 0;
+        for i in 0..credential_types.len() {
+            let ct = credential_types.get(i).unwrap();
+            let issuer = issuer_ids.get(i).unwrap();
+
+            if !registry.is_valid_issuer(&issuer, &ct) {
+                panic_with_error!(&env, Error::IssuerNotTrusted);
+            }
+
+            // Pubkey sits at (commitment field + 1) relative to the block start.
+            let expected = registry.get_issuer_pubkey(&issuer);
+            if !Self::aggregate_pubkey_match(&public_inputs, field_offset + 1, &expected) {
+                panic_with_error!(&env, Error::IssuerKeyMismatch);
+            }
+
+            let threshold =
+                Self::extract_threshold_from_aggregate(&ct, &public_inputs, field_offset);
+            Self::store_claim(&env, &holder, &ct, now, expiry, threshold, issuer.clone());
+
+            // Emit one event per stored credential.
+            // Topics: ("proof_reg", "submitted", credential_type)
+            // Data:   EventProofSubmitted { holder, issuer, verified_at, expiry }
+            env.events().publish(
+                (
+                    symbol_short!("proof_reg"),
+                    symbol_short!("submitted"),
+                    ct.clone(),
+                ),
+                EventProofSubmitted {
+                    holder: holder.clone(),
+                    issuer: issuer.clone(),
+                    verified_at: now,
+                    expiry,
+                },
+            );
+
+            field_offset += Self::aggregate_field_count(&ct);
+        }
+    }
+
     /// Returns `(is_currently_valid, verified_at, expiry)`. `is_currently_valid`
     /// accounts for expiry against the current ledger time.
     ///
@@ -477,6 +565,28 @@ impl ProofRegistry {
         env.storage()
             .persistent()
             .remove(&DataKey::Proof(holder, credential_type));
+    }
+
+    /// Revoke ALL cached proofs for a holder — useful after an aggregate proof
+    /// is submitted and the holder wants a clean slate. Best-effort removal
+    /// across all known credential types; types without a stored proof are a
+    /// no-op.
+    pub fn revoke_all(env: Env, holder: Address) {
+        holder.require_auth();
+        let types = [
+            symbol_short!("kyc"),
+            symbol_short!("age"),
+            symbol_short!("income"),
+            Symbol::new(&env, "jurisdiction"),
+            symbol_short!("funds"),
+            Symbol::new(&env, "accreditation"),
+            Symbol::new(&env, "employment"),
+        ];
+        for t in types {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Proof(holder.clone(), t));
+        }
     }
 
     /// Invalidate a holder's cached proof. Only the registered issuer for
@@ -638,14 +748,15 @@ impl ProofRegistry {
         verified_at: u64,
         expiry: u64,
         threshold: Option<u64>,
-        revoked: bool,
+        issuer: Address,
     ) {
         let key = DataKey::Proof(holder.clone(), credential_type.clone());
         let record = ProofRecord {
             verified_at,
             expiry,
             threshold,
-            revoked,
+            revoked: false,
+            issuer: Some(issuer),
         };
         env.storage().persistent().set(&key, &record);
         env.storage()

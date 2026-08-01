@@ -1044,6 +1044,83 @@ fn batch_duplicate_credential_type_is_rejected() {
     assert!(res.is_err());
 }
 
+// ── revoke_all tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn revoke_all_clears_submitted_proofs() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    let admin = Address::generate(&env);
+
+    let ir_id = env.register(IssuerRegistry, (admin.clone(),));
+    let ir = IssuerRegistryClient::new(&env, &ir_id);
+
+    let kyc_issuer = Address::generate(&env);
+    ir.register_issuer(
+        &kyc_issuer,
+        &pubkey_from(&env, PUBLIC_INPUTS),
+        &vec![&env, symbol_short!("kyc")],
+    );
+    let funds_issuer = Address::generate(&env);
+    ir.register_issuer(
+        &funds_issuer,
+        &pubkey_from(&env, FUNDS_PUBLIC_INPUTS),
+        &vec![&env, symbol_short!("funds")],
+    );
+    let age_issuer = Address::generate(&env);
+    ir.register_issuer(
+        &age_issuer,
+        &pubkey_from(&env, AGE_PUBLIC_INPUTS),
+        &vec![&env, symbol_short!("age")],
+    );
+
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
+    let vc = CredentialVerifierClient::new(&env, &v_id);
+    vc.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
+    vc.set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+    vc.set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, AGE_VK));
+
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
+    let registry = ProofRegistryClient::new(&env, &pr_id);
+    let holder = Address::generate(&env);
+
+    registry.submit_proof(
+        &holder,
+        &kyc_issuer,
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, PROOF),
+        &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &9999,
+    );
+    registry.submit_proof(
+        &holder,
+        &funds_issuer,
+        &symbol_short!("funds"),
+        &Bytes::from_slice(&env, FUNDS_PROOF),
+        &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &9999,
+    );
+    registry.submit_proof(
+        &holder,
+        &age_issuer,
+        &symbol_short!("age"),
+        &Bytes::from_slice(&env, AGE_PROOF),
+        &Bytes::from_slice(&env, AGE_PUBLIC_INPUTS),
+        &9999,
+    );
+
+    assert!(registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
+    assert!(registry.is_verified(&holder, &symbol_short!("funds"), &None).0);
+    assert!(registry.is_verified(&holder, &symbol_short!("age"), &None).0);
+
+    registry.revoke_all(&holder);
+
+    assert!(!registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
+    assert!(!registry.is_verified(&holder, &symbol_short!("funds"), &None).0);
+    assert!(!registry.is_verified(&holder, &symbol_short!("age"), &None).0);
+}
+
 // ── Admin / upgrade tests ────────────────────────────────────────────────────
 
 #[test]
