@@ -133,6 +133,8 @@ jobs:
   a11y:
     name: Accessibility (axe-core)
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     defaults:
       run:
         working-directory: frontend
@@ -191,5 +193,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           skip_step: build
           directory: frontend
-
->>>>>>> 1e3a72f (feat(frontend): add bundle size budget and CI regression check (#139))
