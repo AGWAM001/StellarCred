@@ -9,5 +9,6 @@ members = [
     "jurisdiction_proof",
     "funds_proof",
     "accreditation_proof",
+    "employment_proof",
     "aggregate_proof",
 ]
