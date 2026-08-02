@@ -7,15 +7,40 @@ on:
     branches: [main]
 
 jobs:
+  commitlint:
+    name: Lint commit messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Lint commits in PR
+        run: |
+          npx --yes -p @commitlint/cli -p @commitlint/config-conventional commitlint \
+            --from ${{ github.event.pull_request.base.sha }} \
+            --to ${{ github.event.pull_request.head.sha }} \
+            --verbose
+
   contracts:
     name: Contract tests & build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          # Toolchain version is read from rust-toolchain.toml; specifying it
+          # here too lets the action cache by version rather than just "stable".
+          toolchain: "1.93.1"
           targets: wasm32v1-none
           components: clippy
 
@@ -29,11 +54,12 @@ jobs:
           key: cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-
 
-      - name: Build WASM artifacts (required by upgrade tests)
-        run: cargo build --release --target wasm32v1-none
+      - name: Build WASM artifacts
+        # --locked ensures Cargo.lock is respected exactly (no silent dep upgrades).
+        run: cargo build --release --target wasm32v1-none --locked
 
       - name: Run contract tests
-        run: cargo test
+        run: cargo test --locked
 
   circuits:
     name: Circuit compile
@@ -122,6 +148,9 @@ jobs:
             exit 1
           fi
 
+      - name: Check verify-wasm.sh syntax
+        run: bash -n scripts/verify-wasm.sh
+
   frontend:
     name: Frontend typecheck & build
     runs-on: ubuntu-latest
@@ -129,7 +158,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -163,3 +192,45 @@ jobs:
 
       - name: Run issuer tests (incl. cross-boundary circuit test)
         run: pnpm --filter @stellarcred/issuer test
+
+  a11y:
+    name: Accessibility (axe-core)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # Dummy values so the build doesn't error on missing env vars
+      NEXT_PUBLIC_PROOF_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000001
+      NEXT_PUBLIC_ISSUER_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000002
+      NEXT_PUBLIC_CREDENTIAL_VERIFIER_ID: C000000000000000000000000000000000000000000000000000000000000003
+      NEXT_PUBLIC_GATED_POOL_ID: C000000000000000000000000000000000000000000000000000000000000004
+      NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
+      NEXT_PUBLIC_STELLAR_NETWORK: testnet
+      NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run axe-core accessibility checks
+        run: pnpm test:e2e

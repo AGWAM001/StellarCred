@@ -1,8 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { IssuerClient, CREDENTIAL_TYPES, type CredentialType, type ClaimParams } from "@stellarcred/issuer";
+import {
+  IssuerClient,
+  CREDENTIAL_TYPES,
+  type CredentialType,
+  type ClaimParams,
+} from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
-import { logger, stripSensitiveFields, resolveRequestId } from "../../../lib/logger";
+import { readJsonBody, bodyErrorResponse } from "../../../lib/request-limits";
+import {
+  logger,
+  stripSensitiveFields,
+  resolveRequestId,
+} from "../../../lib/logger";
+import { fetchPlaidBalance } from "../../../lib/plaid";
+import {
+  idempotencyGet,
+  idempotencySet,
+  idempotencyInFlightBegin,
+  idempotencyInFlightSettle,
+  idempotencyInFlightFail,
+  isValidIdempotencyKey,
+  MAX_KEY_LENGTH_BYTES,
+  type CachedResponse,
+} from "../../../lib/idempotency";
 
 // Server-side only — never shipped to the browser.
 // Set ISSUER_PRIVATE_KEY in .env.local to the 64-char hex secp256k1 private
@@ -12,7 +33,9 @@ import { logger, stripSensitiveFields, resolveRequestId } from "../../../lib/log
 // this fallback is intentionally app-specific and not part of @stellarcred/issuer.
 const DEMO_SK_HEX =
   process.env.ISSUER_PRIVATE_KEY ||
-  Buffer.from(sha256(new TextEncoder().encode("stellarcred-demo-issuer"))).toString("hex");
+  Buffer.from(
+    sha256(new TextEncoder().encode("stellarcred-demo-issuer")),
+  ).toString("hex");
 
 if (!process.env.ISSUER_PRIVATE_KEY) {
   logger.warn(
@@ -164,80 +187,117 @@ async function resolvePersonaKYC(inquiryId: string): Promise<{
   };
 }
 
-// Plaid balance attestation relay. Returns the verified balance from the user's
-// bank — this becomes the credential value, not what the user typed.
-// Mock mode: no PLAID_ACCESS_TOKEN set → returns a mock balance of $50,000.
-async function verifyWithPlaid(requestId?: string): Promise<{
-  ok: boolean;
-  balance?: number;
-  error?: string;
-}> {
-  if (!process.env.PLAID_ACCESS_TOKEN) {
-    logger.warn(
-      stripSensitiveFields({ event: "plaid_mock_mode", requestId }),
-      "PLAID_ACCESS_TOKEN not set — returning mock balance $50,000",
-    );
-    return { ok: true, balance: 50000 };
-  }
-
-  const env = process.env.PLAID_ENV ?? "sandbox";
-  const baseUrl =
-    env === "production"
-      ? "https://production.plaid.com"
-      : env === "development"
-        ? "https://development.plaid.com"
-        : "https://sandbox.plaid.com";
-
-  const response = await fetch(`${baseUrl}/accounts/balance/get`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: process.env.PLAID_CLIENT_ID,
-      secret: process.env.PLAID_SECRET,
-      access_token: process.env.PLAID_ACCESS_TOKEN,
-    }),
-  });
-
-  const result = await response.json();
-  logger.info(stripSensitiveFields({
-    event: "plaid_response",
-    outcome: result.error_code ?? "ok",
-    requestId,
-  }));
-
-  if (!response.ok || result.error_code) {
-    return { ok: false, error: result.error_message ?? "Plaid error" };
-  }
-
-  // Use the highest available balance across depository accounts.
-  const accounts: Array<{
-    type: string;
-    balances: { available: number | null };
-  }> = result.accounts ?? [];
-  const depository = accounts.filter((a) => a.type === "depository");
-  const verifiedBalance = depository.reduce(
-    (max, a) => Math.max(max, a.balances.available ?? 0),
-    0,
-  );
-
-  return { ok: true, balance: verifiedBalance };
-}
-
 // readonly CredentialType[] widened to string[] so .includes() accepts any
 // user-supplied string during validation, before it's known to be valid.
 const VALID_TYPES: readonly string[] = CREDENTIAL_TYPES;
 
 export async function POST(req: NextRequest) {
   const requestId = resolveRequestId(req.headers.get("x-request-id"));
+
+  // ── Idempotency-Key support ────────────────────────────────────────────────
+  // A retried /api/issue request (network blip, double-click) can trigger
+  // duplicate signing/provider calls. Accept an Idempotency-Key header so
+  // identical retries return the cached original result without re-processing.
+  // Keys are validated (non-empty, printable, ≤ 256 bytes) before use so an
+  // oversized header cannot be stored verbatim and amplify memory usage.
+  const rawKey = req.headers.get("Idempotency-Key")?.trim() || undefined;
+  const idempotencyKey =
+    rawKey && isValidIdempotencyKey(rawKey) ? rawKey : undefined;
+  if (rawKey && !idempotencyKey) {
+    logger.warn(
+      stripSensitiveFields({
+        event: "idempotency_key_rejected",
+        requestId,
+        reason:
+          new TextEncoder().encode(rawKey).length > MAX_KEY_LENGTH_BYTES
+            ? "too_long"
+            : "invalid",
+      }),
+    );
+  }
+
+  if (idempotencyKey) {
+    // Cache hit — replay the original response (X-Idempotent: true so clients
+    // can tell this is a replayed, not fresh, result).
+    const cached = idempotencyGet(idempotencyKey);
+    if (cached) {
+      logger.info(stripSensitiveFields({ event: "idempotency_hit", requestId }));
+      return replayCached(cached, requestId);
+    }
+
+    // Concurrent duplicate — another request with this key is already
+    // executing. Await its result and replay it instead of running the
+    // provider calls / signing a second time.
+    const inFlight = idempotencyInFlightBegin(idempotencyKey);
+    if (inFlight) {
+      logger.info(
+        stripSensitiveFields({ event: "idempotency_inflight_hit", requestId }),
+      );
+      try {
+        return replayCached(await inFlight, requestId);
+      } catch {
+        // The leader failed before producing a response — process this
+        // request normally instead of replaying the leader's error. Re-acquire
+        // the in-flight slot so a third concurrent duplicate joining while we
+        // execute is still de-duplicated instead of running in parallel.
+        idempotencyInFlightBegin(idempotencyKey);
+      }
+    }
+  }
+
+  try {
+    return await executeRequest(req, requestId, idempotencyKey);
+  } catch (e) {
+    // Release any duplicate waiting on this key so it can retry itself.
+    if (idempotencyKey) idempotencyInFlightFail(idempotencyKey, e);
+    throw e;
+  }
+}
+
+/** Reconstruct a NextResponse from a cached entry, tagging it as replayed. */
+function replayCached(cached: CachedResponse, requestId: string): NextResponse {
+  const headers = new Headers(cached.headers as Record<string, string>);
+  headers.set("x-request-id", requestId);
+  headers.set("X-Idempotent", "true");
+  return new NextResponse(cached.body, { status: cached.status, headers });
+}
+
+async function executeRequest(
+  req: NextRequest,
+  requestId: string,
+  idempotencyKey: string | undefined,
+) {
   const startTime = Date.now();
   let outcome: "success" | "failure" = "failure";
   let credentialTypes: string[] = [];
   let issuerId: string | undefined;
   let walletAddress: string | undefined;
 
-  const sendResponse = (response: NextResponse) => {
+  const sendResponse = async (response: NextResponse) => {
     const durationMs = Date.now() - startTime;
     response.headers.set("x-request-id", requestId);
+
+    // Cache this response under the idempotency key if provided, and release
+    // any concurrent duplicate that joined the in-flight slot.
+    if (idempotencyKey) {
+      try {
+        const cloned = response.clone();
+        const body = await cloned.text();
+        const entry: CachedResponse = {
+          status: response.status,
+          body,
+          headers: Object.fromEntries(response.headers.entries()),
+          createdAt: Date.now(),
+        };
+        idempotencySet(idempotencyKey, entry);
+        idempotencyInFlightSettle(idempotencyKey, entry);
+      } catch (e) {
+        // If cloning/caching fails (edge case), don't break the response —
+        // but do fail any waiting duplicate so it can retry for itself.
+        idempotencyInFlightFail(idempotencyKey, e);
+      }
+    }
+
     for (const type of credentialTypes) {
       logger.info(
         stripSensitiveFields({
@@ -254,7 +314,7 @@ export async function POST(req: NextRequest) {
     return response;
   };
 
-  let body: {
+  type BodyType = {
     credential_types?: string[];
     // Legacy single-type shape — still accepted for backward compatibility.
     type?: string;
@@ -270,13 +330,11 @@ export async function POST(req: NextRequest) {
     returnUrl?: string;
   };
 
-  try {
-    body = await req.json();
-  } catch {
-    return sendResponse(
-      NextResponse.json({ error: "Invalid JSON" }, { status: 400 }),
-    );
+  const parsed = await readJsonBody<BodyType>(req);
+  if (!parsed.ok) {
+    return sendResponse(bodyErrorResponse(parsed.error));
   }
+  const body = parsed.body;
 
   const {
     holder,
@@ -361,20 +419,24 @@ export async function POST(req: NextRequest) {
   if (process.env.NEXT_PUBLIC_ISSUER_REGISTRY_ID) {
     const registered = await fetchIssuerPubkey(issuerId, SIM_ACCOUNT);
     if (!registered) {
-      return sendResponse(NextResponse.json(
-        { error: "Selected issuer is not registered on IssuerRegistry." },
-        { status: 400 },
-      ));
+      return sendResponse(
+        NextResponse.json(
+          { error: "Selected issuer is not registered on IssuerRegistry." },
+          { status: 400 },
+        ),
+      );
     }
     const localKey = localIssuerPubkeyBytes();
     if (!Buffer.from(registered).equals(localKey)) {
-      return sendResponse(NextResponse.json(
-        {
-          error:
-            "ISSUER_PRIVATE_KEY does not match the selected issuer's registered public key on IssuerRegistry. Choose the issuer that matches your server key, or update ISSUER_PRIVATE_KEY.",
-        },
-        { status: 403 },
-      ));
+      return sendResponse(
+        NextResponse.json(
+          {
+            error:
+              "ISSUER_PRIVATE_KEY does not match the selected issuer's registered public key on IssuerRegistry. Choose the issuer that matches your server key, or update ISSUER_PRIVATE_KEY.",
+          },
+          { status: 403 },
+        ),
+      );
     }
   }
 
@@ -489,7 +551,7 @@ export async function POST(req: NextRequest) {
   // truth — we overwrite any user-supplied balance with the verified figure.
   const needsFunds = credentialTypes.includes("funds");
   if (needsFunds) {
-    const plaid = await verifyWithPlaid(requestId);
+    const plaid = await fetchPlaidBalance(requestId);
     if (!plaid.ok) {
       logger.info(
         stripSensitiveFields({
@@ -503,8 +565,8 @@ export async function POST(req: NextRequest) {
       );
       return sendResponse(
         NextResponse.json(
-          { error: plaid.error ?? "Balance verification failed" },
-          { status: 403 },
+          { error: plaid.error, code: plaid.code },
+          { status: plaid.status },
         ),
       );
     }

@@ -14,6 +14,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { saveCredential, TYPE_META, type Credential } from "@/lib/credential";
 import type { CredentialType } from "@/lib/stellar";
 import { useToast } from "@/components/Toast";
+import { validateVerifyParams } from "@/lib/verifyParams";
 import { QrScanner } from "@/components/QrScanner";
 
 const TYPES = Object.entries(TYPE_META) as [
@@ -66,6 +67,16 @@ function VerifyInner() {
     claimParam && VALID_CLAIMS.includes(claimParam) ? claimParam : null;
   const locked = !!requiredClaim;
 
+  // Validate all query params up-front; block the flow on any invalid value.
+  const paramValidation = validateVerifyParams({
+    returnUrl,
+    claim: claimParam,
+    thresholdYears: searchParams.get("threshold_years"),
+    threshold: searchParams.get("threshold"),
+    restricted: searchParams.get("restricted"),
+    currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+  });
+
   // Protocol-supplied proof parameters. These flow into the issued credential
   // so the witness route can use them at prove time instead of hardcoded values.
   const minThresholdParam = searchParams.get("min_threshold") ?? undefined;
@@ -87,6 +98,7 @@ function VerifyInner() {
   const [selected, setSelected] = useState<CredentialType | null>(
     requiredClaim ?? TYPES[0]?.[0] ?? null,
   );
+  const radioRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [attributes, setAttributes] = useState<Record<string, string>>({
     date_of_birth: "1995-06-15",
     income: "250000",
@@ -99,6 +111,13 @@ function VerifyInner() {
   const [error, setError] = useState("");
   const [urlError, setUrlError] = useState("");
   const [requestingDomain, setRequestingDomain] = useState("");
+  // Param validation errors surfaced from validateVerifyParams
+  const paramErrors = [
+    paramValidation.claimError,
+    paramValidation.thresholdYearsError,
+    paramValidation.thresholdError,
+    paramValidation.restrictedError,
+  ].filter(Boolean) as string[];
   const [done, setDone] = useState(false);
   const [scanning, setScanning] = useState(false);
   const justIssuedClaims = useRef<string[]>([]);
@@ -164,32 +183,30 @@ function VerifyInner() {
 
   useEffect(() => {
     if (returnUrl) {
-      try {
-        let isRelative = false;
-        try {
-          new URL(returnUrl);
-        } catch {
-          if (returnUrl.startsWith("/")) {
-            isRelative = true;
-          }
-        }
+      // Use the extracted validator so error messages are consistent and testable.
+      const result = validateVerifyParams({
+        returnUrl,
+        claim: null,
+        thresholdYears: null,
+        threshold: null,
+        restricted: null,
+        currentOrigin: window.location.origin,
+      });
 
-        if (isRelative) {
-          setUrlError("");
-          setRequestingDomain(window.location.hostname);
-        } else {
-          const parsed = new URL(returnUrl);
-          if (parsed.protocol !== "https:") {
-            setUrlError("Invalid return URL: Must use HTTPS protocol.");
-            setRequestingDomain("");
-          } else {
-            setUrlError("");
-            setRequestingDomain(parsed.hostname);
-          }
-        }
-      } catch {
-        setUrlError("Invalid return URL: Must be a well-formed URL.");
+      if (result.returnUrlError) {
+        setUrlError(result.returnUrlError);
         setRequestingDomain("");
+      } else {
+        setUrlError("");
+        try {
+          if (returnUrl.startsWith("/")) {
+            setRequestingDomain(window.location.hostname);
+          } else {
+            setRequestingDomain(new URL(returnUrl).hostname);
+          }
+        } catch {
+          setRequestingDomain("");
+        }
       }
     } else {
       setUrlError("");
@@ -465,19 +482,21 @@ function VerifyInner() {
             </div>
           ) : (
             <>
-              {urlError && (
-                <div
-                  style={{
-                    padding: "0.75rem 1rem",
-                    borderRadius: "var(--radius)",
-                    background: "rgba(240, 96, 77, 0.1)",
-                    border: "1px solid rgba(240, 96, 77, 0.2)",
-                    color: "var(--danger)",
-                    fontSize: "0.8125rem",
-                    marginBottom: "1rem",
-                  }}
-                >
-                  {urlError}
+              {(urlError || paramErrors.length > 0) && (
+                <div style={{
+                  padding: "0.75rem 1rem",
+                  borderRadius: "var(--radius)",
+                  background: "rgba(240, 96, 77, 0.1)",
+                  border: "1px solid rgba(240, 96, 77, 0.2)",
+                  color: "var(--danger)",
+                  fontSize: "0.8125rem",
+                  marginBottom: "1rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.3rem",
+                }}>
+                  {urlError && <span>{urlError}</span>}
+                  {paramErrors.map((e, i) => <span key={i}>{e}</span>)}
                 </div>
               )}
               {requestingDomain && !urlError && (
@@ -498,7 +517,7 @@ function VerifyInner() {
                   </strong>
                 </div>
               )}
-              <label className="field-label">Credential type</label>
+              <label className="field-label" id="credential-type-label">Credential type</label>
               {locked && (
                 <p
                   className="faint"
@@ -513,6 +532,8 @@ function VerifyInner() {
               )}
               <div
                 className="stack"
+                role="radiogroup"
+                aria-labelledby="credential-type-label"
                 style={{
                   gap: "0.5rem",
                   marginTop: "0.5rem",
@@ -522,12 +543,41 @@ function VerifyInner() {
                 {TYPES.map(([key, m]) => {
                   const on = selected === key;
                   if (locked && key !== requiredClaim) return null;
+                  const visibleTypes = locked
+                    ? TYPES.filter(([k]) => k === requiredClaim)
+                    : TYPES;
                   return (
                     <div
                       key={key}
+                      ref={(el) => {
+                        radioRefs.current[key] = el;
+                      }}
                       onClick={() => {
                         if (!locked) setSelected(key);
                       }}
+                      onKeyDown={(e) => {
+                        if (locked) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelected(key);
+                        } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+                          e.preventDefault();
+                          const i = visibleTypes.findIndex(([k]) => k === key);
+                          const [nextKey] = visibleTypes[(i + 1) % visibleTypes.length];
+                          setSelected(nextKey);
+                          radioRefs.current[nextKey]?.focus();
+                        } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+                          e.preventDefault();
+                          const i = visibleTypes.findIndex(([k]) => k === key);
+                          const [prevKey] = visibleTypes[(i - 1 + visibleTypes.length) % visibleTypes.length];
+                          setSelected(prevKey);
+                          radioRefs.current[prevKey]?.focus();
+                        }
+                      }}
+                      role="radio"
+                      aria-checked={on}
+                      aria-label={m.title}
+                      tabIndex={on ? 0 : -1}
                       style={{
                         padding: "0.75rem 0.9rem",
                         borderRadius: "var(--radius)",
@@ -604,8 +654,9 @@ function VerifyInner() {
                           style={{ marginTop: "0.75rem" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <label className="field-label">{m.attribute}</label>
+                          <label className="field-label" htmlFor="attr-date-of-birth">{m.attribute}</label>
                           <input
+                            id="attr-date-of-birth"
                             type="date"
                             value={attributes.date_of_birth}
                             onChange={(e) =>
@@ -619,8 +670,9 @@ function VerifyInner() {
                           style={{ marginTop: "0.75rem" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <label className="field-label">{m.attribute}</label>
+                          <label className="field-label" htmlFor="attr-income">{m.attribute}</label>
                           <input
+                            id="attr-income"
                             type="number"
                             value={attributes.income}
                             onChange={(e) => setAttr("income", e.target.value)}
@@ -632,8 +684,9 @@ function VerifyInner() {
                           style={{ marginTop: "0.75rem" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <label className="field-label">{m.attribute}</label>
+                          <label className="field-label" htmlFor="attr-net-worth">{m.attribute}</label>
                           <input
+                            id="attr-net-worth"
                             type="number"
                             value={attributes.net_worth}
                             onChange={(e) =>
@@ -771,8 +824,9 @@ function VerifyInner() {
                           style={{ marginTop: "0.75rem" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <label className="field-label">{m.attribute}</label>
+                          <label className="field-label" htmlFor="attr-country-code">{m.attribute}</label>
                           <select
+                            id="attr-country-code"
                             value={attributes.country_code}
                             onChange={(e) =>
                               setAttr("country_code", e.target.value)
@@ -791,8 +845,9 @@ function VerifyInner() {
                           style={{ marginTop: "0.75rem" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <label className="field-label">{m.attribute}</label>
+                          <label className="field-label" htmlFor="attr-seniority">{m.attribute}</label>
                           <input
+                            id="attr-seniority"
                             type="number"
                             value={attributes.seniority}
                             onChange={(e) =>
@@ -807,8 +862,9 @@ function VerifyInner() {
               </div>
 
               <div style={{ marginBottom: "1.5rem" }}>
-                <label className="field-label">Validity period</label>
+                <label className="field-label" htmlFor="validity-period">Validity period</label>
                 <select
+                  id="validity-period"
                   value={expiry}
                   onChange={(e) => setExpiry(e.target.value)}
                 >
@@ -842,7 +898,7 @@ function VerifyInner() {
               <button
                 className="btn btn-primary"
                 style={{ width: "100%" }}
-                disabled={busy || !selected || !!urlError}
+                disabled={busy || !selected || !!urlError || paramErrors.length > 0}
                 onClick={onRequest}
               >
                 {busy ? (
