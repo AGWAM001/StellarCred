@@ -25,8 +25,6 @@ const AGE_VK: &[u8] = include_bytes!("../../../fixtures/age/vk");
 const AGE_PROOF: &[u8] = include_bytes!("../../../fixtures/age/proof");
 const AGE_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/age/public_inputs");
 
-// Extract the issuer secp256k1 key (x || y) from any fixture's public inputs
-// (fields 1..65, low byte of each 32-byte field).
 fn pubkey_from(env: &Env, public_inputs: &[u8]) -> BytesN<64> {
     let mut arr = [0u8; 64];
     for i in 0..64usize {
@@ -47,7 +45,6 @@ struct Harness {
 fn deploy(env: &Env) -> Harness {
     let admin = Address::generate(env);
 
-    // IssuerRegistry with one issuer trusted for kyc.
     let ir_id = env.register(IssuerRegistry, (admin.clone(),));
     let ir = IssuerRegistryClient::new(env, &ir_id);
     let issuer = Address::generate(env);
@@ -57,7 +54,6 @@ fn deploy(env: &Env) -> Harness {
         &vec![env, symbol_short!("kyc")],
     );
 
-    // CredentialVerifier with the kyc VK.
     let v_id = env.register(CredentialVerifier, (admin,));
     CredentialVerifierClient::new(env, &v_id)
         .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, VK));
@@ -89,7 +85,7 @@ fn submit_then_verified() {
 
     submit(&env, &h, &holder, 1000);
 
-    let (valid, _at, expiry) = h.registry.is_verified(&holder, &symbol_short!("kyc"));
+    let (valid, _at, expiry) = h.registry.is_verified(&holder, &symbol_short!("kyc"), &None);
     assert!(valid);
     assert_eq!(expiry, 1000);
 }
@@ -101,12 +97,11 @@ fn expires_after_ledger_time_passes() {
     let h = deploy(&env);
     let holder = Address::generate(&env);
 
-    submit(&env, &h, &holder, 1000); // valid until ts=1000
-    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    submit(&env, &h, &holder, 1000);
+    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
 
-    // Advance ledger time past the expiry.
     env.ledger().with_mut(|li| li.timestamp = 2000);
-    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
 }
 
 #[test]
@@ -115,8 +110,6 @@ fn rejects_wrong_issuer_key() {
     env.mock_all_auths();
     let admin = Address::generate(&env);
 
-    // Register the issuer with a DIFFERENT key than the one the proof was signed
-    // with, so the public-input pubkey will not match.
     let ir_id = env.register(IssuerRegistry, (admin.clone(),));
     let issuer = Address::generate(&env);
     IssuerRegistryClient::new(&env, &ir_id).register_issuer(
@@ -140,7 +133,7 @@ fn rejects_wrong_issuer_key() {
         &1000,
     );
     assert!(res.is_err());
-    assert!(!registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
 }
 
 #[test]
@@ -149,7 +142,7 @@ fn rejects_untrusted_issuer() {
     env.mock_all_auths();
     let h = deploy(&env);
     let holder = Address::generate(&env);
-    let stranger = Address::generate(&env); // not registered
+    let stranger = Address::generate(&env);
 
     let res = h.registry.try_submit_proof(
         &holder,
@@ -160,7 +153,7 @@ fn rejects_untrusted_issuer() {
         &1000,
     );
     assert!(res.is_err());
-    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
 }
 
 #[test]
@@ -181,7 +174,7 @@ fn rejects_invalid_proof() {
         &1000,
     );
     assert!(res.is_err());
-    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
 }
 
 #[test]
@@ -190,7 +183,7 @@ fn unverified_holder_returns_false() {
     env.mock_all_auths();
     let h = deploy(&env);
     let stranger = Address::generate(&env);
-    assert!(!h.registry.is_verified(&stranger, &symbol_short!("kyc")).0);
+    assert!(!h.registry.is_verified(&stranger, &symbol_short!("kyc"), &None).0);
 }
 
 #[test]
@@ -202,7 +195,7 @@ fn revoke_clears_proof() {
 
     submit(&env, &h, &holder, 1000);
     h.registry.revoke_proof(&holder, &symbol_short!("kyc"));
-    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
 }
 
 // ── check_claim / threshold tests ────────────────────────────────────────────
@@ -215,7 +208,6 @@ fn check_claim_no_threshold_matches_is_verified() {
     let holder = Address::generate(&env);
 
     submit(&env, &h, &holder, 1000);
-    // check_claim with no min_threshold should behave like is_verified.
     assert!(h.registry.check_claim(&holder, &symbol_short!("kyc"), &None));
 }
 
@@ -225,7 +217,6 @@ fn funds_threshold_stored_and_checked() {
     env.mock_all_auths();
     let admin = Address::generate(&env);
 
-    // Wire up a fresh harness for the funds credential type.
     let ir_id = env.register(IssuerRegistry, (admin.clone(),));
     let ir = IssuerRegistryClient::new(&env, &ir_id);
     let issuer = Address::generate(&env);
@@ -241,7 +232,6 @@ fn funds_threshold_stored_and_checked() {
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
-    // funds fixture proves balance >= 200_000.
     registry.submit_proof(
         &holder,
         &issuer,
@@ -251,12 +241,9 @@ fn funds_threshold_stored_and_checked() {
         &9999,
     );
 
-    // A protocol requiring <= the proved threshold passes.
     assert!(registry.check_claim(&holder, &symbol_short!("funds"), &Some(200_000)));
     assert!(registry.check_claim(&holder, &symbol_short!("funds"), &Some(50_000)));
     assert!(registry.check_claim(&holder, &symbol_short!("funds"), &None));
-
-    // A protocol requiring MORE than was proved fails.
     assert!(!registry.check_claim(&holder, &symbol_short!("funds"), &Some(250_000)));
 }
 
@@ -281,7 +268,6 @@ fn age_threshold_stored_and_checked() {
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
-    // age fixture proves age >= 18.
     registry.submit_proof(
         &holder,
         &issuer,
@@ -291,10 +277,45 @@ fn age_threshold_stored_and_checked() {
         &9999,
     );
 
-    // Protocols requiring <= 18 pass.
     assert!(registry.check_claim(&holder, &symbol_short!("age"), &Some(18)));
     assert!(registry.check_claim(&holder, &symbol_short!("age"), &Some(16)));
-
-    // A protocol requiring age >= 21 fails — the proof only covers >= 18.
     assert!(!registry.check_claim(&holder, &symbol_short!("age"), &Some(21)));
+}
+
+// -- claim_expiry tests -----------------------------------------------------
+
+#[test]
+fn claim_expiry_returns_expiry_for_valid_proof() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 5000);
+    assert_eq!(h.registry.claim_expiry(&holder, &symbol_short!("kyc")), 5000);
+}
+
+#[test]
+fn claim_expiry_returns_zero_for_nonexistent_proof() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let stranger = Address::generate(&env);
+
+    assert_eq!(h.registry.claim_expiry(&stranger, &symbol_short!("kyc")), 0);
+}
+
+#[test]
+fn claim_expiry_returns_expiry_even_after_expired() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    assert_eq!(h.registry.claim_expiry(&holder, &symbol_short!("kyc")), 1000);
+
+    env.ledger().with_mut(|li| li.timestamp = 2000);
+    assert_eq!(h.registry.claim_expiry(&holder, &symbol_short!("kyc")), 1000);
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
 }
