@@ -69,6 +69,15 @@ jobs:
           source "$HOME/.bashrc" 2>/dev/null || true
           bbup -v 0.87.0
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
       - name: Generate circuit fixtures
         shell: bash
         run: |
