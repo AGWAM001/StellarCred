@@ -1,12 +1,14 @@
 #![cfg(test)]
 
+extern crate std;
+
 use super::*;
 use credential_verifier::{CredentialVerifier, CredentialVerifierClient};
 use issuer_registry::{IssuerRegistry, IssuerRegistryClient};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Ledger as _},
-    vec, Address, BytesN, Bytes, Env,
+    testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
+    vec, Address, BytesN, Bytes, Env, IntoVal,
 };
 
 // Real UltraHonk artifacts (kyc_proof circuit, Noir beta.9 + bb 0.87.0), so
@@ -37,9 +39,37 @@ fn demo_pubkey(env: &Env) -> BytesN<64> {
     pubkey_from(env, PUBLIC_INPUTS)
 }
 
+fn u8_slice_to_vec_u32(env: &Env, slice: &[u8]) -> Vec<u32> {
+    let mut vec = Vec::new(env);
+    for i in (0..slice.len()).step_by(4) {
+        if i + 4 <= slice.len() {
+            let mut chunk = [0u8; 4];
+            chunk.copy_from_slice(&slice[i..i+4]);
+            vec.push_back(u32::from_be_bytes(chunk));
+        }
+    }
+    vec
+}
+
+fn get_test_wasm(env: &Env) -> Bytes {
+    let paths = [
+        "target/wasm32v1-none/release/proof_registry.wasm",
+        "../../target/wasm32v1-none/release/proof_registry.wasm",
+        "../target/wasm32v1-none/release/proof_registry.wasm",
+    ];
+    for path in paths.iter() {
+        if let Ok(wasm) = std::fs::read(path) {
+            return Bytes::from_slice(env, &wasm);
+        }
+    }
+    panic!("Could not find target/wasm32v1-none/release/proof_registry.wasm. Please run 'cargo build --target wasm32v1-none --release' first.");
+}
+
 struct Harness {
     registry: ProofRegistryClient<'static>,
+    registry_id: Address,
     issuer: Address,
+    admin: Address,
 }
 
 fn deploy(env: &Env) -> Harness {
@@ -58,10 +88,12 @@ fn deploy(env: &Env) -> Harness {
     CredentialVerifierClient::new(env, &v_id)
         .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, VK));
 
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin.clone(), v_id, ir_id));
     Harness {
         registry: ProofRegistryClient::new(env, &pr_id),
+        registry_id: pr_id,
         issuer,
+        admin,
     }
 }
 
@@ -117,10 +149,10 @@ fn rejects_wrong_issuer_key() {
         &BytesN::from_array(&env, &[3u8; 64]),
         &vec![&env, symbol_short!("kyc")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
 
     let holder = Address::generate(&env);
@@ -198,6 +230,69 @@ fn revoke_clears_proof() {
     assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
 }
 
+#[test]
+fn issuer_revoke_invalidates_proof() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(h.registry.check_claim(&holder, &symbol_short!("kyc"), &None));
+
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+
+    assert!(!h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+    assert!(!h.registry.check_claim(&holder, &symbol_short!("kyc"), &None));
+    // Expiry data preserved for audit even though proof is no longer valid.
+    let (_valid, _at, expiry) = h.registry.is_verified(&holder, &symbol_short!("kyc"));
+    assert_eq!(expiry, 1000);
+}
+
+#[test]
+fn issuer_revoke_rejects_wrong_issuer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    let res = h.registry.try_revoke(&stranger, &holder, &symbol_short!("kyc"));
+    assert!(res.is_err());
+    assert!(h.registry.is_verified(&holder, &symbol_short!("kyc")).0);
+}
+
+#[test]
+fn issuer_revoke_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
+            (
+                h.registry_id.clone(),
+                (symbol_short!("revoked"),).into_val(&env),
+                (
+                    holder.clone(),
+                    symbol_short!("kyc"),
+                    h.issuer.clone(),
+                    env.ledger().timestamp()
+                )
+                    .into_val(&env),
+            ),
+        ],
+    );
+}
+
 // ── check_claim / threshold tests ────────────────────────────────────────────
 
 #[test]
@@ -225,10 +320,10 @@ fn funds_threshold_stored_and_checked() {
         &pubkey_from(&env, FUNDS_PUBLIC_INPUTS),
         &vec![&env, symbol_short!("funds")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
@@ -261,10 +356,10 @@ fn age_threshold_stored_and_checked() {
         &pubkey_from(&env, AGE_PUBLIC_INPUTS),
         &vec![&env, symbol_short!("age")],
     );
-    let v_id = env.register(CredentialVerifier, (admin,));
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
         .set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, AGE_VK));
-    let pr_id = env.register(ProofRegistry, (v_id, ir_id));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
 
