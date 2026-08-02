@@ -40,6 +40,18 @@ C=$(commit 250000 99)
   echo "threshold = \"200000\""; node "$SCRIPTS/sign.js" "$C"; } \
   > "$ROOT/income_proof/Prover.toml"
 
+echo "accreditation_proof..."
+C=$(commit 1500000 99)
+{ echo "net_worth = \"1500000\""; echo "salt = \"99\""; echo "commitment = \"$C\""; \
+  echo "threshold = \"1000000\""; node "$SCRIPTS/sign.js" "$C"; } \
+  > "$ROOT/accreditation_proof/Prover.toml"
+
+echo "funds_proof..."
+C=$(commit 250000 99)
+{ echo "balance = \"250000\""; echo "salt = \"99\""; echo "commitment = \"$C\""; \
+  echo "threshold = \"200000\""; node "$SCRIPTS/sign.js" "$C"; } \
+  > "$ROOT/funds_proof/Prover.toml"
+
 echo "range_proof..."
 C=$(commit 40000 2024)
 { echo "value = \"40000\""; echo "salt = \"2024\""; echo "commitment = \"$C\""; \

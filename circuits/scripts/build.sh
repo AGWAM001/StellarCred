@@ -42,6 +42,11 @@ REPO="$(cd "$ROOT/.." && pwd)"
 FIXTURES="$REPO/fixtures"
 mkdir -p "$FRONTEND_CIRCUITS"
 
+if [ -f "$ROOT/scripts/gen_inputs.sh" ]; then
+  echo "Generating circuit prover inputs..."
+  bash "$ROOT/scripts/gen_inputs.sh"
+fi
+
 build() {
   local name="$1"
   local dir="$ROOT/$name"
