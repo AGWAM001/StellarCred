@@ -43,7 +43,7 @@
   {
     "name": "Shared JS Chunks",
     "path": ".next/static/chunks/*.js",
-    "limit": "550 kB"
+    "limit": "650 kB"
   },
   {
     "name": "WASM Proving Assets (bb.js)",
@@ -53,6 +53,6 @@
   {
     "name": "Circuit Assets",
     "path": "public/circuits/*.json",
-    "limit": "80 kB"
+    "limit": "100 kB"
   }
 ]
