@@ -106,5 +106,5 @@ build() {
 if [ "$#" -gt 0 ]; then
   for n in "$@"; do build "$n"; done
 else
-  for n in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof; do build "$n"; done
+  for n in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof range_proof employment_proof aggregate_proof; do build "$n"; done
 fi
