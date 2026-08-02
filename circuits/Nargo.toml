@@ -2,6 +2,7 @@
 members = [
     "lib",
     "commit",
+    "commit3",
     "kyc_proof",
     "age_proof",
     "income_proof",
