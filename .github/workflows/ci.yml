@@ -24,7 +24,7 @@ jobs:
           version: 9
       - name: Lint commits in PR
         run: |
-          pnpm dlx --package=@commitlint/cli --package=@commitlint/config-conventional commitlint \
+          npx --yes -p @commitlint/cli -p @commitlint/config-conventional commitlint \
             --from ${{ github.event.pull_request.base.sha }} \
             --to ${{ github.event.pull_request.head.sha }} \
             --verbose
