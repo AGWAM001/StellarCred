@@ -43,13 +43,14 @@ jobs:
         shell: bash
         run: |
           curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
-          export PATH="$HOME/.bb/bin:$PATH"
+          export PATH="$HOME/.bb:$PATH"
+          source "$HOME/.bashrc" 2>/dev/null || true
           bbup -v 0.87.0
 
       - name: Generate circuit fixtures
         shell: bash
         run: |
-          export PATH="$HOME/.nargo/bin:$HOME/.bb/bin:$PATH"
+          export PATH="$HOME/.nargo/bin:$HOME/.bb:$PATH"
           bash ./circuits/scripts/build.sh
 
       - name: Build WASM artifacts
