@@ -38,7 +38,8 @@ function ProtocolDetailBody({
   const { state, statuses, retry, eligible, checking } = useProtocolAccessCheck(
     protocol.requirements,
     activeWallet,
-    { isPreview, networkKey },
+    // Preview mode is "!address"; don't auto-grant when disconnected — match /apps list cards.
+    { isPreview: isPreview && Boolean(activeWallet), networkKey },
   );
   const [inputValue, setInputValue] = useState(protocol.inputDefault);
   const [showQr, setShowQr] = useState(false);
