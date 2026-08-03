@@ -29,7 +29,12 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
     exclude: ["**/node_modules/**"],
-    include: ["**/*.test.{js,ts}", "packages/sdk/src/**/*.test.{js,ts}"],
+    include: [
+      "lib/**/*.test.{js,ts}",
+      "packages/sdk/src/**/*.test.{js,ts}",
+      "app/**/*.test.{js,ts}",
+    ],
+    testTimeout: 30000,
     env: {
       // Module-scope constants (e.g. app/verify/page.tsx's DEMO_ISSUER_ID) read
       // this at import time, before any test file body runs — must be set here.
