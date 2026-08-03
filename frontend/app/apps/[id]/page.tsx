@@ -240,8 +240,11 @@ function ProtocolDetailBody({
             {state === "error" && <Badge variant="denied">Check failed</Badge>}
           </div>
 
-          <label className="field-label">{protocol.inputLabel}</label>
+          <label className="field-label" htmlFor="protocol-input">
+            {protocol.inputLabel}
+          </label>
           <input
+            id="protocol-input"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             disabled={!eligible}
