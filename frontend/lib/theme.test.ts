@@ -1,7 +1,7 @@
 /**
  * Lightweight Node tests for theme resolution (no vitest dependency).
- * Run: node --experimental-strip-types lib/theme.test.ts
- * or:  pnpm exec tsx lib/theme.test.ts
+ * Run: pnpm test:theme
+ * (node --import tsx --test; uses node:test)
  *
  * These exercise the pure storage/OS precedence rules used by ThemeToggle
  * and THEME_BOOT_SCRIPT.

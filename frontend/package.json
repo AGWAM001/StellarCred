@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:theme": "node --experimental-strip-types --test lib/theme.test.ts",
+    "test:theme": "node --import tsx --test lib/theme.test.ts",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "size": "size-limit"
@@ -49,6 +49,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
     "size-limit": "^13.0.1",
+    "tsx": "^4.23.5",
     "typescript": "^5",
     "vitest": "^2.1.9"
   },
