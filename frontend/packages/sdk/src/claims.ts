@@ -1,26 +1,11 @@
-// @stellarcred/sdk
+// @stellarcred/sdk — shared claim-checking core
 //
-// A tiny, zero-dependency* read-only client for protocols integrating
-// StellarCred. The only thing a protocol trusts is the on-chain
-// ProofRegistry — there is no API key, no backend, and no personal data
-// handling. `hasClaim` is the primary integration call.
-//
-// *Requires @stellar/stellar-sdk as a peer dependency.
-//
-// Quick start (Next.js / Vite / Node.js):
-//
-//   import StellarCred from "@stellarcred/sdk";
-//
-//   // Option A: configure explicitly at startup (recommended for servers)
-//   StellarCred.configure({
-//     registryId: process.env.PROOF_REGISTRY_ID,
-//     rpcUrl: "https://soroban-testnet.stellar.org",
-//   });
-//
-//   // Option B: set env vars instead (STELLARCRED_REGISTRY_ID, etc.)
-//   //           — works in both Node.js and Next.js (NEXT_PUBLIC_* prefix)
-//
-//   const ok = await StellarCred.hasClaim(walletAddress, "kyc");
+// Internal module holding the claim-checking machinery (config, low-level
+// ProofRegistry reads, and the public `hasClaim` / `hasClaims` / `getClaims` /
+// `watchClaim` functions plus their helper types). `index.ts`, `core.ts`, and
+// `react.ts` all import from here, so nothing in this module imports back from
+// those files — keeping the module graph acyclic (core/react no longer depend
+// on index.ts, which re-exports them).
 
 // ---------------------------------------------------------------------------
 // Runtime configuration
@@ -145,36 +130,6 @@ export class TimeoutError extends Error {
   }
 }
 
-/**
- * Error thrown when the SDK is missing required configuration (e.g. no
- * `registryId`). Only surfaces when `{ throwOnError: true }` is passed;
- * the default fail-soft path returns `false` / `[]` instead.
- */
-export class ConfigError extends Error {
-  constructor(message = "StellarCred is not configured: missing registryId") {
-    super(message);
-    this.name = "ConfigError";
-  }
-}
-
-/**
- * Error thrown when an RPC / contract-simulation call fails (network,
- * timeout at the transport layer, simulation error, etc.). Only surfaces
- * when `{ throwOnError: true }` is passed — distinguishing "couldn't check"
- * from "not verified" (`false`).
- */
-export class RpcError extends Error {
-  /** Underlying transport / simulation failure, when available. */
-  cause?: unknown;
-  constructor(message = "StellarCred RPC call failed", options?: { cause?: unknown }) {
-    super(message);
-    this.name = "RpcError";
-    if (options && "cause" in options) {
-      this.cause = options.cause;
-    }
-  }
-}
-
 /** The credential types StellarCred supports. Matches the contract Symbols. */
 export const CLAIM_TYPES = ["kyc", "age", "income", "jurisdiction", "funds", "accreditation"] as const;
 /**
@@ -213,14 +168,6 @@ export interface ClaimOptions {
    * `trusted_issuers: None` default. An empty array rejects every issuer.
    */
   trustedIssuers?: string[];
-  /**
-   * When `true`, configuration and RPC failures throw {@link ConfigError} /
-   * {@link RpcError} instead of being masked as `false` / empty results.
-   * Default `false` preserves the historical fail-soft behaviour so a
-   * network blip is indistinguishable from "not verified" unless callers
-   * opt in.
-   */
-  throwOnError?: boolean;
 }
 
 export interface Claim {
@@ -251,14 +198,9 @@ function getSdk(): Promise<StellarSDK> {
 let _client: Promise<ProofRegistryClient> | null = null;
 let _clientKey = "";
 
-async function getClient(throwOnError = false): Promise<ProofRegistryClient | null> {
+async function getClient(): Promise<ProofRegistryClient | null> {
   const { registryId, rpcUrl, networkPassphrase } = _config;
-  if (!registryId) {
-    if (throwOnError) {
-      throw new ConfigError("StellarCred is not configured: missing registryId");
-    }
-    return null;
-  }
+  if (!registryId) return null;
 
   const key = `${registryId}|${rpcUrl}|${networkPassphrase}`;
   if (_client && _clientKey === key) return _client;
@@ -303,9 +245,8 @@ async function readIsVerified(
   wallet: string,
   claimType: string,
   trustedIssuers?: string[],
-  throwOnError = false,
 ): Promise<{ valid: boolean; verifiedAt: number; expiry: number } | null> {
-  const client = await getClient(throwOnError);
+  const client = await getClient();
   if (!client) return null;
 
   try {
@@ -317,10 +258,7 @@ async function readIsVerified(
     if (!result) return null;
     const [valid, verifiedAt, expiry] = result;
     return { valid, verifiedAt: Number(verifiedAt), expiry: Number(expiry) };
-  } catch (err) {
-    if (throwOnError) {
-      throw new RpcError(`is_verified RPC failed for claim "${claimType}"`, { cause: err });
-    }
+  } catch {
     return null;
   }
 }
@@ -330,9 +268,8 @@ async function readCheckClaim(
   claimType: string,
   minThreshold: number,
   trustedIssuers?: string[],
-  throwOnError = false,
 ): Promise<boolean> {
-  const client = await getClient(throwOnError);
+  const client = await getClient();
   if (!client) return false;
 
   try {
@@ -343,10 +280,7 @@ async function readCheckClaim(
       trusted_issuers: trustedIssuers,
     });
     return result ?? false;
-  } catch (err) {
-    if (throwOnError) {
-      throw new RpcError(`check_claim RPC failed for claim "${claimType}"`, { cause: err });
-    }
+  } catch {
     return false;
   }
 }
@@ -382,20 +316,6 @@ async function readCheckClaim(
  * const ok = await hasClaim("G1ABC…", "kyc", {
  *   trustedIssuers: ["G...PERSONA_ISSUER", "G...JUMIO_ISSUER"],
  * });
- *
- * @example
- * // Opt into typed errors — network failure throws RpcError, missing
- * // registryId throws ConfigError; "not verified" still returns false.
- * try {
- *   const ok = await hasClaim("G1ABC…", "kyc", { throwOnError: true });
- * } catch (err) {
- *   if (err instanceof ConfigError) {
- *     // misconfigured SDK — set registryId
- *   }
- *   if (err instanceof RpcError) {
- *     // could not reach the chain — retry or degrade
- *   }
- * }
  */
 export async function hasClaim(
   wallet: string,
@@ -403,17 +323,10 @@ export async function hasClaim(
   opts?: ClaimOptions,
 ): Promise<boolean> {
   warnIfMissingRegistryIdOnce();
-  const throwOnError = opts?.throwOnError === true;
   if (opts?.minThreshold !== undefined) {
-    return readCheckClaim(
-      wallet,
-      claimType,
-      opts.minThreshold,
-      opts.trustedIssuers,
-      throwOnError,
-    );
+    return readCheckClaim(wallet, claimType, opts.minThreshold, opts.trustedIssuers);
   }
-  const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers, throwOnError);
+  const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers);
   return !!r && r.valid;
 }
 
@@ -492,27 +405,17 @@ export async function hasClaims(
  *
  * Uses the same batched fan-out as {@link hasClaims}, so all types are read
  * through one shared client.
- *
- * Pass `{ throwOnError: true }` to surface {@link ConfigError} / {@link RpcError}
- * instead of silently dropping failed reads. When `throwOnError` is set, a
- * single failing claim type rejects the whole batch (fail-fast) and discards
- * successful reads for other types.
  */
-export async function getClaims(
-  wallet: string,
-  opts?: Pick<ClaimOptions, "throwOnError">,
-): Promise<Claim[]> {
+export async function getClaims(wallet: string): Promise<Claim[]> {
   warnIfMissingRegistryIdOnce();
-  const throwOnError = opts?.throwOnError === true;
   const results = await fanOut(CLAIM_TYPES, async (t) => {
-    // Same isolation as `hasClaims` when fail-soft: `readIsVerified` swallows
-    // read errors, but its own `getClient()` await can still reject (a failed
-    // SDK import), which would otherwise reject the whole fan-out.
+    // Same isolation as `hasClaims`: `readIsVerified` swallows read errors, but
+    // its own `getClient()` await can still reject (a failed SDK import), which
+    // would otherwise reject the whole fan-out instead of dropping one type.
     try {
-      const r = await readIsVerified(wallet, t, undefined, throwOnError);
+      const r = await readIsVerified(wallet, t);
       return r && r.valid ? { type: t, verifiedAt: r.verifiedAt, expiry: r.expiry } : null;
-    } catch (err) {
-      if (throwOnError) throw err;
+    } catch {
       return null;
     }
   });
@@ -675,7 +578,7 @@ export interface WatchClaimCallbackOptions extends WatchClaimOptions {
 
 /**
  * Polls for a claim to become verified.
- * 
+ *
  * In Promise form (without `onChange`), it resolves `true` when the claim is verified,
  * or rejects with `TimeoutError` after `timeoutMs`.
  */
@@ -687,7 +590,7 @@ export function watchClaim(
 
 /**
  * Polls for a claim to become verified.
- * 
+ *
  * In Callback form (with `onChange`), it fires the callback whenever the status changes
  * (e.g. from false to true). Returns a `stop` function to cancel polling.
  */
@@ -766,33 +669,3 @@ export function watchClaim(
     });
   }
 }
-
-// ---------------------------------------------------------------------------
-// Namespace export (StellarCred.hasClaim / StellarCred.getClaims / etc.)
-// ---------------------------------------------------------------------------
-
-export const StellarCred = {
-  configure,
-  healthCheck,
-  isConfigured,
-  hasClaim,
-  hasClaims,
-  getClaims,
-  buildVerifyUrl,
-  parseReturnParams,
-  watchClaim,
-  CLAIM_TYPES,
-  TimeoutError,
-  ConfigError,
-  RpcError,
-};
-export default StellarCred;
-
-// Framework-agnostic core — for use outside React (Vue, Svelte, vanilla).
-export { createClaimGate } from "./core";
-export type { ClaimGateConfig, ClaimGateState, ClaimGateListener, ClaimGate } from "./core";
-
-// React hook — React wrapper around the batched `hasClaims` read. It is an
-// independent implementation from `createClaimGate` (which performs per-claim
-// `hasClaim` reads), so keep the two behaviourally in sync.
-export { useStellarCred } from "./react";
