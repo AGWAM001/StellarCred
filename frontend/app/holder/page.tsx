@@ -32,7 +32,6 @@ import { useWarmProver } from "@/lib/use-warm-prover";
 import {
   submitProof,
   submitProofs,
-  submitProofsBatch,
   MAX_BATCH_SIZE,
   parseContractError,
   type ContractError,
@@ -735,9 +734,9 @@ function ProofFlow({
 
         // Stage 2: prove (browser WASM)
         setStage("proving");
-        const start = Date.now();
+        const proveStart = Date.now();
         timerRef.current = setInterval(
-          () => setElapsed(Math.floor((Date.now() - start) / 1000)),
+          () => setElapsed(Math.floor((Date.now() - proveStart) / 1000)),
           1000,
         );
 
@@ -837,11 +836,11 @@ function ProofFlow({
             title="Generate zero-knowledge proof"
             subtitle={`Estimated time: ${ESTIMATES.default.range}`}
             state={
-              (stage === "proving" || stage === "circuit" || stage === "proof") ? "active" :
+              (stage === "witness" || stage === "proving" || stage === "circuit" || stage === "proof") ? "active" :
               proofDone            ? "done"   : "idle"
             }
             detail={
-              (stage === "proving" || stage === "circuit" || stage === "proof") ? (
+              (stage === "witness" || stage === "proving" || stage === "circuit" || stage === "proof") ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.65rem" }}>
                   <ProvingBar progress={Math.min((elapsed / ESTIMATES.default.expected) * 80, 80)} />
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
