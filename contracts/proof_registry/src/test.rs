@@ -1106,9 +1106,9 @@ fn revoke_all_clears_submitted_proofs() {
 
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     let vc = CredentialVerifierClient::new(&env, &v_id);
-    vc.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
-    vc.set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
-    vc.set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, AGE_VK));
+    vc.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, VK));
+    vc.set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
+    vc.set_vk(&symbol_short!("age"), &1u32, &Bytes::from_slice(&env, AGE_VK));
 
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
@@ -1120,6 +1120,7 @@ fn revoke_all_clears_submitted_proofs() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, PROOF),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &9999,
     );
     registry.submit_proof(
@@ -1128,6 +1129,7 @@ fn revoke_all_clears_submitted_proofs() {
         &symbol_short!("funds"),
         &Bytes::from_slice(&env, FUNDS_PROOF),
         &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &None,
         &9999,
     );
     registry.submit_proof(
@@ -1136,6 +1138,7 @@ fn revoke_all_clears_submitted_proofs() {
         &symbol_short!("age"),
         &Bytes::from_slice(&env, AGE_PROOF),
         &Bytes::from_slice(&env, AGE_PUBLIC_INPUTS),
+        &None,
         &9999,
     );
 
@@ -1178,6 +1181,7 @@ fn aggregate_submits_real_proof_and_stores_claims() {
     let vc = CredentialVerifierClient::new(&env, &v_id);
     vc.set_vk(
         &symbol_short!("aggregate"),
+        &1u32,
         &Bytes::from_slice(&env, AGGREGATE_VK),
     );
 

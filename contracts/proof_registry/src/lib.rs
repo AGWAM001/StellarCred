@@ -364,7 +364,12 @@ impl ProofRegistry {
                 panic_with_error!(&env, Error::IssuerKeyMismatch);
             }
 
-            if !verifier.verify_proof(&sub.credential_type, &sub.proof, &public_inputs_bytes) {
+            if !verifier.verify_proof(
+                &sub.credential_type,
+                &sub.proof,
+                &public_inputs_bytes,
+                &sub.vk_version,
+            ) {
                 panic_with_error!(&env, Error::VerificationFailed);
             }
 
@@ -433,9 +438,11 @@ impl ProofRegistry {
     ) {
         holder.require_auth();
 
-        // 1. Verify the outer aggregate proof against the aggregate VK.
+        // 1. Verify the outer aggregate proof against the aggregate VK. The
+        //    aggregate circuit has no version parameter; always resolve the
+        //    latest registered VK (`None`).
         let verifier = VerifierClient::new(&env, &Self::verifier(&env));
-        if !verifier.verify_proof(&symbol_short!("aggregate"), &proof, &public_inputs) {
+        if !verifier.verify_proof(&symbol_short!("aggregate"), &proof, &public_inputs, &None) {
             panic_with_error!(&env, Error::VerificationFailed);
         }
 
@@ -801,6 +808,10 @@ impl ProofRegistry {
             threshold,
             revoked: false,
             issuer: Some(issuer),
+            // Aggregate proofs always verify against the latest VK (see
+            // submit_aggregate_proof), so the stored version is the "latest at
+            // submission time" sentinel 0 (see ProofRecord::vk_version).
+            vk_version: 0,
         };
         env.storage().persistent().set(&key, &record);
         env.storage()

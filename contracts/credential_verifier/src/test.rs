@@ -75,11 +75,16 @@ fn verifies_range() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
-    c.set_vk(&symbol_short!("range"), &Bytes::from_slice(&env, fixture!("range", "vk")));
+    c.set_vk(
+        &symbol_short!("range"),
+        &1u32,
+        &Bytes::from_slice(&env, fixture!("range", "vk")),
+    );
     assert!(c.verify_proof(
         &symbol_short!("range"),
         &Bytes::from_slice(&env, fixture!("range", "proof")),
         &Bytes::from_slice(&env, fixture!("range", "public_inputs")),
+        &None,
     ));
 }
 
