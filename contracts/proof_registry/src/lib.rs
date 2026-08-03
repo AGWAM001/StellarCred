@@ -310,7 +310,7 @@ impl ProofRegistry {
     // value-based `publish` API, we maintain consistency with other modules to avoid 
     // introducing architectural mismatch.
     #[allow(deprecated)]
-    pub fn submit_proofs_batch(env: Env, holder: Address, submissions: Vec<ProofSubmission>) {
+    pub fn submit_proofs(env: Env, holder: Address, submissions: Vec<ProofSubmission>) -> Vec<bool> {
         holder.require_auth();
 
         let len = submissions.len();
@@ -385,6 +385,12 @@ impl ProofRegistry {
                 },
             );
         }
+
+        let mut results = Vec::new(&env);
+        for _ in 0..len {
+            results.push_back(true);
+        }
+        results
     }
 
     /// Verify an aggregate proof that bundles N credential proofs into a single
@@ -632,6 +638,7 @@ impl ProofRegistry {
             .persistent()
             .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
 
+        #[allow(deprecated)]
         // Emit: topics = ("proof_reg", "revoked", credential_type)
         //       data   = EventProofRevoked { holder, issuer, revoked_at }
         env.events().publish(

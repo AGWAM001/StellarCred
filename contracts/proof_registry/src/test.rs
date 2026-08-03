@@ -901,7 +901,7 @@ fn batch_all_pass() {
         },
     ];
 
-    h.registry.submit_proofs_batch(&holder, &submissions);
+    h.registry.submit_proofs(&holder, &submissions);
 
     assert!(h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
     assert!(h.registry.is_verified(&holder, &symbol_short!("funds"), &None).0);
@@ -937,7 +937,7 @@ fn batch_one_fail_reverts_all() {
         },
     ];
 
-    let res = h.registry.try_submit_proofs_batch(&holder, &submissions);
+    let res = h.registry.try_submit_proofs(&holder, &submissions);
     assert!(res.is_err());
 
     // The valid kyc proof must NOT have been stored because the batch reverted.
@@ -987,7 +987,8 @@ fn batch_max_size_boundary_accepts_five() {
         ProofSubmission { credential_type: types[4].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
     ];
 
-    registry.submit_proofs_batch(&holder, &submissions);
+    // Must not panic — 5 distinct types is within the allowed maximum.
+    registry.submit_proofs(&holder, &submissions);
     assert!(registry.is_verified(&holder, &types[0], &None).0);
     assert!(registry.is_verified(&holder, &types[4], &None).0);
 }
@@ -1017,7 +1018,7 @@ fn batch_exceeds_max_size_is_rejected() {
         &env, sub.clone(), sub.clone(), sub.clone(), sub.clone(), sub.clone(), sub,
     ];
 
-    let res = registry.try_submit_proofs_batch(&holder, &submissions);
+    let res = registry.try_submit_proofs(&holder, &submissions);
     assert!(res.is_err());
 }
 
@@ -1033,7 +1034,7 @@ fn batch_empty_is_rejected() {
     let holder = Address::generate(&env);
 
     let submissions: Vec<ProofSubmission> = Vec::new(&env);
-    let res = registry.try_submit_proofs_batch(&holder, &submissions);
+    let res = registry.try_submit_proofs(&holder, &submissions);
     assert!(res.is_err());
 }
 
@@ -1047,7 +1048,7 @@ fn batch_duplicate_credential_type_is_rejected() {
     let sub = kyc_submission(&env, &h.issuer, 9999);
     let submissions = vec![&env, sub.clone(), sub];
 
-    let res = h.registry.try_submit_proofs_batch(&holder, &submissions);
+    let res = h.registry.try_submit_proofs(&holder, &submissions);
     assert!(res.is_err());
 }
 
