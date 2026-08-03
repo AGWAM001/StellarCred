@@ -28,7 +28,11 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    exclude: ["**/node_modules/**"],
+    exclude: [
+      "**/node_modules/**",
+      // Node's built-in test runner (pnpm test:theme), not a Vitest suite.
+      "lib/theme.test.ts",
+    ],
     include: [
       "lib/**/*.test.{js,ts}",
       "packages/sdk/src/**/*.test.{js,ts}",
