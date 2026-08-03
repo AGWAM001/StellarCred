@@ -160,6 +160,50 @@ jobs:
       - name: Run issuer tests (incl. cross-boundary circuit test)
         run: pnpm --filter @stellarcred/issuer test
 
+  sdk-integration:
+    name: SDK integration tests (testnet)
+    runs-on: ubuntu-latest
+    # Needs the testnet fixture wallet and the deployed ProofRegistry ID as
+    # repo variables. Skipped entirely on forks where they are not configured
+    # (the suite also skips gracefully if they are unset at runtime).
+    if: vars.SC_TEST_WALLET != '' && vars.STELLARCRED_REGISTRY_ID != ''
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # @stellarcred/sdk is a standalone publish-only package — it is NOT part
+      # of the frontend pnpm workspace (pnpm-workspace.yaml), so it cannot be
+      # addressed with pnpm --filter. Its scripts are run from its own
+      # directory; pnpm resolves the shared toolchain from the workspace root.
+      - name: Typecheck SDK
+        working-directory: frontend/packages/sdk
+        run: pnpm typecheck
+
+      - name: Run integration tests
+        working-directory: frontend/packages/sdk
+        run: pnpm test:integration
+        env:
+          SC_TEST_WALLET: ${{ vars.SC_TEST_WALLET }}
+          STELLARCRED_REGISTRY_ID: ${{ vars.STELLARCRED_REGISTRY_ID }}
+          STELLARCRED_RPC_URL: ${{ vars.STELLARCRED_RPC_URL || 'https://soroban-testnet.stellar.org' }}
+
   a11y:
     name: Accessibility (axe-core)
     runs-on: ubuntu-latest
