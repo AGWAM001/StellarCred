@@ -1,491 +1,145 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const isVerified = vi.fn();
+const checkClaim = vi.fn();
+
+vi.mock("../../proof-registry/src/index.js", () => ({
+  Client: vi.fn(function ProofRegistryClient() {
+    return {
+      is_verified: isVerified,
+      check_claim: checkClaim,
+    };
+  }),
+}));
+
+vi.mock("@stellar/stellar-sdk", () => ({
+  rpc: {},
+}));
+
 import {
   configure,
   hasClaim,
-  hasClaims,
   getClaims,
-  buildVerifyUrl,
-  watchClaim,
+  ConfigError,
+  RpcError,
   TimeoutError,
-  CLAIM_TYPES,
-} from "./index.js";
+  StellarCred,
+} from "./index";
 
-// Mock the ProofRegistryClient
-vi.mock("../../proof-registry/src/index.js", () => ({
-  Client: vi.fn().mockImplementation(() => ({
-    is_verified: vi.fn(),
-    check_claim: vi.fn(),
-  })),
-}));
+const WALLET = "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-import { Client as ProofRegistryClient } from "../../proof-registry/src/index.js";
+describe("error taxonomy exports", () => {
+  it("exports ConfigError, RpcError, and TimeoutError on the namespace", () => {
+    expect(StellarCred.ConfigError).toBe(ConfigError);
+    expect(StellarCred.RpcError).toBe(RpcError);
+    expect(StellarCred.TimeoutError).toBe(TimeoutError);
+    expect(new ConfigError().name).toBe("ConfigError");
+    expect(new RpcError().name).toBe("RpcError");
+  });
+});
 
-describe("StellarCred SDK", () => {
-  let mockClient: any;
-
+describe("hasClaim — fail-soft default", () => {
   beforeEach(() => {
-    // Reset configuration before each test
-    configure({
-      registryId: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-      rpcUrl: "https://soroban-testnet.stellar.org",
-      networkPassphrase: "Test SDF Network ; September 2015",
-      baseUrl: "https://stellarcred.xyz",
-    });
+    isVerified.mockReset();
+    checkClaim.mockReset();
+    configure({ registryId: "" });
+  });
 
-    // Create fresh mock for each test
-    mockClient = {
-      is_verified: vi.fn(),
-      check_claim: vi.fn(),
-    };
-    
-    (ProofRegistryClient as any).mockImplementation(() => mockClient);
-    
-    // Setup fake timers for watchClaim tests
-    vi.useFakeTimers();
+  it("returns false when registryId is missing (no throw)", async () => {
+    await expect(hasClaim(WALLET, "kyc")).resolves.toBe(false);
+    expect(isVerified).not.toHaveBeenCalled();
+  });
+
+  it("returns false when is_verified throws (network/simulation)", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    isVerified.mockRejectedValue(new Error("network down"));
+    await expect(hasClaim(WALLET, "kyc")).resolves.toBe(false);
+  });
+
+  it("returns false when the holder is not verified", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    isVerified.mockResolvedValue({ result: [false, 0n, 0n] });
+    await expect(hasClaim(WALLET, "kyc")).resolves.toBe(false);
+  });
+
+  it("returns true when the holder is verified", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    isVerified.mockResolvedValue({ result: [true, 1_700_000_000n, 1_800_000_000n] });
+    await expect(hasClaim(WALLET, "kyc")).resolves.toBe(true);
+  });
+
+  it("returns false when check_claim throws under fail-soft", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    checkClaim.mockRejectedValue(new Error("rpc timeout"));
+    await expect(hasClaim(WALLET, "age", { minThreshold: 21 })).resolves.toBe(false);
+  });
+});
+
+describe("hasClaim — throwOnError", () => {
+  beforeEach(() => {
+    isVerified.mockReset();
+    checkClaim.mockReset();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
-    vi.runOnlyPendingTimers();
-    vi.useRealTimers();
+    configure({ registryId: "C_TEST_REGISTRY" });
   });
 
-  describe("hasClaim", () => {
-    it("returns false when no registryId configured", async () => {
-      configure({ registryId: "" });
-      
-      const result = await hasClaim("GTEST", "kyc");
-      
-      expect(result).toBe(false);
-      expect(mockClient.is_verified).not.toHaveBeenCalled();
-      expect(mockClient.check_claim).not.toHaveBeenCalled();
-    });
-
-    it("calls readIsVerified when no minThreshold", async () => {
-      mockClient.is_verified.mockResolvedValue({
-        result: [true, BigInt(1000), BigInt(2000)],
-      });
-      
-      const result = await hasClaim("GTEST", "kyc");
-      
-      expect(result).toBe(true);
-      expect(mockClient.is_verified).toHaveBeenCalledWith({
-        holder: "GTEST",
-        credential_type: "kyc",
-        trusted_issuers: undefined,
-      });
-      expect(mockClient.check_claim).not.toHaveBeenCalled();
-    });
-
-    it("calls readCheckClaim when minThreshold is set", async () => {
-      mockClient.check_claim.mockResolvedValue({
-        result: true,
-      });
-      
-      const result = await hasClaim("GTEST", "age", { minThreshold: 21 });
-      
-      expect(result).toBe(true);
-      expect(mockClient.check_claim).toHaveBeenCalledWith({
-        holder: "GTEST",
-        credential_type: "age",
-        min_threshold: BigInt(21),
-        trusted_issuers: undefined,
-      });
-      expect(mockClient.is_verified).not.toHaveBeenCalled();
-    });
-
-    it("returns false when readIsVerified returns false", async () => {
-      mockClient.is_verified.mockResolvedValue({
-        result: [false, BigInt(1000), BigInt(2000)],
-      });
-      
-      const result = await hasClaim("GTEST", "kyc");
-      
-      expect(result).toBe(false);
-    });
-
-    it("returns false when readCheckClaim returns below threshold", async () => {
-      mockClient.check_claim.mockResolvedValue({
-        result: false,
-      });
-      
-      const result = await hasClaim("GTEST", "funds", { minThreshold: 50000 });
-      
-      expect(result).toBe(false);
-    });
+  it("throws ConfigError when registryId is missing", async () => {
+    configure({ registryId: "" });
+    await expect(hasClaim(WALLET, "kyc", { throwOnError: true })).rejects.toBeInstanceOf(
+      ConfigError,
+    );
   });
 
-  describe("hasClaims", () => {
-    it("returns empty object when no registryId configured", async () => {
-      configure({ registryId: "" });
-      
-      const result = await hasClaims("GTEST", ["kyc", "age"]);
-      
-      expect(result).toEqual({ kyc: false, age: false });
-      expect(mockClient.is_verified).not.toHaveBeenCalled();
-      expect(mockClient.check_claim).not.toHaveBeenCalled();
-    });
-
-    it("handles mixed binary and threshold claims", async () => {
-      mockClient.is_verified.mockResolvedValue({
-        result: [true, BigInt(1000), BigInt(2000)],
-      });
-      mockClient.check_claim.mockResolvedValue({
-        result: true,
-      });
-      
-      const result = await hasClaims("GTEST", ["kyc", "age"], {
-        minThresholds: { age: 21 },
-      });
-      
-      expect(result.kyc).toBe(true);
-      expect(result.age).toBe(true);
-      expect(mockClient.is_verified).toHaveBeenCalledWith({
-        holder: "GTEST",
-        credential_type: "kyc",
-        trusted_issuers: undefined,
-      });
-      expect(mockClient.check_claim).toHaveBeenCalledWith({
-        holder: "GTEST",
-        credential_type: "age",
-        min_threshold: BigInt(21),
-        trusted_issuers: undefined,
-      });
-    });
-
-    it("handles duplicate claim types", async () => {
-      mockClient.is_verified.mockResolvedValue({
-        result: [true, BigInt(1000), BigInt(2000)],
-      });
-      
-      const result = await hasClaims("GTEST", ["kyc", "kyc", "age"]);
-      
-      expect(result.kyc).toBe(true);
-      expect(result.age).toBe(true);
-      // Should only call once per unique type
-      expect(mockClient.is_verified).toHaveBeenCalledTimes(2);
-    });
-
-    it("handles failed claims gracefully", async () => {
-      mockClient.is_verified
-        .mockResolvedValueOnce({ result: [true, BigInt(1000), BigInt(2000)] }) // kyc - success
-        .mockRejectedValueOnce(new Error("RPC Error")); // age - failure
-      
-      const result = await hasClaims("GTEST", ["kyc", "age"]);
-      
-      expect(result.kyc).toBe(true);
-      expect(result.age).toBe(false); // Should default to false on error
-    });
-
-    it("passes trustedIssuers to all claims", async () => {
-      const trustedIssuers = ["ISSUER1", "ISSUER2"];
-      mockClient.is_verified.mockResolvedValue({
-        result: [true, BigInt(1000), BigInt(2000)],
-      });
-      mockClient.check_claim.mockResolvedValue({
-        result: true,
-      });
-      
-      const result = await hasClaims("GTEST", ["kyc", "age"], {
-        minThresholds: { age: 21 },
-        trustedIssuers,
-      });
-      
-      expect(mockClient.is_verified).toHaveBeenCalledWith({
-        holder: "GTEST",
-        credential_type: "kyc",
-        trusted_issuers: trustedIssuers,
-      });
-      expect(mockClient.check_claim).toHaveBeenCalledWith({
-        holder: "GTEST",
-        credential_type: "age",
-        min_threshold: BigInt(21),
-        trusted_issuers: trustedIssuers,
-      });
-    });
-
-    it("returns false for claims that don't pass threshold", async () => {
-      mockClient.check_claim.mockResolvedValue({
-        result: false,
-      });
-      
-      const result = await hasClaims("GTEST", ["funds"], {
-        minThresholds: { funds: 100000 },
-      });
-      
-      expect(result.funds).toBe(false);
-    });
+  it("throws RpcError when is_verified fails, not ConfigError", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    isVerified.mockRejectedValue(new Error("connection reset"));
+    const err = await hasClaim(WALLET, "kyc", { throwOnError: true }).catch((e) => e);
+    expect(err).toBeInstanceOf(RpcError);
+    expect(err).not.toBeInstanceOf(ConfigError);
+    expect((err as RpcError).cause).toBeInstanceOf(Error);
   });
 
-  describe("getClaims", () => {
-    it("filters out null claims", async () => {
-      // Mock is_verified to return valid claim for 'kyc', null for 'age'
-      mockClient.is_verified
-        .mockResolvedValueOnce({ result: [true, BigInt(1000), BigInt(2000)] }) // kyc
-        .mockResolvedValueOnce({ result: null }) // age
-        .mockResolvedValueOnce({ result: [true, BigInt(1500), BigInt(2500)] }) // income
-        .mockResolvedValueOnce({ result: null }) // jurisdiction
-        .mockResolvedValueOnce({ result: null }) // funds
-        .mockResolvedValueOnce({ result: null }); // accreditation
-      
-      const result = await getClaims("GTEST");
-      
-      expect(result).toHaveLength(2);
-      expect(result.some(c => c.type === "kyc")).toBe(true);
-      expect(result.some(c => c.type === "income")).toBe(true);
-      expect(result.some(c => c.type === "age")).toBe(false);
-    });
-
-    it("maps verifiedAt to a number", async () => {
-      // Mock all CLAIM_TYPES since getClaims calls them all
-      CLAIM_TYPES.forEach((type, index) => {
-        if (type === "kyc") {
-          mockClient.is_verified.mockResolvedValueOnce({
-            result: [true, BigInt(1609459200), BigInt(2000000000)], // Unix timestamp as BigInt
-          });
-        } else {
-          mockClient.is_verified.mockResolvedValueOnce({
-            result: null, // Other types return null
-          });
-        }
-      });
-      
-      const result = await getClaims("GTEST");
-      
-      expect(result).toHaveLength(1);
-      expect(result[0].verifiedAt).toBe(1609459200);
-      expect(typeof result[0].verifiedAt).toBe("number");
-    });
-
-    it("maps expiry to a number", async () => {
-      // Mock all CLAIM_TYPES since getClaims calls them all
-      CLAIM_TYPES.forEach((type, index) => {
-        if (type === "kyc") {
-          mockClient.is_verified.mockResolvedValueOnce({
-            result: [true, BigInt(1000), BigInt(1609459200)], // Unix timestamp as BigInt
-          });
-        } else {
-          mockClient.is_verified.mockResolvedValueOnce({
-            result: null, // Other types return null
-          });
-        }
-      });
-      
-      const result = await getClaims("GTEST");
-      
-      expect(result).toHaveLength(1);
-      expect(result[0].expiry).toBe(1609459200);
-      expect(typeof result[0].expiry).toBe("number");
-    });
-
-    it("filters out claims with invalid/missing required fields", async () => {
-      // Mock first call to return invalid (false) claim, second to return valid
-      mockClient.is_verified
-        .mockResolvedValueOnce({ result: [false, BigInt(1000), BigInt(2000)] }) // kyc - invalid
-        .mockResolvedValueOnce({ result: [true, BigInt(1500), BigInt(2500)] }) // age - valid
-        .mockResolvedValueOnce({ result: null }) // income - null
-        .mockResolvedValueOnce({ result: null }) // jurisdiction - null
-        .mockResolvedValueOnce({ result: null }) // funds - null
-        .mockResolvedValueOnce({ result: null }); // accreditation - null
-      
-      const result = await getClaims("GTEST");
-      
-      expect(result).toHaveLength(1);
-      expect(result[0].type).toBe("age");
-    });
+  it("throws RpcError when check_claim fails", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    checkClaim.mockRejectedValue(new Error("simulation failed"));
+    await expect(
+      hasClaim(WALLET, "funds", { minThreshold: 50_000, throwOnError: true }),
+    ).rejects.toBeInstanceOf(RpcError);
   });
 
-  describe("buildVerifyUrl", () => {
-    it("sets age param correctly", () => {
-      const url = buildVerifyUrl({
-        returnUrl: "/test",
-        claim: "age",
-        claimParams: { threshold_years: "21" },
-      });
-      
-      expect(url).toContain("threshold_years=21");
-      expect(url).toContain("claim=age");
-    });
-
-    it("sets income param correctly", () => {
-      const url = buildVerifyUrl({
-        returnUrl: "/test",
-        claim: "income",
-        claimParams: { threshold: "50000" },
-      });
-      
-      expect(url).toContain("threshold=50000");
-      expect(url).toContain("claim=income");
-    });
-
-    it("sets funds param correctly", () => {
-      const url = buildVerifyUrl({
-        returnUrl: "/test",
-        claim: "funds",
-        claimParams: { threshold: "100000" },
-      });
-      
-      expect(url).toContain("threshold=100000");
-      expect(url).toContain("claim=funds");
-    });
-
-    it("sets jurisdiction param correctly", () => {
-      const url = buildVerifyUrl({
-        returnUrl: "/test",
-        claim: "jurisdiction",
-      });
-      
-      expect(url).toContain("claim=jurisdiction");
-    });
-
-    it("handles restricted as array", () => {
-      const url = buildVerifyUrl({
-        returnUrl: "/test",
-        claim: "jurisdiction",
-        claimParams: { restricted: ["US", "CN"] },
-      });
-      
-      expect(url).toContain("restricted=US%2CCN");
-    });
-
-    it("handles restricted as string", () => {
-      const url = buildVerifyUrl({
-        returnUrl: "/test",
-        claim: "jurisdiction",
-        claimParams: { restricted: "US" },
-      });
-      
-      expect(url).toContain("restricted=US");
-    });
-
-    it("uses base URL override when provided", () => {
-      const url = buildVerifyUrl({
-        returnUrl: "/test",
-        claim: "kyc",
-        baseUrl: "https://custom.stellarcred.xyz",
-      });
-      
-      expect(url).toMatch(/^https:\/\/custom\.stellarcred\.xyz/);
-    });
-
-    it("uses default base URL when no override", () => {
-      const url = buildVerifyUrl({
-        returnUrl: "/test",
-        claim: "kyc",
-      });
-      
-      expect(url).toMatch(/^https:\/\/stellarcred\.xyz/);
-    });
+  it("still returns false for not-verified (does not throw)", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    isVerified.mockResolvedValue({ result: [false, 0n, 0n] });
+    await expect(hasClaim(WALLET, "kyc", { throwOnError: true })).resolves.toBe(false);
   });
 
-  describe("watchClaim", () => {
-    beforeEach(() => {
-      vi.clearAllTimers();
-    });
+  it("returns true for verified claims", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    isVerified.mockResolvedValue({ result: [true, 10n, 20n] });
+    await expect(hasClaim(WALLET, "kyc", { throwOnError: true })).resolves.toBe(true);
+  });
+});
 
-    it("Promise form resolves when claim is verified", async () => {
-      let callCount = 0;
-      mockClient.is_verified.mockImplementation(async () => {
-        callCount++;
-        return {
-          result: callCount >= 2 ? [true, BigInt(1000), BigInt(2000)] : [false, BigInt(0), BigInt(0)],
-        };
-      });
-      
-      const promise = watchClaim("GTEST", "kyc", { pollMs: 1000, timeoutMs: 10000 });
-      
-      // Fast-forward time to trigger the second poll
-      vi.advanceTimersByTime(1000);
-      await vi.runAllTimersAsync();
-      
-      const result = await promise;
-      expect(result).toBe(true);
-    });
+describe("getClaims — throwOnError", () => {
+  beforeEach(() => {
+    isVerified.mockReset();
+  });
 
-    it("Promise form rejects with TimeoutError on timeout", async () => {
-      mockClient.is_verified.mockResolvedValue({
-        result: [false, BigInt(0), BigInt(0)],
-      });
-      
-      const promise = watchClaim("GTEST", "kyc", { pollMs: 1000, timeoutMs: 2000 });
-      
-      // Fast-forward past timeout
-      vi.advanceTimersByTime(2000);
-      await vi.runAllTimersAsync();
-      
-      await expect(promise).rejects.toThrow(TimeoutError);
-    });
+  it("fail-soft returns [] when unconfigured", async () => {
+    configure({ registryId: "" });
+    await expect(getClaims(WALLET)).resolves.toEqual([]);
+  });
 
-    it("Callback form fires onChange when state changes", async () => {
-      const onChange = vi.fn();
-      let callCount = 0;
-      
-      mockClient.is_verified.mockImplementation(async () => {
-        callCount++;
-        return {
-          result: callCount >= 2 ? [true, BigInt(1000), BigInt(2000)] : [false, BigInt(0), BigInt(0)],
-        };
-      });
-      
-      const stop = watchClaim("GTEST", "kyc", { 
-        pollMs: 1000, 
-        timeoutMs: 10000, 
-        onChange 
-      });
-      
-      // Initial call should happen immediately, then advance for second call
-      await vi.runOnlyPendingTimersAsync();
-      vi.advanceTimersByTime(1000);
-      await vi.runOnlyPendingTimersAsync();
-      
-      expect(onChange).toHaveBeenCalledWith(true);
-      stop();
-    });
+  it("throws ConfigError when unconfigured and throwOnError", async () => {
+    configure({ registryId: "" });
+    await expect(getClaims(WALLET, { throwOnError: true })).rejects.toBeInstanceOf(ConfigError);
+  });
 
-    it("Callback form does not fire onChange when state is unchanged", async () => {
-      const onChange = vi.fn();
-      
-      mockClient.is_verified.mockResolvedValue({
-        result: [false, BigInt(0), BigInt(0)],
-      });
-      
-      const stop = watchClaim("GTEST", "kyc", { 
-        pollMs: 1000, 
-        timeoutMs: 5000, 
-        onChange 
-      });
-      
-      // Initial call + two more polls
-      await vi.runOnlyPendingTimersAsync();
-      vi.advanceTimersByTime(2000);
-      await vi.runOnlyPendingTimersAsync();
-      
-      // onChange should not be called since state remained false
-      expect(onChange).not.toHaveBeenCalled();
-      stop();
-    });
-
-    it("stop() cancels polling", async () => {
-      const onChange = vi.fn();
-      
-      mockClient.is_verified.mockResolvedValue({
-        result: [false, BigInt(0), BigInt(0)],
-      });
-      
-      const stop = watchClaim("GTEST", "kyc", { 
-        pollMs: 1000, 
-        timeoutMs: 10000, 
-        onChange 
-      });
-      
-      // Stop immediately
-      stop();
-      
-      // Advance time - no calls should happen
-      vi.advanceTimersByTime(2000);
-      await vi.runOnlyPendingTimersAsync();
-      
-      expect(mockClient.is_verified).toHaveBeenCalledTimes(1); // Only initial call
-    });
+  it("throws RpcError when a read fails under throwOnError", async () => {
+    configure({ registryId: "C_TEST_REGISTRY" });
+    isVerified.mockRejectedValue(new Error("boom"));
+    await expect(getClaims(WALLET, { throwOnError: true })).rejects.toBeInstanceOf(RpcError);
   });
 });

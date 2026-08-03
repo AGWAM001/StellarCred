@@ -1,215 +1,53 @@
-# Add Vitest and SDK Unit Tests (#200)
+## Summary
 
-**Closes #200**
+Only Freighter was reachable as a wallet in the app's own framing, even though the multi-wallet abstraction (`@creit.tech/stellar-wallets-kit`) was already integrated underneath. This closes the real gaps: WalletConnect wasn't wired in at all, error messaging assumed Freighter regardless of which wallet was picked, and the CSP silently blocked the wallet-picker modal's icons/relay/verify traffic in a real browser (only caught by driving a production build end-to-end, not by `tsc`/tests).
 
-## 📋 Summary
+## What changed
 
-This PR adds comprehensive unit testing to the StellarCred frontend SDK using Vitest. The implementation includes 22 unit tests covering all exported functions (`hasClaim`, `getClaims`, `buildVerifyUrl`, `watchClaim`) with complete offline mocking and CI integration.
+### WalletConnect wired in (`frontend/lib/wallet.ts`)
+- `allowAllModules()` already covers Freighter/Albedo/xBull/Rabet/Lobstr/Hana/Klever/HOT Wallet — it deliberately excludes WalletConnect because that module needs a project ID first.
+- Manually instantiate `WalletConnectModule` (from the kit's `modules/walletconnect.module` subpath — not re-exported off the package root) and append it to the kit's `modules` array, gated on a new `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` env var.
+- Unset = WalletConnect is simply omitted from the picker; every other wallet still works. No hard failure, no build-time requirement.
 
-## 🎯 What Changed
+### Wallet-specific error context, not hardcoded Freighter
+- `WalletConnectError` now carries `walletName`/`installUrl` sourced from the kit's own `ISupportedWallet` (`option.name`/`option.url`) at the point of failure, instead of a module-level constant that always pointed at Freighter.
+- `WalletButton.tsx`'s "not installed" state now renders `Install {walletName}` linking to that wallet's own install URL, whichever wallet the user actually picked.
+- WalletConnect itself is excluded from the "not-installed" classification (matched on `option.id === WALLET_CONNECT_ID`): it isn't a browser extension, so its own "not connected" errors mean a dropped relay socket or expired session, not something to install. Those now map to `"rejected"` instead of showing a misleading "Install WalletConnect" link.
+- De-hardcoded remaining Freighter-only copy: `lib/contracts.ts`'s auth-failure message, `holder/page.tsx`'s proof-submission subtitles, and marketing/docs copy in `app/page.tsx`, `app/docs/page.tsx`, and the root `README.md`.
 
-### Configuration Updates
-- **`frontend/package.json`**: Added `test:watch` script alongside existing `test` script
-- **`frontend/vitest.config.ts`**: Modified to include SDK tests (removed package exclusion, added explicit include patterns)
-- **`.github/workflows/ci.yml`**: Added SDK test step to frontend CI job
+### CSP fixes (`frontend/next.config.mjs`) — found by actually running it, not just typechecking
+Driving a real production build (`next build && next start`) in headless Chromium surfaced three concrete gaps the strict `Content-Security-Policy` header didn't account for:
+- `connect-src` was missing the WalletConnect relay (`wss://relay.walletconnect.{com,org}`).
+- No `frame-src` at all, so WalletConnect's domain-verification iframe (`verify.walletconnect.{com,org}`) was silently blocked.
+- `img-src` didn't allow the wallet-picker's icon CDN — determined empirically from real network requests in a live browser (`stellar.creit.tech` for most wallets, `storage.herewallet.app` for HOT Wallet specifically; an earlier guess based on package-source greps pointed at the wrong domain).
 
-### New Test Suite
-- **`frontend/packages/sdk/src/index.test.ts`** (NEW): Complete test suite with 22 comprehensive unit tests
+All three WalletConnect-specific pieces (`frame-src` entirely, and the relay/verify/explorer entries in `connect-src`/`img-src`) are now gated on `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` being set, so a deployment that leaves WalletConnect disabled keeps the minimally-permissive CSP. `stellar.creit.tech` and `storage.herewallet.app` stay unconditional in `img-src` since they serve icons for every wallet the kit shows (Freighter, Albedo, etc.), not just WalletConnect's.
 
-## 🧪 Test Coverage Breakdown
+Also aliased `pino-pretty` to `false` in the webpack config — `@walletconnect/sign-client → @walletconnect/logger → pino` conditionally requires it, it's a dev-only transport this app doesn't use, and unresolved it was throwing a new build warning. This is pino's own documented bundler fix.
 
-### `hasClaim` Function (5 tests)
-- ✅ Returns `false` when no `registryId` configured
-- ✅ Calls `readIsVerified` when no `minThreshold` provided
-- ✅ Calls `readCheckClaim` when `minThreshold` is set
-- ✅ Returns `false` when `readIsVerified` returns `false`
-- ✅ Returns `false` when `readCheckClaim` returns below threshold
+### Tests (`frontend/lib/__tests__/wallet.test.ts`, new)
+No tests existed for `lib/wallet.ts` before this. Added 13, mocking `StellarWalletsKit` and `WalletConnectModule` (real extensions/relays aren't reachable from jsdom):
+- `connect()` resolves the right address/walletId; rejects as `dismissed` on modal close.
+- Regression guard: a "not installed" failure carries *that* wallet's name/url (e.g. connecting xBull or Lobstr no longer produces a Freighter-branded error).
+- Regression guard: WalletConnect's own relay/session failures map to `"rejected"`, not `"not-installed"` with a bogus install link.
+- `restore`, `signTx`, `getNetworkOk` (including the "don't false-positive a network mismatch if the wallet doesn't support `getNetwork()`" case).
+- `getKit()` includes/excludes `WalletConnectModule` correctly based on whether the project-id env var is set.
 
-### `getClaims` Function (4 tests)
-- ✅ Filters out `null` claims from contract responses
-- ✅ Maps `verifiedAt` BigInt timestamps to JavaScript numbers
-- ✅ Maps `expiry` BigInt timestamps to JavaScript numbers
-- ✅ Filters out claims with invalid/missing required fields
+## Why no custom wallet-picker UI
+The kit's own `openModal()` already renders a picker listing every configured wallet, with unavailable ones visually marked "Not available" (clicking one opens its install page directly — confirmed in the kit's own modal source, not just docs). Building a second, custom picker on top would duplicate exactly what `@creit.tech/stellar-wallets-kit` is for.
 
-### `buildVerifyUrl` Function (8 tests)
-- ✅ Sets `age` parameter correctly (`threshold_years`)
-- ✅ Sets `income` parameter correctly (`threshold`)
-- ✅ Sets `funds` parameter correctly (`threshold`)
-- ✅ Sets `jurisdiction` parameter correctly
-- ✅ Handles `restricted` as array (joins with comma)
-- ✅ Handles `restricted` as string (passes directly)
-- ✅ Uses base URL override when provided
-- ✅ Uses default base URL when no override specified
+## Test plan
 
-### `watchClaim` Function (5 tests)
-- ✅ Promise form resolves when claim becomes verified
-- ✅ Promise form rejects with `TimeoutError` on timeout
-- ✅ Callback form fires `onChange` when state changes
-- ✅ Callback form does NOT fire `onChange` when state is unchanged
-- ✅ `stop()` function properly cancels polling
+- [x] `pnpm tsc --noEmit` — clean
+- [x] `pnpm vitest run` — 15/15 passing (13 new + 2 existing)
+- [x] `pnpm build` — clean, no warnings beyond a pre-existing unrelated `@stellar/stellar-sdk` deprecation notice
+- [x] Drove a real production build (`next build && next start`) with headless Chromium: clicked "Connect wallet" on `/holder`, confirmed the picker lists Freighter/Albedo/xBull/Rabet/Lobstr/Hana/Klever/HOT Wallet/Wallet Connect, extension-only wallets correctly show "Not available", and zero CSP violations fire (before the `next.config.mjs` fix, icon loads and the picker itself were being blocked)
+- [x] Confirmed build succeeds identically with `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` unset (matches CI's env) — WalletConnect just doesn't appear, nothing else regresses
+- [x] Verified the CSP gating directly (`next.config.mjs`'s `headers()` called with the env var toggled): WalletConnect-specific `frame-src`/relay/verify/explorer entries appear only when the project ID is set
+- [ ] Live connect/sign/submit against a real installed extension and a real WalletConnect relay (not possible in this sandbox — no browser-extension environment, no outbound DNS to `relay.walletconnect.com`)
 
-## 🔧 Technical Implementation
+## Notes for reviewers
 
-### Mock Strategy
-```typescript
-// Module-level mocking of ProofRegistryClient
-vi.mock("../../proof-registry/src/index.js", () => ({
-  Client: vi.fn().mockImplementation(() => ({
-    is_verified: vi.fn(),
-    check_claim: vi.fn(),
-  })),
-}));
-```
-
-**Benefits:**
-- All tests run **completely offline** - no network dependencies
-- Fresh mock instances per test prevent cross-test pollution
-- Mocks both `is_verified` and `check_claim` methods as required by SDK
-
-### Fake Timer Management
-```typescript
-beforeEach(() => {
-  vi.useFakeTimers(); // Enable fake timers for watchClaim tests
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  vi.restoreCurrentDate();
-  vi.runOnlyPendingTimers();
-  vi.useRealTimers(); // Prevent timer leakage between tests
-});
-```
-
-**Benefits:**
-- Deterministic timing for `watchClaim` polling tests
-- No actual delays in test execution
-- Prevents timer leakage between tests
-
-### Configuration Reset
-Each test starts with a clean, known SDK configuration:
-```typescript
-beforeEach(() => {
-  configure({
-    registryId: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-    rpcUrl: "https://soroban-testnet.stellar.org",
-    networkPassphrase: "Test SDF Network ; September 2015",
-    baseUrl: "https://stellarcred.xyz",
-  });
-});
-```
-
-## 🚀 CI Integration
-
-Added test step to existing frontend CI job:
-```yaml
-- name: Test frontend SDK
-  run: pnpm test
-```
-
-**Position:** After build step, following existing CI patterns  
-**Working Directory:** `frontend` (matches existing steps)
-
-## 🔍 Verification Strategy
-
-### Exact SDK Behavior Testing
-Tests verify the precise implementation details discovered during codebase reconnaissance:
-
-1. **Method Routing Logic**: Confirms `minThreshold` parameter correctly routes between `check_claim` and `is_verified`
-2. **Data Type Conversions**: Verifies BigInt timestamps from Stellar contracts are properly converted to JavaScript numbers
-3. **Configuration Dependencies**: Tests that missing `registryId` causes graceful failures
-4. **URL Query Parameter Handling**: Validates all parameter types and encoding in `buildVerifyUrl`
-5. **Polling State Management**: Confirms both Promise and callback forms of `watchClaim` behave correctly
-
-### Error Handling
-- Tests `TimeoutError` rejection in Promise form of `watchClaim`
-- Verifies graceful handling of null/invalid contract responses
-- Confirms proper behavior when configuration is missing
-
-## 📊 Test Execution
-
-### Local Development
-```bash
-# Run tests once
-pnpm test
-
-# Watch mode for development
-pnpm test:watch
-```
-
-### CI Environment
-Tests automatically run as part of the frontend CI job after:
-1. ✅ Dependency installation (`pnpm install --frozen-lockfile`)
-2. ✅ Type checking (`pnpm tsc --noEmit`)
-3. ✅ Build verification (`pnpm build`)
-4. 🆕 **SDK Tests** (`pnpm test`)
-
-## 🎯 Compatibility
-
-- **Vitest Version**: Uses existing `vitest@2.1.9` installation
-- **Environment**: `jsdom` (matches existing frontend test setup)
-- **TypeScript**: Full type safety with existing `typescript@^5` configuration
-- **Dependencies**: No new dependencies added - leverages existing test infrastructure
-
-## 📈 Benefits
-
-### Developer Experience
-- **Fast Feedback**: Tests run in milliseconds with fake timers
-- **Offline Development**: No network dependencies or external services required
-- **Type Safety**: Full TypeScript integration with IDE support
-- **Watch Mode**: Immediate feedback during development
-
-### Code Quality
-- **Regression Protection**: Comprehensive coverage prevents breaking changes
-- **Documentation**: Tests serve as living documentation of SDK behavior
-- **Refactoring Safety**: Enables confident code improvements
-- **Edge Case Coverage**: Tests handle error conditions and edge cases
-
-### CI/CD Integration
-- **Automated Validation**: Every PR automatically validates SDK functionality
-- **Breaking Change Detection**: CI fails if SDK contracts are violated
-- **Deployment Safety**: Ensures production deployments don't break SDK behavior
-
-## 🔄 Future Extensibility
-
-The test infrastructure is designed for easy extension:
-
-### Adding New Tests
-```typescript
-describe("newFunction", () => {
-  it("should handle new feature", async () => {
-    // Test implementation follows established patterns
-  });
-});
-```
-
-### New Function Coverage
-- Mock setup automatically applies to new functions using `ProofRegistryClient`
-- Configuration management works for any new SDK functions
-- Timer management ready for any polling/async functionality
-
-### Additional Assertion Types
-- Infrastructure supports testing React hooks (if SDK adds them)
-- Ready for integration testing between SDK functions
-- Supports testing error boundary scenarios
-
-## ✅ Checklist
-
-- [x] **Comprehensive Test Coverage**: 22 tests covering all exported functions
-- [x] **Offline Execution**: Complete mocking of external dependencies
-- [x] **CI Integration**: Tests run automatically in GitHub Actions
-- [x] **Type Safety**: Full TypeScript integration
-- [x] **Documentation**: Tests serve as function behavior documentation
-- [x] **Performance**: Fast execution with fake timers and mocks
-- [x] **Maintainability**: Clear test structure and naming conventions
-- [x] **Edge Cases**: Error conditions and configuration edge cases covered
-- [x] **No Breaking Changes**: Existing functionality completely preserved
-- [x] **Zero New Dependencies**: Uses existing Vitest installation
-
-## 🚦 Ready to Merge
-
-This PR is ready for merge when:
-- [x] All CI checks pass (including new SDK tests)
-- [x] Code review approval received
-- [x] No merge conflicts with main branch
-
-The implementation provides a solid foundation for SDK testing and follows all project conventions for testing, CI, and code quality.
+- If you want WalletConnect live in a deployed environment, set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` (free at https://cloud.reown.com) — documented in `frontend/.env.example`.
+- The CSP domains (`stellar.creit.tech`, `storage.herewallet.app`, `explorer-api.walletconnect.com`, `verify.walletconnect.{com,org}`, `relay.walletconnect.{com,org}`) were verified against the actual installed dependency versions (`@creit.tech/stellar-wallets-kit@1.9.5`, `@walletconnect/sign-client@2.11.2`), not copied wholesale from WalletConnect's general AppKit docs (which include several domains — Coinbase, 1inch, WalletLink — this app's dependency tree doesn't actually use).
+- `next.config.mjs`'s `headers()` runs server-side at runtime (each request/server-start), not baked in at build time — so `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` needs to be set wherever the server actually runs, not just at build time, for the CSP gating to reflect it correctly. (This tripped me up once during testing — worth knowing if the picker's icons ever look blocked in a deployed environment that *did* set the var at build time.)
