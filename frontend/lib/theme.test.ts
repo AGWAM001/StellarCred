@@ -53,7 +53,7 @@ function installDomStubs(systemDark: boolean) {
 describe("theme helpers", async () => {
   // Dynamic import after stubs so module code can see window when called
   const { getStoredTheme, getSystemTheme, resolveTheme, setExplicitTheme, applyTheme, THEME_BOOT_SCRIPT } =
-    await import("./theme");
+    await import("./theme.ts");
 
   beforeEach(() => {
     store.clear();

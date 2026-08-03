@@ -160,6 +160,9 @@ jobs:
       - name: Test frontend SDK
         run: pnpm test
 
+      - name: Test theme helpers (node:test)
+        run: pnpm test:theme
+
       - name: Run issuer tests (incl. cross-boundary circuit test)
         run: pnpm --filter @stellarcred/issuer test
 

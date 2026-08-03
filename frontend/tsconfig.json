@@ -27,6 +27,8 @@
     // so its vitest config/tests would fail to resolve here. Exclude them from
     // the app typecheck; they are typechecked by the SDK's own toolchain.
     "packages/sdk/test",
-    "packages/sdk/vitest.config.ts"
+    "packages/sdk/vitest.config.ts",
+    // Node built-in test runner suite (pnpm test:theme), not part of app tsc.
+    "lib/theme.test.ts"
   ]
 }
