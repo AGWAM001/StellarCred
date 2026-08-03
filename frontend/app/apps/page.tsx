@@ -42,13 +42,23 @@ function ProtocolCard({
   const { state, statuses, retry, checking } = useProtocolAccessCheck(
     protocol.requirements,
     activeWallet,
-    { isPreview, networkKey },
+    // Preview mode is "!address"; don't auto-grant when disconnected — show Connect wallet.
+    { isPreview: isPreview && Boolean(activeWallet), networkKey },
   );
 
   return (
     <div
       className="card protocol-card"
       onClick={() => router.push(`/apps/${protocol.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(`/apps/${protocol.id}`);
+        }
+      }}
+      role="link"
+      tabIndex={0}
+      aria-label={`Open ${protocol.name} — ${protocol.tagline}`}
       style={{ display: "flex", flexDirection: "column", gap: 0, cursor: "pointer" }}
     >
       <div className="between" style={{ marginBottom: "0.35rem" }}>
@@ -173,46 +183,49 @@ function ProtocolCard({
           if (state === "error") e.stopPropagation();
         }}
       >
-        {state === "loading" && (
-          <span className="row faint" style={{ gap: "0.4rem", fontSize: "0.75rem" }}>
-            <IconLoader2 size={14} className="spin" />
-            Checking access…
-          </span>
-        )}
-        {state === "granted" && <Badge variant="verified">Access granted</Badge>}
-        {state === "denied" && <Badge variant="denied">Access denied</Badge>}
-        {state === "error" && (
-          <>
-            <span className="row" style={{ gap: "0.4rem" }}>
-              <Badge variant="denied">Check failed</Badge>
-              <span className="faint" style={{ fontSize: "0.72rem" }}>
-                RPC error
-              </span>
-            </span>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                retry();
-              }}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.3rem",
-                fontSize: "0.72rem",
-                padding: "0.25rem 0.55rem",
-              }}
-            >
-              <IconRefresh size={12} stroke={2} />
-              Retry
-            </button>
-          </>
-        )}
-        {state === "idle" && activeWallet === null && (
+        {!activeWallet ? (
           <span className="faint" style={{ fontSize: "0.75rem" }}>
             Connect wallet to check access
           </span>
+        ) : (
+          <>
+            {state === "loading" && (
+              <span className="row faint" style={{ gap: "0.4rem", fontSize: "0.75rem" }}>
+                <IconLoader2 size={14} className="spin" />
+                Checking access…
+              </span>
+            )}
+            {state === "granted" && <Badge variant="verified">Access granted</Badge>}
+            {state === "denied" && <Badge variant="denied">Access denied</Badge>}
+            {state === "error" && (
+              <>
+                <span className="row" style={{ gap: "0.4rem" }}>
+                  <Badge variant="denied">Check failed</Badge>
+                  <span className="faint" style={{ fontSize: "0.72rem" }}>
+                    RPC error
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    retry();
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    fontSize: "0.72rem",
+                    padding: "0.25rem 0.55rem",
+                  }}
+                >
+                  <IconRefresh size={12} stroke={2} />
+                  Retry
+                </button>
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -224,7 +237,8 @@ function AppsInner() {
   const searchParams = useSearchParams();
   const scVerified = searchParams.get("sc_verified") === "true";
   const scWallet = searchParams.get("sc_wallet");
-  const activeWallet = address ?? scWallet ?? null;
+  // `address` is "" when disconnected — use || so we fall through to scWallet/null.
+  const activeWallet = address || scWallet || null;
   // Include mismatch so a live network switch re-runs checks after debounce.
   const networkKey = networkMismatch ? "mismatch" : "ok";
 
@@ -325,6 +339,7 @@ function AppsInner() {
           />
           <input
             type="text"
+            aria-label="Search apps by name, description, or tagline"
             placeholder="Search apps by name, description, or tagline..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
