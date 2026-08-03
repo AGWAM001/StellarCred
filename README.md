@@ -351,6 +351,7 @@ Deploy and wire the contracts on the Stellar Mainnet:
   the verifier crate; the VK is deterministic from the circuit.
 - Server-side issuance, multi-claim flow, the return-URL redirect, the
   `@stellarcred/sdk`, and the Persona relay are wired and build-clean.
+- **Bundle size budget & CI checks enforced**: WASM proving assets and route bundles are monitored with `@size-limit/file` and `@next/bundle-analyzer`. See [docs/BUNDLE_SIZE_BUDGET.md](docs/BUNDLE_SIZE_BUDGET.md).
 
 ---
 
