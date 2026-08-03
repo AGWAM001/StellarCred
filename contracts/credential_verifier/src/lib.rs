@@ -58,6 +58,9 @@ pub enum Error {
     /// The requested VK version has been deprecated by the admin; new
     /// submissions against it are rejected.
     VersionDeprecated = 4,
+    /// A VK is already registered at the requested (credential_type,
+    /// version); VKs are immutable once set — register a new version instead.
+    VkAlreadySet = 5,
 }
 
 #[contract]
@@ -69,9 +72,11 @@ impl CredentialVerifier {
         env.storage().instance().set(&DataKey::Admin, &admin);
     }
 
-    /// Register/replace the verification key for a credential circuit. Admin-only.
-    /// The VK is validated by parsing it before storage, rejecting malformed keys
-    /// at set time.
+    /// Register the verification key for a credential circuit. Admin-only.
+    /// A version's VK is immutable once set — re-registering an existing
+    /// (credential_type, version) panics with `VkAlreadySet`; register a new
+    /// (higher) version to upgrade. The VK is validated by parsing it before
+    /// storage, rejecting malformed keys at set time.
     // NOTE: We suppress the deprecation warning for `env.events().publish` here.
     // The idiomatic Soroban v26 replacement is `#[contractevent]`; we use
     // value-based publish to stay consistent with the rest of the codebase.
@@ -83,10 +88,17 @@ impl CredentialVerifier {
         if version == 0 {
             panic_with_error!(&env, Error::VkInvalid);
         }
+        let key = DataKey::Vk(credential_type.clone(), version);
+        // A version's VK is immutable once registered: proofs are verified
+        // and cached against it, so silently replacing the bytes would
+        // invalidate every existing proof. Register a new (higher) version
+        // to upgrade the circuit.
+        if env.storage().persistent().has(&key) {
+            panic_with_error!(&env, Error::VkAlreadySet);
+        }
         if UltraHonkVerifier::new(&env, &vk).is_err() {
             panic_with_error!(&env, Error::VkInvalid);
         }
-        let key = DataKey::Vk(credential_type.clone(), version);
         env.storage().persistent().set(&key, &vk);
         env.storage()
             .persistent()
@@ -144,6 +156,23 @@ impl CredentialVerifier {
         env.storage()
             .persistent()
             .extend_ttl(&dep_key, VK_BUMP_THRESHOLD, VK_TTL);
+    }
+
+    /// Admin-only. Refreshes the TTL of the `LatestVersion` pointer so that
+    /// `verify_proof(..., None)` — the default submission path — keeps
+    /// resolving in long-lived deployments that register no new circuit
+    /// versions. Panics with `VkNotSet` if no VK has been registered for the
+    /// credential type yet.
+    pub fn refresh_latest_version_ttl(env: Env, credential_type: Symbol) {
+        Self::require_admin(&env);
+        let latest_key = DataKey::LatestVersion(credential_type);
+        env.storage()
+            .persistent()
+            .get::<_, u32>(&latest_key)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::VkNotSet));
+        env.storage()
+            .persistent()
+            .extend_ttl(&latest_key, VK_BUMP_THRESHOLD, VK_TTL);
     }
 
     /// Returns the highest VK version registered for `credential_type`, or

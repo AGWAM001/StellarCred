@@ -223,12 +223,14 @@ fn latest_version_tracks_updates() {
     c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
     assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 1);
 
-    c.set_vk(&symbol_short!("kyc"), &2u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
-    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 2);
+    // Skip v2 to leave a gap for the out-of-order registration below.
+    c.set_vk(&symbol_short!("kyc"), &3u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 3);
 
-    // Out-of-order registration of an older version must not regress latest.
-    c.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
-    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 2);
+    // Out-of-order registration of an older, previously-unregistered version
+    // must not regress latest.
+    c.set_vk(&symbol_short!("kyc"), &2u32, &Bytes::from_slice(&env, fixture!("kyc", "vk")));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 3);
 }
 
 /// After a circuit upgrade (v2 registered), an old proof verified against v1
@@ -286,12 +288,12 @@ fn deprecated_version_rejects_new_submissions() {
     assert!(res.is_err());
 }
 
-/// Re-registering a VK at the current latest version refreshes the
-/// `LatestVersion` pointer TTL, so `verify_proof(..., None)` — the default
-/// submission path — never lapses into `VkNotSet` after 180 days without a
-/// new circuit version.
+/// `refresh_latest_version_ttl` restores the full 180-day TTL on the
+/// `LatestVersion` pointer once it has decayed, so `verify_proof(..., None)`
+/// — the default submission path — never lapses into `VkNotSet` in long-lived
+/// deployments that register no new circuit versions.
 #[test]
-fn set_vk_refreshes_latest_version_ttl_without_new_version() {
+fn refresh_latest_version_ttl_restores_pointer_ttl() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
@@ -310,7 +312,7 @@ fn set_vk_refreshes_latest_version_ttl_without_new_version() {
 
     // ~180 days pass with no circuit upgrades: the pointer decays to just
     // inside its 30-day bump threshold (remaining = 1000 ledgers), the point
-    // where an unconditional refresh matters.
+    // where a TTL refresh matters.
     env.ledger().with_mut(|li| li.sequence_number += VK_TTL - 1000);
     assert_eq!(
         env.as_contract(&c.address, || env.storage().persistent().get_ttl(&latest_key)),
@@ -318,17 +320,53 @@ fn set_vk_refreshes_latest_version_ttl_without_new_version() {
         "pointer TTL has decayed to just inside the bump threshold",
     );
 
-    // Re-register the current latest version: the pointer must stay at v1
-    // but its TTL must be restored to the full window.
+    // The admin refresh restores the full window without touching versions.
+    c.refresh_latest_version_ttl(&symbol_short!("kyc"));
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 1);
+    assert_eq!(
+        env.as_contract(&c.address, || env.storage().persistent().get_ttl(&latest_key)),
+        VK_TTL,
+        "refresh restores the full 180-day TTL on the latest pointer",
+    );
+}
+
+/// `refresh_latest_version_ttl` panics if no VK has been registered for the
+/// credential type yet.
+#[test]
+#[should_panic]
+fn refresh_latest_version_ttl_panics_without_vk() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+    c.refresh_latest_version_ttl(&symbol_short!("kyc"));
+}
+
+/// A VK version is immutable once registered: re-registering the same
+/// `(credential_type, version)` is rejected, and the stored VK stays intact
+/// so proofs already verified against it remain valid.
+#[test]
+fn set_vk_rejects_overwrite_of_existing_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+
     c.set_vk(
         &symbol_short!("kyc"),
         &1u32,
         &Bytes::from_slice(&env, fixture!("kyc", "vk")),
     );
-    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 1);
-    assert_eq!(
-        env.as_contract(&c.address, || env.storage().persistent().get_ttl(&latest_key)),
-        VK_TTL,
-        "re-registration restores the full 180-day TTL on the latest pointer",
+    let res = c.try_set_vk(
+        &symbol_short!("kyc"),
+        &1u32,
+        &Bytes::from_slice(&env, fixture!("kyc", "vk")),
     );
+    assert!(res.is_err(), "re-registering an existing version must be rejected");
+
+    // The original v1 VK is untouched and still verifies old proofs.
+    assert!(c.verify_proof(
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, fixture!("kyc", "proof")),
+        &Bytes::from_slice(&env, fixture!("kyc", "public_inputs")),
+        &Some(1),
+    ));
 }
