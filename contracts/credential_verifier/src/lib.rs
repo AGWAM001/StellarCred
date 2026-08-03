@@ -103,10 +103,15 @@ impl CredentialVerifier {
             .unwrap_or(0);
         if version > current {
             env.storage().persistent().set(&latest_key, &version);
-            env.storage()
-                .persistent()
-                .extend_ttl(&latest_key, VK_BUMP_THRESHOLD, VK_TTL);
         }
+        // Always refresh the latest pointer's TTL on any successful
+        // registration — not only when the version advances — so that
+        // `verify_proof(..., None)`, the default path for new submissions,
+        // can never lapse into `VkNotSet` after 180 days without a new
+        // circuit version.
+        env.storage()
+            .persistent()
+            .extend_ttl(&latest_key, VK_BUMP_THRESHOLD, VK_TTL);
 
         // Emit: topics = ("cred_ver", "vk_set", credential_type)
         //       data   = EventVkSet { admin }

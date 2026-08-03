@@ -3,7 +3,7 @@
 use super::*;
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events as _},
+    testutils::{storage::Persistent as _, Address as _, Events as _, Ledger as _},
     vec, Address, Bytes, Env, IntoVal, Symbol,
 };
 
@@ -284,4 +284,51 @@ fn deprecated_version_rejects_new_submissions() {
         &Some(1),
     );
     assert!(res.is_err());
+}
+
+/// Re-registering a VK at the current latest version refreshes the
+/// `LatestVersion` pointer TTL, so `verify_proof(..., None)` — the default
+/// submission path — never lapses into `VkNotSet` after 180 days without a
+/// new circuit version.
+#[test]
+fn set_vk_refreshes_latest_version_ttl_without_new_version() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+    let latest_key = DataKey::LatestVersion(symbol_short!("kyc"));
+
+    c.set_vk(
+        &symbol_short!("kyc"),
+        &1u32,
+        &Bytes::from_slice(&env, fixture!("kyc", "vk")),
+    );
+    assert_eq!(
+        env.as_contract(&c.address, || env.storage().persistent().get_ttl(&latest_key)),
+        VK_TTL,
+        "fresh registration sets a full 180-day TTL on the latest pointer",
+    );
+
+    // ~180 days pass with no circuit upgrades: the pointer decays to just
+    // inside its 30-day bump threshold (remaining = 1000 ledgers), the point
+    // where an unconditional refresh matters.
+    env.ledger().with_mut(|li| li.sequence_number += VK_TTL - 1000);
+    assert_eq!(
+        env.as_contract(&c.address, || env.storage().persistent().get_ttl(&latest_key)),
+        1000,
+        "pointer TTL has decayed to just inside the bump threshold",
+    );
+
+    // Re-register the current latest version: the pointer must stay at v1
+    // but its TTL must be restored to the full window.
+    c.set_vk(
+        &symbol_short!("kyc"),
+        &1u32,
+        &Bytes::from_slice(&env, fixture!("kyc", "vk")),
+    );
+    assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 1);
+    assert_eq!(
+        env.as_contract(&c.address, || env.storage().persistent().get_ttl(&latest_key)),
+        VK_TTL,
+        "re-registration restores the full 180-day TTL on the latest pointer",
+    );
 }
