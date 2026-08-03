@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   configure,
   hasClaim,
+  hasClaims,
   getClaims,
   buildVerifyUrl,
   watchClaim,
@@ -45,7 +46,6 @@ describe("StellarCred SDK", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.restoreCurrentDate();
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
   });
@@ -115,6 +115,108 @@ describe("StellarCred SDK", () => {
     });
   });
 
+  describe("hasClaims", () => {
+    it("returns empty object when no registryId configured", async () => {
+      configure({ registryId: "" });
+      
+      const result = await hasClaims("GTEST", ["kyc", "age"]);
+      
+      expect(result).toEqual({ kyc: false, age: false });
+      expect(mockClient.is_verified).not.toHaveBeenCalled();
+      expect(mockClient.check_claim).not.toHaveBeenCalled();
+    });
+
+    it("handles mixed binary and threshold claims", async () => {
+      mockClient.is_verified.mockResolvedValue({
+        result: [true, BigInt(1000), BigInt(2000)],
+      });
+      mockClient.check_claim.mockResolvedValue({
+        result: true,
+      });
+      
+      const result = await hasClaims("GTEST", ["kyc", "age"], {
+        minThresholds: { age: 21 },
+      });
+      
+      expect(result.kyc).toBe(true);
+      expect(result.age).toBe(true);
+      expect(mockClient.is_verified).toHaveBeenCalledWith({
+        holder: "GTEST",
+        credential_type: "kyc",
+        trusted_issuers: undefined,
+      });
+      expect(mockClient.check_claim).toHaveBeenCalledWith({
+        holder: "GTEST",
+        credential_type: "age",
+        min_threshold: BigInt(21),
+        trusted_issuers: undefined,
+      });
+    });
+
+    it("handles duplicate claim types", async () => {
+      mockClient.is_verified.mockResolvedValue({
+        result: [true, BigInt(1000), BigInt(2000)],
+      });
+      
+      const result = await hasClaims("GTEST", ["kyc", "kyc", "age"]);
+      
+      expect(result.kyc).toBe(true);
+      expect(result.age).toBe(true);
+      // Should only call once per unique type
+      expect(mockClient.is_verified).toHaveBeenCalledTimes(2);
+    });
+
+    it("handles failed claims gracefully", async () => {
+      mockClient.is_verified
+        .mockResolvedValueOnce({ result: [true, BigInt(1000), BigInt(2000)] }) // kyc - success
+        .mockRejectedValueOnce(new Error("RPC Error")); // age - failure
+      
+      const result = await hasClaims("GTEST", ["kyc", "age"]);
+      
+      expect(result.kyc).toBe(true);
+      expect(result.age).toBe(false); // Should default to false on error
+    });
+
+    it("passes trustedIssuers to all claims", async () => {
+      const trustedIssuers = ["ISSUER1", "ISSUER2"];
+      mockClient.is_verified.mockResolvedValue({
+        result: [true, BigInt(1000), BigInt(2000)],
+      });
+      mockClient.check_claim.mockResolvedValue({
+        result: true,
+      });
+      
+      const result = await hasClaims("GTEST", ["kyc", "age"], {
+        minThresholds: { age: 21 },
+        trustedIssuers,
+      });
+      
+      expect(mockClient.is_verified).toHaveBeenCalledWith({
+        holder: "GTEST",
+        credential_type: "kyc",
+        trusted_issuers: trustedIssuers,
+      });
+      expect(mockClient.check_claim).toHaveBeenCalledWith({
+        holder: "GTEST",
+        credential_type: "age",
+        min_threshold: BigInt(21),
+        trusted_issuers: trustedIssuers,
+      });
+    });
+
+    it("returns false for claims that don't pass threshold", async () => {
+      mockClient.check_claim.mockResolvedValue({
+        result: false,
+      });
+      
+      const result = await hasClaims("GTEST", ["funds"], {
+        minThresholds: { funds: 100000 },
+      });
+      
+      expect(result.funds).toBe(false);
+    });
+  });
+
   describe("getClaims", () => {
     it("filters out null claims", async () => {
       // Mock is_verified to return valid claim for 'kyc', null for 'age'
@@ -135,8 +237,17 @@ describe("StellarCred SDK", () => {
     });
 
     it("maps verifiedAt to a number", async () => {
-      mockClient.is_verified.mockResolvedValue({
-        result: [true, BigInt(1609459200), BigInt(2000000000)], // Unix timestamp as BigInt
+      // Mock all CLAIM_TYPES since getClaims calls them all
+      CLAIM_TYPES.forEach((type, index) => {
+        if (type === "kyc") {
+          mockClient.is_verified.mockResolvedValueOnce({
+            result: [true, BigInt(1609459200), BigInt(2000000000)], // Unix timestamp as BigInt
+          });
+        } else {
+          mockClient.is_verified.mockResolvedValueOnce({
+            result: null, // Other types return null
+          });
+        }
       });
       
       const result = await getClaims("GTEST");
@@ -147,8 +258,17 @@ describe("StellarCred SDK", () => {
     });
 
     it("maps expiry to a number", async () => {
-      mockClient.is_verified.mockResolvedValue({
-        result: [true, BigInt(1000), BigInt(1609459200)], // Unix timestamp as BigInt
+      // Mock all CLAIM_TYPES since getClaims calls them all
+      CLAIM_TYPES.forEach((type, index) => {
+        if (type === "kyc") {
+          mockClient.is_verified.mockResolvedValueOnce({
+            result: [true, BigInt(1000), BigInt(1609459200)], // Unix timestamp as BigInt
+          });
+        } else {
+          mockClient.is_verified.mockResolvedValueOnce({
+            result: null, // Other types return null
+          });
+        }
       });
       
       const result = await getClaims("GTEST");
@@ -245,7 +365,7 @@ describe("StellarCred SDK", () => {
         baseUrl: "https://custom.stellarcred.xyz",
       });
       
-      expect(url).toStartWith("https://custom.stellarcred.xyz");
+      expect(url).toMatch(/^https:\/\/custom\.stellarcred\.xyz/);
     });
 
     it("uses default base URL when no override", () => {
@@ -254,7 +374,7 @@ describe("StellarCred SDK", () => {
         claim: "kyc",
       });
       
-      expect(url).toStartWith("https://stellarcred.xyz");
+      expect(url).toMatch(/^https:\/\/stellarcred\.xyz/);
     });
   });
 
