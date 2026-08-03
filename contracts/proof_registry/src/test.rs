@@ -476,7 +476,6 @@ fn check_claim_trusted_issuer_combines_with_threshold() {
     let holder = Address::generate(&env);
     let other_issuer = Address::generate(&env);
 
-    // funds fixture proves balance >= 200_000.
     registry.submit_proof(
         &holder,
         &issuer,
@@ -809,7 +808,7 @@ fn check_claim_stored_none_with_required_threshold() {
     assert!(!client.check_claim(&holder1, &cred, &Some(u64::MAX), &None));
 }
 
-// ── submit_proofs_batch tests ─────────────────────────────────────────────────
+// -- claim_expiry tests -----------------------------------------------------
 
 fn kyc_submission(env: &Env, issuer: &Address, expiry: u64) -> ProofSubmission {
     ProofSubmission {
@@ -1186,7 +1185,7 @@ fn aggregate_submits_real_proof_and_stores_claims() {
 // ── Admin / upgrade tests ────────────────────────────────────────────────────
 
 #[test]
-fn upgrade_by_admin_succeeds() {
+fn claim_expiry_returns_zero_for_nonexistent_proof() {
     let env = Env::default();
     env.mock_all_auths();
     let h = deploy(&env);
@@ -1213,7 +1212,7 @@ fn upgrade_by_non_admin_panics() {
 }
 
 #[test]
-fn admin_transfer_works() {
+fn claim_expiry_returns_expiry_even_after_expired() {
     let env = Env::default();
     env.mock_all_auths();
     let h = deploy(&env);
