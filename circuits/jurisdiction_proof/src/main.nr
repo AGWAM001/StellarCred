@@ -123,7 +123,7 @@ fn test_salt_mismatch_rejected() {
     main(cc, wrong_salt, JUR_ZERO_SIG, commitment, JUR_ZERO_X, JUR_ZERO_Y, restricted, 0);
 }
 
-// Denylist pass — logic test without full commitment verification.
+// Denylist pass - logic test without full commitment verification.
 #[test]
 fn test_denylist_pass_logic() {
     let country_code: u64 = 566;
@@ -137,7 +137,7 @@ fn test_denylist_pass_logic() {
     }
 }
 
-// Allowlist pass — logic test without full commitment verification.
+// Allowlist pass - logic test without full commitment verification.
 #[test]
 fn test_allowlist_pass_logic() {
     let country_code: u64 = 566;
@@ -155,7 +155,7 @@ fn test_allowlist_pass_logic() {
     }
 }
 
-// Denylist fail — logic test.
+// Denylist fail - logic test.
 #[test(should_fail)]
 fn test_denylist_fail_logic() {
     let country_code: u64 = 840;
@@ -169,7 +169,7 @@ fn test_denylist_fail_logic() {
     }
 }
 
-// Allowlist fail — logic test.
+// Allowlist fail - logic test.
 #[test(should_fail)]
 fn test_allowlist_fail_logic() {
     let country_code: u64 = 840;
@@ -187,7 +187,7 @@ fn test_allowlist_fail_logic() {
     }
 }
 
-// Invalid mode — must be rejected.
+// Invalid mode - must be rejected.
 #[test(should_fail)]
 fn test_invalid_mode() {
     let mode: u64 = 2;
