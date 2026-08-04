@@ -288,16 +288,21 @@ fn deprecated_version_rejects_new_submissions() {
     assert!(res.is_err());
 }
 
-/// `refresh_latest_version_ttl` restores the full 180-day TTL on the
-/// `LatestVersion` pointer once it has decayed, so `verify_proof(..., None)`
-/// — the default submission path — never lapses into `VkNotSet` in long-lived
-/// deployments that register no new circuit versions.
+/// `refresh_latest_version_ttl` restores the full 180-day TTL on BOTH the
+/// `LatestVersion` pointer and the VK blob it resolves to once they have
+/// decayed, so `verify_proof(..., None)` — the default submission path —
+/// never lapses into `VkNotSet` in long-lived deployments that register no
+/// new circuit versions. (The blob must be refreshed too: if it expired
+/// underneath a live pointer, the verify-path blob lookup would panic with
+/// `VkNotSet`, and `set_vk`'s `VkAlreadySet` guard leaves no other way to
+/// extend it.)
 #[test]
 fn refresh_latest_version_ttl_restores_pointer_ttl() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup(&env);
     let latest_key = DataKey::LatestVersion(symbol_short!("kyc"));
+    let vk_key = DataKey::Vk(symbol_short!("kyc"), 1u32);
 
     c.set_vk(
         &symbol_short!("kyc"),
@@ -309,24 +314,40 @@ fn refresh_latest_version_ttl_restores_pointer_ttl() {
         VK_TTL,
         "fresh registration sets a full 180-day TTL on the latest pointer",
     );
+    assert_eq!(
+        env.as_contract(&c.address, || env.storage().persistent().get_ttl(&vk_key)),
+        VK_TTL,
+        "fresh registration sets a full 180-day TTL on the VK blob too",
+    );
 
-    // ~180 days pass with no circuit upgrades: the pointer decays to just
-    // inside its 30-day bump threshold (remaining = 1000 ledgers), the point
-    // where a TTL refresh matters.
+    // ~180 days pass with no circuit upgrades: both entries decay to just
+    // inside their 30-day bump threshold (remaining = 1000 ledgers), the
+    // point where a TTL refresh matters.
     env.ledger().with_mut(|li| li.sequence_number += VK_TTL - 1000);
     assert_eq!(
         env.as_contract(&c.address, || env.storage().persistent().get_ttl(&latest_key)),
         1000,
         "pointer TTL has decayed to just inside the bump threshold",
     );
+    assert_eq!(
+        env.as_contract(&c.address, || env.storage().persistent().get_ttl(&vk_key)),
+        1000,
+        "VK blob TTL has decayed to just inside the bump threshold",
+    );
 
-    // The admin refresh restores the full window without touching versions.
+    // The admin refresh restores the full window on the pointer AND the blob
+    // without touching versions.
     c.refresh_latest_version_ttl(&symbol_short!("kyc"));
     assert_eq!(c.get_latest_version(&symbol_short!("kyc")), 1);
     assert_eq!(
         env.as_contract(&c.address, || env.storage().persistent().get_ttl(&latest_key)),
         VK_TTL,
         "refresh restores the full 180-day TTL on the latest pointer",
+    );
+    assert_eq!(
+        env.as_contract(&c.address, || env.storage().persistent().get_ttl(&vk_key)),
+        VK_TTL,
+        "refresh restores the full 180-day TTL on the VK blob",
     );
 }
 

@@ -158,21 +158,36 @@ impl CredentialVerifier {
             .extend_ttl(&dep_key, VK_BUMP_THRESHOLD, VK_TTL);
     }
 
-    /// Admin-only. Refreshes the TTL of the `LatestVersion` pointer so that
-    /// `verify_proof(..., None)` — the default submission path — keeps
-    /// resolving in long-lived deployments that register no new circuit
-    /// versions. Panics with `VkNotSet` if no VK has been registered for the
-    /// credential type yet.
+    /// Admin-only. Refreshes the TTL of the `LatestVersion` pointer AND the VK
+    /// blob it resolves to, so that `verify_proof(..., None)` — the default
+    /// submission path — keeps working in long-lived deployments that register
+    /// no new circuit versions. Panics with `VkNotSet` if no VK has been
+    /// registered for the credential type yet.
+    ///
+    /// The pointer alone is not enough: if the VK blob at
+    /// `Vk(credential_type, version)` expires, `verify_proof` panics with
+    /// `VkNotSet` at the blob lookup even though the pointer is still alive.
+    /// And because `set_vk` rejects re-registration of an existing version
+    /// (`VkAlreadySet`), this refresh is the only way to extend VK blob TTLs
+    /// after deployment.
     pub fn refresh_latest_version_ttl(env: Env, credential_type: Symbol) {
         Self::require_admin(&env);
-        let latest_key = DataKey::LatestVersion(credential_type);
-        env.storage()
+        let latest_key = DataKey::LatestVersion(credential_type.clone());
+        let version = env
+            .storage()
             .persistent()
             .get::<_, u32>(&latest_key)
             .unwrap_or_else(|| panic_with_error!(&env, Error::VkNotSet));
         env.storage()
             .persistent()
             .extend_ttl(&latest_key, VK_BUMP_THRESHOLD, VK_TTL);
+
+        // Refresh the VK blob the pointer resolves to as well, so it never
+        // expires underneath a live pointer (see doc comment above).
+        let vk_key = DataKey::Vk(credential_type, version);
+        env.storage()
+            .persistent()
+            .extend_ttl(&vk_key, VK_BUMP_THRESHOLD, VK_TTL);
     }
 
     /// Returns the highest VK version registered for `credential_type`, or
