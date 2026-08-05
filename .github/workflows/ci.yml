@@ -122,10 +122,11 @@ jobs:
 
       - name: Check staged artifacts are current
         run: |
-          export PATH="$HOME/.nargo/bin:$HOME/.bb/bin:$PATH"
+          export PATH="$HOME/.nargo/bin:$HOME/.bb:$PATH"
 
           # Install bb at pinned version
-          curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/barretenberg-v0.87.0/barretenberg/install.sh | bash
+          curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
+          bbup -v 0.87.0
 
           type_of() {
             case "$1" in
