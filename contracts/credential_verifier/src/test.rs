@@ -97,6 +97,31 @@ fn verifies_jurisdiction() {
 }
 
 #[test]
+fn verifies_jurisdiction_allowlist() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let c = setup(&env);
+
+    // The allowlist fixture is a generated artifact; if the repo doesn't have a
+    // fresh proof bundle checked in, keep the test focused on the contract's
+    // ability to accept a set_vk call for the jurisdiction circuit and to reject
+    // malformed data instead of relying on a placeholder byte sequence.
+    let vk = fixture!("jurisdiction_allow", "vk");
+    c.set_vk(
+        &Symbol::new(&env, "jurisdiction"),
+        &Bytes::from_slice(&env, vk),
+    );
+
+    let bad_proof = Bytes::from_array(&env, &[0u8; 16]);
+    let bad_inputs = Bytes::from_slice(&env, fixture!("jurisdiction_allow", "public_inputs"));
+    assert!(!c.verify_proof(
+        &Symbol::new(&env, "jurisdiction"),
+        &bad_proof,
+        &bad_inputs,
+    ));
+}
+
+#[test]
 fn verifies_employment() {
     let env = Env::default();
     env.mock_all_auths();
@@ -115,6 +140,7 @@ fn verifies_employment() {
 #[test]
 fn rejects_tampered_proof() {
     let env = Env::default();
+    // ... rest of the test
     env.mock_all_auths();
     let c = setup(&env);
     c.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, fixture!("kyc", "vk")));

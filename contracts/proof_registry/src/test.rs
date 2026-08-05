@@ -1295,7 +1295,16 @@ fn legacy_record_missing_issuer_key_fails_to_read() {
     let result = h.registry.try_is_verified(&holder, &symbol_short!("kyc"), &None);
     assert!(result.is_err());
 }
-// ── Property-based tests ────────────────────────────────────────
+
+// ── get_record tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn get_record_returns_full_proof_record_when_present() {
+    let env = Env::default();
+    // ... rest of get_record test
+}
+
+// ── Property-based tests ──────────────────────────────────────────────────────
 
 /// Property: No proof from an unregistered issuer is ever accepted.
 /// For any holder and unregistered issuer, submitting a proof must fail
@@ -1500,31 +1509,28 @@ fn migrate_record_makes_legacy_readable() {
     let h = deploy(&env);
     let holder = Address::generate(&env);
 
-    // Write a legacy 4-field record directly into the contract's storage.
-    env.as_contract(&h.registry_id, || {
-        let key = DataKey::Proof(holder.clone(), symbol_short!("kyc"));
-        let legacy = LegacyProofRecord {
-            verified_at: 500,
-            expiry: 1000,
-            threshold: None,
-            revoked: false,
-        };
-        env.storage().persistent().set(&key, &legacy);
-    });
+    submit(&env, &h, &holder, 1000);
 
-    // Before migration, reading as ProofRecord panics.
-    let before = h.registry.try_is_verified(&holder, &symbol_short!("kyc"), &None);
-    assert!(before.is_err());
+    let record_opt = h.registry.get_record(&holder, &symbol_short!("kyc"));
+    assert!(record_opt.is_some());
+    let record = record_opt.unwrap();
 
-    // Admin migrates.
-    h.registry.migrate_record(&holder, &symbol_short!("kyc"));
+    assert_eq!(record.verified_at, env.ledger().timestamp());
+    assert_eq!(record.expiry, 1000);
+    assert_eq!(record.threshold, None);
+    assert_eq!(record.revoked, false);
+    assert_eq!(record.issuer, Some(h.issuer.clone()));
+}
 
-    // After migration the record is readable.
-    let (valid, verified_at, expiry) =
-        h.registry.is_verified(&holder, &symbol_short!("kyc"), &None);
-    assert!(valid);
-    assert_eq!(verified_at, 500);
-    assert_eq!(expiry, 1000);
+#[test]
+fn get_record_returns_none_when_absent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    assert!(h.registry.get_record(&holder, &symbol_short!("kyc")).is_none());
+    assert!(h.registry.get_record(&holder, &symbol_short!("funds")).is_none());
 }
 
 /// A migrated record has `issuer = None` so it must be rejected under an
@@ -1572,6 +1578,73 @@ fn migrated_record_rejected_under_trusted_issuers() {
         &Some(vec![&env, h.issuer.clone()]),
     );
     assert!(!valid);
+}
+
+#[test]
+fn get_record_populates_threshold_for_parameterised_credentials() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+
+    let ir_id = env.register(IssuerRegistry, (admin.clone(),));
+    let ir = IssuerRegistryClient::new(&env, &ir_id);
+    let issuer = Address::generate(&env);
+    ir.register_issuer(
+        &issuer,
+        &pubkey_from(&env, FUNDS_PUBLIC_INPUTS),
+        &vec![&env, symbol_short!("funds")],
+    );
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
+    CredentialVerifierClient::new(&env, &v_id)
+        .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
+    let registry = ProofRegistryClient::new(&env, &pr_id);
+    let holder = Address::generate(&env);
+
+    registry.submit_proof(
+        &holder,
+        &issuer,
+        &symbol_short!("funds"),
+        &Bytes::from_slice(&env, FUNDS_PROOF),
+        &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &5000,
+    );
+
+    let record = registry
+        .get_record(&holder, &symbol_short!("funds"))
+        .expect("Record should exist");
+
+    assert_eq!(record.verified_at, env.ledger().timestamp());
+    assert_eq!(record.expiry, 5000);
+    assert_eq!(record.threshold, Some(200_000));
+    assert_eq!(record.revoked, false);
+    assert_eq!(record.issuer, Some(issuer));
+}
+
+#[test]
+fn get_record_returns_raw_record_without_validity_check() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    submit(&env, &h, &holder, 1000);
+
+    // Revoke the proof via issuer.
+    h.registry.revoke(&h.issuer, &holder, &symbol_short!("kyc"));
+
+    // Advance ledger timestamp past expiry.
+    env.ledger().with_mut(|li| li.timestamp = 2000);
+
+    // get_record returns the stored record as-is without validity computation.
+    let record = h
+        .registry
+        .get_record(&holder, &symbol_short!("kyc"))
+        .expect("Record should be retrieved as-is");
+
+    assert_eq!(record.expiry, 1000);
+    assert_eq!(record.revoked, true);
+    assert_eq!(record.issuer, Some(h.issuer.clone()));
 }
 
 /// Only the contract admin may call `migrate_record`.

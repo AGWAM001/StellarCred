@@ -547,6 +547,18 @@ impl ProofRegistry {
         }
     }
 
+    /// Returns the stored `ProofRecord` as-is (no validity computation), or `None`
+    /// if absent. Pure read: does not extend TTL.
+    pub fn get_record(
+        env: Env,
+        holder: Address,
+        credential_type: Symbol,
+    ) -> Option<ProofRecord> {
+        env.storage()
+            .persistent()
+            .get::<_, ProofRecord>(&DataKey::Proof(holder, credential_type))
+    }
+
     /// Returns the expiry (ledger timestamp, seconds) for `holder`'s cached
     /// proof of `credential_type`, or 0 if no proof is on record. Like
     /// `is_verified`'s returned `expiry`, this reflects the stored value
