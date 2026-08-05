@@ -91,6 +91,12 @@ jobs:
       - name: Run contract tests
         run: cargo test --locked
 
+      - name: Lint (clippy)
+        # Warn-only — clippy lints should not block CI on first integration,
+        # but the output is captured so reviewers can see any issues.
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true
+
   circuits:
     name: Circuit compile
     runs-on: ubuntu-latest
@@ -179,7 +185,16 @@ jobs:
           fi
 
       - name: Check verify-wasm.sh syntax
-        run: bash -n scripts/verify-wasm.sh
+        run: bash -n ../scripts/verify-wasm.sh
+
+      - name: Check deploy.sh syntax
+        run: bash -n ../scripts/deploy.sh
+
+      - name: Check deploy-mainnet.sh syntax
+        run: bash -n ../scripts/deploy-mainnet.sh
+
+      - name: Check benchmark.sh syntax
+        run: bash -n ../scripts/benchmark.sh
 
   frontend:
     name: Frontend typecheck & build
