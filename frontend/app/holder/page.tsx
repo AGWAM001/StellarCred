@@ -75,6 +75,30 @@ function daysRemaining(cred: Credential): number {
   return Math.max(0, Math.ceil(secsLeft / 86_400));
 }
 
+// ── Credential expiry helpers ─────────────────────────────────────────────────
+
+function credExpiryTimestamp(cred: Credential): number {
+  return cred.issuedAt + credTtlSecs(cred);
+}
+
+function credIsExpired(cred: Credential): boolean {
+  return credExpiryTimestamp(cred) <= Math.floor(Date.now() / 1000);
+}
+
+function credExpiryWithinDays(cred: Credential, days: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const ts = credExpiryTimestamp(cred);
+  return ts > now && ts <= now + days * 86_400;
+}
+
+function formatExpiryDate(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 // ── Credential card ──────────────────────────────────────────────────────────
 
 function CredCard({
@@ -113,40 +137,43 @@ function CredCard({
             <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{c.title}</span>
             <span className="mono faint" style={{ fontSize: "0.7rem" }}>{c.claim}</span>
           </div>
-          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem", display: "flex", alignItems: "center", gap: "0.35rem" }}>
-            {c.issuer} · <span>{truncateHash(c.commitment)}</span>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={onInspect}
-              title="View details"
-              style={{ padding: "0.1rem 0.2rem", color: "var(--faint)", lineHeight: 0 }}
-            >
-              <IconInfoCircle size={12} />
-            </button>
-            {status === "proved" && (
-              <>
-                {" · "}
-                <span style={{ color: "var(--accent)", opacity: 0.75 }}>
-                  expires in {daysRemaining(c)}d
+          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem" }}>
+            <div>
+              {c.issuer} · <span>{truncateHash(c.commitment)}</span>
+              {status === "proved" && (
+                <>
+                  {" · "}
+                  <span style={{ color: "var(--accent)", opacity: 0.75 }}>
+                    expires in {daysRemaining(c)}d
+                  </span>
+                  {c.provedTxHash && (
+                    <>
+                      {" · "}
+                      <a
+                        href={EXPLORER_TX(c.provedTxHash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: "0.15rem" }}
+                      >
+                        {c.provedTxHash.slice(0, 6)}…<IconExternalLink size={10} />
+                      </a>
+                    </>
+                  )}
+                </>
+              )}
+              {status === "expired" && (
+                <> · <span style={{ color: "var(--danger)", opacity: 0.8 }}>expired</span></>
+              )}
+            </div>
+            <div style={{ marginTop: "0.1rem" }}>
+              {credIsExpired(c) ? (
+                <span style={{ color: "var(--danger)", fontWeight: 500 }}>Expired</span>
+              ) : (
+                <span style={{ color: credExpiryWithinDays(c, 30) ? "var(--warn)" : "var(--faint)" }}>
+                  Expires {formatExpiryDate(credExpiryTimestamp(c))}
                 </span>
-                {c.provedTxHash && (
-                  <>
-                    {" · "}
-                    <a
-                      href={EXPLORER_TX(c.provedTxHash)}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: "0.15rem" }}
-                    >
-                      {c.provedTxHash.slice(0, 6)}…<IconExternalLink size={10} />
-                    </a>
-                  </>
-                )}
-              </>
-            )}
-            {status === "expired" && (
-              <> · <span style={{ color: "var(--danger)", opacity: 0.8 }}>expired</span></>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
@@ -157,8 +184,8 @@ function CredCard({
           {status === "proved" && <Badge variant="verified" dot={false}>On-chain</Badge>}
           <button
             className={`btn btn-sm ${status === "proved" ? "btn-secondary" : "btn-primary"}`}
-            disabled={!address}
-            title={!address ? "Connect a wallet first" : undefined}
+            disabled={!address || credIsExpired(c)}
+            title={!address ? "Connect a wallet first" : credIsExpired(c) ? "This credential has expired" : undefined}
             onClick={onProve}
           >
             {status === "proved"  ? "Re-prove" :
