@@ -448,6 +448,9 @@ export async function getClaim(
   warnIfMissingRegistryIdOnce();
   const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers);
   return r && r.valid ? r : null;
+}
+
+/**
  * Options accepted by {@link hasClaims}.
  *
  * Mirrors {@link ClaimOptions}, except the threshold is per claim type so one
