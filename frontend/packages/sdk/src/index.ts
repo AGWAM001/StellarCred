@@ -57,6 +57,10 @@ export function configure(opts: {
   baseUrl?: string;
 }): void {
   _config = { ..._config, ...opts };
+  // The cached client is bound to the old config — drop it so the next read
+  // rebuilds against the new one.
+  _client = null;
+  _clientKey = "";
 }
 
 /**
@@ -141,6 +145,35 @@ export class TimeoutError extends Error {
   }
 }
 
+/**
+ * Error thrown when the SDK is missing required configuration (e.g. no
+ * `registryId`). Only surfaces when `{ throwOnError: true }` is passed;
+ * the default fail-soft path returns `false` / `[]` instead.
+ */
+export class ConfigError extends Error {
+  constructor(message = "StellarCred is not configured: missing registryId") {
+    super(message);
+    this.name = "ConfigError";
+  }
+}
+
+/**
+ * Error thrown when an RPC / contract-simulation call fails (network,
+ * timeout at the transport layer, simulation error, etc.). Only surfaces
+ * when `{ throwOnError: true }` is passed — distinguishing "couldn't check"
+ * from "not verified" (`false`).
+ */
+export class RpcError extends Error {
+  /** Underlying transport / simulation failure, when available. */
+  cause?: unknown;
+  constructor(message = "StellarCred RPC call failed", options?: { cause?: unknown }) {
+    super(message);
+    this.name = "RpcError";
+    if (options && "cause" in options) {
+      this.cause = options.cause;
+    }
+  }
+}
 
 /** The credential types StellarCred supports. Matches the contract Symbols. */
 export const CLAIM_TYPES = ["kyc", "age", "income", "jurisdiction", "funds", "accreditation"] as const;
@@ -180,6 +213,14 @@ export interface ClaimOptions {
    * `trusted_issuers: None` default. An empty array rejects every issuer.
    */
   trustedIssuers?: string[];
+  /**
+   * When `true`, configuration and RPC failures throw {@link ConfigError} /
+   * {@link RpcError} instead of being masked as `false` / empty results.
+   * Default `false` preserves the historical fail-soft behaviour so a
+   * network blip is indistinguishable from "not verified" unless callers
+   * opt in.
+   */
+  throwOnError?: boolean;
 }
 
 export interface Claim {
@@ -204,24 +245,67 @@ function getSdk(): Promise<StellarSDK> {
   return _sdk;
 }
 
-async function getClient(): Promise<ProofRegistryClient | null> {
+// The client is stateless per config, so one instance is shared across every
+// read. Cached as a promise so a fan-out of concurrent reads (see `fanOut`)
+// awaits a single construction instead of racing to build N clients.
+let _client: Promise<ProofRegistryClient> | null = null;
+let _clientKey = "";
+
+async function getClient(throwOnError = false): Promise<ProofRegistryClient | null> {
   const { registryId, rpcUrl, networkPassphrase } = _config;
-  if (!registryId) return null;
-  const { rpc } = await getSdk();
-  return new ProofRegistryClient({
-    networkPassphrase,
-    contractId: registryId,
-    rpcUrl,
-    allowHttp: rpcUrl.startsWith("http://"),
+  if (!registryId) {
+    if (throwOnError) {
+      throw new ConfigError("StellarCred is not configured: missing registryId");
+    }
+    return null;
+  }
+
+  const key = `${registryId}|${rpcUrl}|${networkPassphrase}`;
+  if (_client && _clientKey === key) return _client;
+
+  _clientKey = key;
+  _client = getSdk().then(
+    () =>
+      new ProofRegistryClient({
+        networkPassphrase,
+        contractId: registryId,
+        rpcUrl,
+        allowHttp: rpcUrl.startsWith("http://"),
+      }),
+  );
+  // Don't cache a failed SDK import — the next read should retry. `_sdk` holds
+  // the import promise itself, so it has to be cleared too: leaving a rejected
+  // promise there would make every later `getClient()` fail on the same
+  // rejection instead of re-attempting the import.
+  _client.catch(() => {
+    _sdk = null;
+    _client = null;
+    _clientKey = "";
   });
+  return _client;
+}
+
+/**
+ * Runs `fn` over `items` concurrently after priming the shared client, so a
+ * multi-claim read builds one `ProofRegistryClient` rather than one per item.
+ */
+async function fanOut<T, R>(
+  items: readonly T[],
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  // Priming is an optimisation only — if it fails, each read falls back to its
+  // own `getClient()` call and its own error handling.
+  await getClient().catch(() => null);
+  return Promise.all(items.map(fn));
 }
 
 async function readIsVerified(
   wallet: string,
   claimType: string,
   trustedIssuers?: string[],
+  throwOnError = false,
 ): Promise<{ valid: boolean; verifiedAt: number; expiry: number } | null> {
-  const client = await getClient();
+  const client = await getClient(throwOnError);
   if (!client) return null;
 
   try {
@@ -233,7 +317,10 @@ async function readIsVerified(
     if (!result) return null;
     const [valid, verifiedAt, expiry] = result;
     return { valid, verifiedAt: Number(verifiedAt), expiry: Number(expiry) };
-  } catch {
+  } catch (err) {
+    if (throwOnError) {
+      throw new RpcError(`is_verified RPC failed for claim "${claimType}"`, { cause: err });
+    }
     return null;
   }
 }
@@ -243,8 +330,9 @@ async function readCheckClaim(
   claimType: string,
   minThreshold: number,
   trustedIssuers?: string[],
+  throwOnError = false,
 ): Promise<boolean> {
-  const client = await getClient();
+  const client = await getClient(throwOnError);
   if (!client) return false;
 
   try {
@@ -255,7 +343,10 @@ async function readCheckClaim(
       trusted_issuers: trustedIssuers,
     });
     return result ?? false;
-  } catch {
+  } catch (err) {
+    if (throwOnError) {
+      throw new RpcError(`check_claim RPC failed for claim "${claimType}"`, { cause: err });
+    }
     return false;
   }
 }
@@ -291,6 +382,20 @@ async function readCheckClaim(
  * const ok = await hasClaim("G1ABC…", "kyc", {
  *   trustedIssuers: ["G...PERSONA_ISSUER", "G...JUMIO_ISSUER"],
  * });
+ *
+ * @example
+ * // Opt into typed errors — network failure throws RpcError, missing
+ * // registryId throws ConfigError; "not verified" still returns false.
+ * try {
+ *   const ok = await hasClaim("G1ABC…", "kyc", { throwOnError: true });
+ * } catch (err) {
+ *   if (err instanceof ConfigError) {
+ *     // misconfigured SDK — set registryId
+ *   }
+ *   if (err instanceof RpcError) {
+ *     // could not reach the chain — retry or degrade
+ *   }
+ * }
  */
 export async function hasClaim(
   wallet: string,
@@ -298,25 +403,119 @@ export async function hasClaim(
   opts?: ClaimOptions,
 ): Promise<boolean> {
   warnIfMissingRegistryIdOnce();
+  const throwOnError = opts?.throwOnError === true;
   if (opts?.minThreshold !== undefined) {
-    return readCheckClaim(wallet, claimType, opts.minThreshold, opts.trustedIssuers);
+    return readCheckClaim(
+      wallet,
+      claimType,
+      opts.minThreshold,
+      opts.trustedIssuers,
+      throwOnError,
+    );
   }
-  const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers);
+  const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers, throwOnError);
   return !!r && r.valid;
+}
+
+/**
+ * Options accepted by {@link hasClaims}.
+ *
+ * Mirrors {@link ClaimOptions}, except the threshold is per claim type so one
+ * batched call can gate on several parameterised claims at once.
+ */
+export interface BatchClaimOptions {
+  /**
+   * Per-type minimum thresholds, e.g. `{ age: 21, funds: 50000 }`. A type with
+   * no entry here is checked as a binary claim (`is_verified`), exactly as
+   * {@link hasClaim} does when `minThreshold` is omitted.
+   */
+  minThresholds?: Partial<Record<ClaimType, number>>;
+  /**
+   * Restrict which issuer(s) every proof in this batch must come from. Same
+   * semantics as {@link ClaimOptions.trustedIssuers} — omit to accept any
+   * registered issuer, pass an empty array to reject every issuer.
+   */
+  trustedIssuers?: string[];
+}
+
+/**
+ * Batched form of {@link hasClaim}: checks several claim types for one wallet
+ * in a single fan-out that shares one `ProofRegistryClient`, instead of the
+ * caller issuing N independent `hasClaim` calls.
+ *
+ * Each type resolves independently — a read that fails (RPC error, missing
+ * config) resolves to `false` for that type rather than rejecting the whole
+ * batch. Duplicate types in `types` are read once and appear once in the
+ * result. The returned record contains a key for every requested type.
+ *
+ * @param wallet Stellar address to check.
+ * @param types Claim types to read.
+ * @param opts Per-type thresholds and issuer restrictions.
+ *
+ * @example
+ * // Gate on three claims at once
+ * const claims = await hasClaims("G1ABC…", ["kyc", "age", "funds"], {
+ *   minThresholds: { age: 21, funds: 50000 },
+ * });
+ * if (claims.kyc && claims.age) grantAccess();
+ */
+export async function hasClaims(
+  wallet: string,
+  types: readonly ClaimType[],
+  opts?: BatchClaimOptions,
+): Promise<Partial<Record<ClaimType, boolean>>> {
+  warnIfMissingRegistryIdOnce();
+
+  const unique = Array.from(new Set(types));
+  const results: Partial<Record<ClaimType, boolean>> = {};
+
+  await fanOut(unique, async (t) => {
+    try {
+      const minThreshold = opts?.minThresholds?.[t];
+      if (minThreshold !== undefined) {
+        results[t] = await readCheckClaim(wallet, t, minThreshold, opts?.trustedIssuers);
+        return;
+      }
+      const r = await readIsVerified(wallet, t, opts?.trustedIssuers);
+      results[t] = !!r && r.valid;
+    } catch {
+      results[t] = false;
+    }
+  });
+
+  return results;
 }
 
 /**
  * Returns every active claim a wallet has proven, across all known credential
  * types. Useful for profile pages and protocol dashboards.
+ *
+ * Uses the same batched fan-out as {@link hasClaims}, so all types are read
+ * through one shared client.
+ *
+ * Pass `{ throwOnError: true }` to surface {@link ConfigError} / {@link RpcError}
+ * instead of silently dropping failed reads. When `throwOnError` is set, a
+ * single failing claim type rejects the whole batch (fail-fast) and discards
+ * successful reads for other types.
  */
-export async function getClaims(wallet: string): Promise<Claim[]> {
+export async function getClaims(
+  wallet: string,
+  opts?: Pick<ClaimOptions, "throwOnError">,
+): Promise<Claim[]> {
   warnIfMissingRegistryIdOnce();
-  const results = await Promise.all(
-    CLAIM_TYPES.map(async (t) => {
-      const r = await readIsVerified(wallet, t);
+  const throwOnError = opts?.throwOnError === true;
+  const results = await fanOut(CLAIM_TYPES, async (t) => {
+    // Same isolation as `hasClaims` when fail-soft: `readIsVerified` swallows
+    // read errors, but its own `getClient()` await can still reject (a failed
+    // SDK import), which would otherwise reject the whole fan-out.
+    try {
+      const r = await readIsVerified(wallet, t, undefined, throwOnError);
       return r && r.valid ? { type: t, verifiedAt: r.verifiedAt, expiry: r.expiry } : null;
-    }),
-  );
+    } catch (err) {
+      if (throwOnError) throw err;
+      return null;
+    }
+  });
   return results.filter((x): x is NonNullable<typeof x> => x !== null);
 }
 
@@ -351,8 +550,10 @@ export function buildVerifyUrl(options: {
     threshold_years?: string;
     /** For "income" / "funds" claims: minimum value in whole units (default varies). */
     threshold?: string;
-    /** For "jurisdiction" claims: ISO 3166-1 numeric codes to block (default []). */
+    /** For "jurisdiction" claims: ISO 3166-1 numeric codes (default []). */
     restricted?: string | string[];
+    /** For "jurisdiction" claims: "block" = denylist (default), "allow" = allowlist. */
+    mode?: "allow" | "block";
   };
   /**
    * Opaque CSRF-style correlation token (e.g. a per-session nonce). Embedded
@@ -383,11 +584,14 @@ export function buildVerifyUrl(options: {
   url.searchParams.set("return_url", returnUrl);
   url.searchParams.set("claim", options.claim);
   if (options.claimParams) {
-    const { threshold_years, threshold, restricted } = options.claimParams;
+    const { threshold_years, threshold, restricted, mode } = options.claimParams;
     if (threshold_years) url.searchParams.set("threshold_years", threshold_years);
     if (threshold) url.searchParams.set("threshold", threshold);
     if (restricted) {
       url.searchParams.set("restricted", Array.isArray(restricted) ? restricted.join(",") : restricted);
+    }
+    if (mode) {
+      url.searchParams.set("mode", mode === "allow" ? "1" : "0");
     }
   }
   return url.toString();
@@ -577,11 +781,23 @@ export const StellarCred = {
   healthCheck,
   isConfigured,
   hasClaim,
+  hasClaims,
   getClaims,
   buildVerifyUrl,
   parseReturnParams,
   watchClaim,
   CLAIM_TYPES,
   TimeoutError,
+  ConfigError,
+  RpcError,
 };
 export default StellarCred;
+
+// Framework-agnostic core — for use outside React (Vue, Svelte, vanilla).
+export { createClaimGate } from "./core";
+export type { ClaimGateConfig, ClaimGateState, ClaimGateListener, ClaimGate } from "./core";
+
+// React hook — React wrapper around the batched `hasClaims` read. It is an
+// independent implementation from `createClaimGate` (which performs per-claim
+// `hasClaim` reads), so keep the two behaviourally in sync.
+export { useStellarCred } from "./react";
