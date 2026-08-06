@@ -126,7 +126,7 @@ function warnIfMissingRegistryIdOnce(): void {
   _warnedMissingRegistryId = true;
   // eslint-disable-next-line no-console
   console.warn(
-    "[StellarCred] hasClaim()/getClaims() called with no `registryId` configured. " +
+    "[StellarCred] hasClaim()/getClaim()/getClaims() called with no `registryId` configured. " +
       "Every check will silently return false/[] until you set STELLARCRED_REGISTRY_ID " +
       "(or NEXT_PUBLIC_PROOF_REGISTRY_ID) or call StellarCred.configure({ registryId }). " +
       "Call StellarCred.healthCheck() to diagnose. This warning only logs in development.",
@@ -415,6 +415,39 @@ export async function hasClaim(
   }
   const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers, throwOnError);
   return !!r && r.valid;
+}
+
+/**
+ * Returns the full claim record (valid, verifiedAt, expiry) for a wallet and
+ * credential type, or `null` if the wallet has no current proof of that type.
+ *
+ * Unlike {@link hasClaim} which only returns a boolean, this gives UIs the
+ * verified-at timestamp and expiry so they can show claim freshness without
+ * pulling every claim type via {@link getClaims}.
+ *
+ * Respects `trustedIssuers` — only proofs from the given issuers are accepted.
+ *
+ * @example
+ * const claim = await getClaim("G1ABC…", "kyc");
+ * if (claim) {
+ *   console.log(`Verified at: ${new Date(claim.verifiedAt * 1000)}`);
+ *   console.log(`Expires: ${new Date(claim.expiry * 1000)}`);
+ * }
+ *
+ * @example
+ * // Only accept KYC from a trusted issuer
+ * const claim = await getClaim("G1ABC…", "kyc", {
+ *   trustedIssuers: ["G...PERSONA_ISSUER"],
+ * });
+ */
+export async function getClaim(
+  wallet: string,
+  claimType: string,
+  opts?: Pick<ClaimOptions, "trustedIssuers">,
+): Promise<{ valid: boolean; verifiedAt: number; expiry: number } | null> {
+  warnIfMissingRegistryIdOnce();
+  const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers);
+  return r && r.valid ? r : null;
 }
 
 /**
@@ -781,6 +814,7 @@ export const StellarCred = {
   healthCheck,
   isConfigured,
   hasClaim,
+  getClaim,
   hasClaims,
   getClaims,
   buildVerifyUrl,
