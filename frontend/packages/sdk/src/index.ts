@@ -43,6 +43,10 @@ let _config = {
     env("STELLARCRED_NETWORK_PASSPHRASE", "NEXT_PUBLIC_NETWORK_PASSPHRASE") ||
     "Test SDF Network ; September 2015",
   baseUrl: env("STELLARCRED_BASE_URL", "NEXT_PUBLIC_STELLARCRED_BASE_URL") || "https://stellarcred.xyz",
+  retries: 3,
+  baseDelayMs: 500,
+  maxDelayMs: 5000,
+  jitter: true,
 };
 
 /**
@@ -55,6 +59,10 @@ export function configure(opts: {
   rpcUrl?: string;
   networkPassphrase?: string;
   baseUrl?: string;
+  retries?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  jitter?: boolean;
 }): void {
   _config = { ..._config, ...opts };
   // The cached client is bound to the old config — drop it so the next read
@@ -299,6 +307,42 @@ async function fanOut<T, R>(
   return Promise.all(items.map(fn));
 }
 
+function isRetryable(error: any): boolean {
+  if (error && typeof error.message === "string") {
+    const msg = error.message.toLowerCase();
+    // Non-retryable errors (e.g., bad args, 400 Bad Request, parsing errors)
+    if (
+      msg.includes("invalid argument") ||
+      msg.includes("bad request") ||
+      msg.includes("not found") ||
+      msg.includes("parse error")
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const { retries, baseDelayMs, maxDelayMs, jitter } = _config;
+  let attempt = 0;
+  while (true) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      if (attempt >= retries || !isRetryable(error)) {
+        throw error;
+      }
+      attempt++;
+      let delay = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs);
+      if (jitter) {
+        delay = delay / 2 + Math.random() * (delay / 2);
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 async function readIsVerified(
   wallet: string,
   claimType: string,
@@ -309,11 +353,11 @@ async function readIsVerified(
   if (!client) return null;
 
   try {
-    const { result } = await client.is_verified({
+    const { result } = await withRetry(() => client.is_verified({
       holder: wallet,
       credential_type: claimType,
       trusted_issuers: trustedIssuers,
-    });
+    }));
     if (!result) return null;
     const [valid, verifiedAt, expiry] = result;
     return { valid, verifiedAt: Number(verifiedAt), expiry: Number(expiry) };
@@ -336,12 +380,12 @@ async function readCheckClaim(
   if (!client) return false;
 
   try {
-    const { result } = await client.check_claim({
+    const { result } = await withRetry(() => client.check_claim({
       holder: wallet,
       credential_type: claimType,
       min_threshold: BigInt(minThreshold),
       trusted_issuers: trustedIssuers,
-    });
+    }));
     return result ?? false;
   } catch (err) {
     if (throwOnError) {
