@@ -56,6 +56,24 @@ pub struct EventProofRevoked {
     pub revoked_at: u64,
 }
 
+/// Payload emitted when submissions are paused by admin.
+/// Topics: ("proof_reg", "paused")
+#[contracttype]
+#[derive(Clone)]
+pub struct EventPaused {
+    pub admin: Address,
+    pub paused_at: u64,
+}
+
+/// Payload emitted when submissions are unpaused by admin.
+/// Topics: ("proof_reg", "unpaused")
+#[contracttype]
+#[derive(Clone)]
+pub struct EventUnpaused {
+    pub admin: Address,
+    pub unpaused_at: u64,
+}
+
 // Persistent-entry lifetime management (~5s ledgers).
 const DAY_IN_LEDGERS: u32 = 17280;
 const PROOF_BUMP_THRESHOLD: u32 = DAY_IN_LEDGERS;
@@ -160,6 +178,7 @@ pub enum DataKey {
     Admin,
     Verifier,
     IssuerRegistry,
+    Paused,
     /// Cached verification, keyed by (holder, credential_type).
     Proof(Address, Symbol),
 }
@@ -186,6 +205,8 @@ pub enum Error {
     /// The aggregate proof's num_credentials field doesn't match the expected
     /// count or the inner public inputs are too short.
     AggregateLayoutInvalid = 10,
+    /// New submissions are temporarily halted by admin.
+    SubmissionsPaused = 11,
 }
 
 #[contract]
@@ -208,6 +229,7 @@ impl ProofRegistry {
         env.storage()
             .instance()
             .set(&DataKey::IssuerRegistry, &issuer_registry);
+        env.storage().instance().set(&DataKey::Paused, &false);
     }
 
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
@@ -237,6 +259,42 @@ impl ProofRegistry {
             .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized))
     }
 
+    #[allow(deprecated)]
+    pub fn pause(env: Env) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events().publish(
+            (symbol_short!("proof_reg"), symbol_short!("paused")),
+            EventPaused {
+                admin,
+                paused_at: env.ledger().timestamp(),
+            },
+        );
+    }
+
+    #[allow(deprecated)]
+    pub fn unpause(env: Env) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events().publish(
+            (symbol_short!("proof_reg"), symbol_short!("unpaused")),
+            EventUnpaused {
+                admin,
+                unpaused_at: env.ledger().timestamp(),
+            },
+        );
+    }
+
     /// Verify a proof and, if valid, cache it for `holder` until `expiry`
     /// (ledger timestamp, seconds). The holder authorizes their own submission.
     /// `issuer_id` must be registered and trusted for `credential_type`.
@@ -251,6 +309,7 @@ impl ProofRegistry {
         expiry: u64,
     ) {
         holder.require_auth();
+        Self::ensure_not_paused(&env);
 
         // 1. The named issuer must be trusted for this credential type.
         let registry = IssuerClient::new(&env, &Self::issuer_registry(&env));
@@ -312,6 +371,7 @@ impl ProofRegistry {
     #[allow(deprecated)]
     pub fn submit_proofs(env: Env, holder: Address, submissions: Vec<ProofSubmission>) -> Vec<bool> {
         holder.require_auth();
+        Self::ensure_not_paused(&env);
 
         let len = submissions.len();
         if len == 0 {
@@ -416,6 +476,7 @@ impl ProofRegistry {
         expiry: u64,
     ) {
         holder.require_auth();
+        Self::ensure_not_paused(&env);
 
         // 1. Verify the outer aggregate proof against the aggregate VK.
         let verifier = VerifierClient::new(&env, &Self::verifier(&env));
@@ -848,8 +909,17 @@ impl ProofRegistry {
             .get(&DataKey::Verifier)
             .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
     }
+
+    fn is_paused(env: &Env) -> bool {
+        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+    }
+
+    fn ensure_not_paused(env: &Env) {
+        if Self::is_paused(env) {
+            panic_with_error!(env, Error::SubmissionsPaused);
+        }
+    }
 }
 
 mod test;
-
 
