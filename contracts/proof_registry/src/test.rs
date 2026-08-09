@@ -100,7 +100,7 @@ fn deploy(env: &Env) -> Harness {
 
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(env, &v_id)
-        .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, VK));
+        .set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(env, VK));
 
     let pr_id = env.register(ProofRegistry, (admin.clone(), v_id, ir_id));
     Harness {
@@ -118,6 +118,7 @@ fn submit(env: &Env, h: &Harness, holder: &Address, expiry: u64) {
         &symbol_short!("kyc"),
         &Bytes::from_slice(env, PROOF),
         &Bytes::from_slice(env, PUBLIC_INPUTS),
+        &None,
         &expiry,
     );
 }
@@ -169,7 +170,7 @@ fn rejects_wrong_issuer_key() {
     );
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
+        .set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, VK));
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
 
@@ -180,6 +181,7 @@ fn rejects_wrong_issuer_key() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, PROOF),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &1000,
     );
     assert!(res.is_err());
@@ -200,6 +202,7 @@ fn rejects_untrusted_issuer() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, PROOF),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &1000,
     );
     assert!(res.is_err());
@@ -221,6 +224,7 @@ fn rejects_invalid_proof() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, &bad),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &1000,
     );
     assert!(res.is_err());
@@ -377,6 +381,7 @@ fn pause_blocks_submit_reads_still_work_and_unpause_restores() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, PROOF),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &2000,
     );
     assert!(res.is_err());
@@ -404,6 +409,7 @@ fn pause_blocks_submit_reads_still_work_and_unpause_restores() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, PROOF),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &2000,
     );
     let (valid, _at, expiry) = h.registry.is_verified(&holder, &symbol_short!("kyc"), &None);
@@ -437,6 +443,7 @@ fn pause_blocks_batch_and_aggregate_submissions() {
             public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS),
             issuer_id: h.kyc_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
         ProofSubmission {
             credential_type: symbol_short!("funds"),
@@ -444,6 +451,7 @@ fn pause_blocks_batch_and_aggregate_submissions() {
             public_inputs: u8_slice_to_vec_u32(&env, FUNDS_PUBLIC_INPUTS),
             issuer_id: h.funds_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
     ];
 
@@ -468,6 +476,7 @@ fn pause_blocks_batch_and_aggregate_submissions() {
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id).set_vk(
         &symbol_short!("aggregate"),
+        &1u32,
         &Bytes::from_slice(&env, AGGREGATE_VK),
     );
 
@@ -629,7 +638,7 @@ fn check_claim_trusted_issuer_combines_with_threshold() {
     );
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+        .set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
@@ -641,6 +650,7 @@ fn check_claim_trusted_issuer_combines_with_threshold() {
         &symbol_short!("funds"),
         &Bytes::from_slice(&env, FUNDS_PROOF),
         &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &None,
         &9999,
     );
 
@@ -683,7 +693,7 @@ fn funds_threshold_stored_and_checked() {
     );
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+        .set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
@@ -694,6 +704,7 @@ fn funds_threshold_stored_and_checked() {
         &symbol_short!("funds"),
         &Bytes::from_slice(&env, FUNDS_PROOF),
         &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &None,
         &9999,
     );
 
@@ -722,7 +733,7 @@ fn age_threshold_stored_and_checked() {
     );
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, AGE_VK));
+        .set_vk(&symbol_short!("age"), &1u32, &Bytes::from_slice(&env, AGE_VK));
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
@@ -733,6 +744,7 @@ fn age_threshold_stored_and_checked() {
         &symbol_short!("age"),
         &Bytes::from_slice(&env, AGE_PROOF),
         &Bytes::from_slice(&env, AGE_PUBLIC_INPUTS),
+        &None,
         &9999,
     );
 
@@ -793,6 +805,7 @@ proptest! {
             threshold: Some(stored),
             revoked: false,
             issuer: None,
+            vk_version: 0,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
@@ -820,6 +833,7 @@ proptest! {
             threshold: Some(stored),
             revoked: false,
             issuer: None,
+            vk_version: 0,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
@@ -842,6 +856,7 @@ proptest! {
             threshold: stored,
             revoked: false,
             issuer: None,
+            vk_version: 0,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
@@ -873,6 +888,7 @@ proptest! {
             threshold: stored,
             revoked,
             issuer: None,
+            vk_version: 0,
         };
         set_proof_record(&env, &reg_id, &holder, &cred, &record);
 
@@ -899,6 +915,7 @@ fn check_claim_boundary_values_exhaustive() {
                 threshold: Some(req),
                 revoked: false,
                 issuer: None,
+                vk_version: 0,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
@@ -917,6 +934,7 @@ fn check_claim_boundary_values_exhaustive() {
                 threshold: Some(stored),
                 revoked: false,
                 issuer: None,
+                vk_version: 0,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
@@ -935,6 +953,7 @@ fn check_claim_boundary_values_exhaustive() {
                 threshold: Some(stored),
                 revoked: false,
                 issuer: None,
+                vk_version: 0,
             };
             set_proof_record(&env, &reg_id, &holder, &cred, &record);
             assert!(
@@ -957,6 +976,7 @@ fn check_claim_stored_none_with_required_threshold() {
         threshold: None, // e.g. KYC proof without numeric threshold
         revoked: false,
         issuer: None,
+        vk_version: 0,
     };
     set_proof_record(&env, &reg_id, &holder1, &cred, &record1);
 
@@ -976,6 +996,7 @@ fn kyc_submission(env: &Env, issuer: &Address, expiry: u64) -> ProofSubmission {
         public_inputs: u8_slice_to_vec_u32(env, PUBLIC_INPUTS),
         issuer_id: issuer.clone(),
         expiry,
+        vk_version: None,
     }
 }
 
@@ -1014,9 +1035,9 @@ fn deploy_multi(env: &Env) -> MultiHarness {
 
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     let vc = CredentialVerifierClient::new(env, &v_id);
-    vc.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(env, VK));
-    vc.set_vk(&symbol_short!("funds"), &Bytes::from_slice(env, FUNDS_VK));
-    vc.set_vk(&symbol_short!("age"), &Bytes::from_slice(env, AGE_VK));
+    vc.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(env, VK));
+    vc.set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(env, FUNDS_VK));
+    vc.set_vk(&symbol_short!("age"), &1u32, &Bytes::from_slice(env, AGE_VK));
 
     let pr_id = env.register(ProofRegistry, (admin.clone(), v_id, ir_id));
     MultiHarness {
@@ -1043,6 +1064,7 @@ fn batch_all_pass() {
             public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS),
             issuer_id: h.kyc_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
         ProofSubmission {
             credential_type: symbol_short!("funds"),
@@ -1050,6 +1072,7 @@ fn batch_all_pass() {
             public_inputs: u8_slice_to_vec_u32(&env, FUNDS_PUBLIC_INPUTS),
             issuer_id: h.funds_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
         ProofSubmission {
             credential_type: symbol_short!("age"),
@@ -1057,6 +1080,7 @@ fn batch_all_pass() {
             public_inputs: u8_slice_to_vec_u32(&env, AGE_PUBLIC_INPUTS),
             issuer_id: h.age_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
     ];
 
@@ -1086,6 +1110,7 @@ fn batch_one_fail_reverts_all() {
             public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS),
             issuer_id: h.kyc_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
         ProofSubmission {
             credential_type: symbol_short!("funds"),
@@ -1093,6 +1118,7 @@ fn batch_one_fail_reverts_all() {
             public_inputs: u8_slice_to_vec_u32(&env, FUNDS_PUBLIC_INPUTS),
             issuer_id: h.funds_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
     ];
 
@@ -1130,7 +1156,7 @@ fn batch_max_size_boundary_accepts_five() {
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     let vc = CredentialVerifierClient::new(&env, &v_id);
     for t in types.iter() {
-        vc.set_vk(t, &Bytes::from_slice(&env, VK));
+        vc.set_vk(t, &1u32, &Bytes::from_slice(&env, VK));
     }
 
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
@@ -1139,11 +1165,11 @@ fn batch_max_size_boundary_accepts_five() {
 
     let submissions = vec![
         &env,
-        ProofSubmission { credential_type: types[0].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
-        ProofSubmission { credential_type: types[1].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
-        ProofSubmission { credential_type: types[2].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
-        ProofSubmission { credential_type: types[3].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
-        ProofSubmission { credential_type: types[4].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999 },
+        ProofSubmission { credential_type: types[0].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999, vk_version: None },
+        ProofSubmission { credential_type: types[1].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999, vk_version: None },
+        ProofSubmission { credential_type: types[2].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999, vk_version: None },
+        ProofSubmission { credential_type: types[3].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999, vk_version: None },
+        ProofSubmission { credential_type: types[4].clone(), proof: Bytes::from_slice(&env, PROOF), public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS), issuer_id: issuer.clone(), expiry: 9999, vk_version: None },
     ];
 
     // Must not panic — 5 distinct types is within the allowed maximum.
@@ -1167,7 +1193,7 @@ fn batch_exceeds_max_size_is_rejected() {
     );
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
+        .set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, VK));
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
@@ -1244,9 +1270,9 @@ fn revoke_all_clears_submitted_proofs() {
 
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     let vc = CredentialVerifierClient::new(&env, &v_id);
-    vc.set_vk(&symbol_short!("kyc"), &Bytes::from_slice(&env, VK));
-    vc.set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
-    vc.set_vk(&symbol_short!("age"), &Bytes::from_slice(&env, AGE_VK));
+    vc.set_vk(&symbol_short!("kyc"), &1u32, &Bytes::from_slice(&env, VK));
+    vc.set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
+    vc.set_vk(&symbol_short!("age"), &1u32, &Bytes::from_slice(&env, AGE_VK));
 
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
@@ -1258,6 +1284,7 @@ fn revoke_all_clears_submitted_proofs() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, PROOF),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &9999,
     );
     registry.submit_proof(
@@ -1266,6 +1293,7 @@ fn revoke_all_clears_submitted_proofs() {
         &symbol_short!("funds"),
         &Bytes::from_slice(&env, FUNDS_PROOF),
         &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &None,
         &9999,
     );
     registry.submit_proof(
@@ -1274,6 +1302,7 @@ fn revoke_all_clears_submitted_proofs() {
         &symbol_short!("age"),
         &Bytes::from_slice(&env, AGE_PROOF),
         &Bytes::from_slice(&env, AGE_PUBLIC_INPUTS),
+        &None,
         &9999,
     );
 
@@ -1316,6 +1345,7 @@ fn aggregate_submits_real_proof_and_stores_claims() {
     let vc = CredentialVerifierClient::new(&env, &v_id);
     vc.set_vk(
         &symbol_short!("aggregate"),
+        &1u32,
         &Bytes::from_slice(&env, AGGREGATE_VK),
     );
 
@@ -1489,6 +1519,7 @@ fn prop_unregistered_issuer_always_rejected() {
                 &symbol_short!("kyc"),
                 &Bytes::from_slice(&env, PROOF),
                 &Bytes::from_slice(&env, PUBLIC_INPUTS),
+                &None,
                 &1000,
             );
 
@@ -1528,7 +1559,7 @@ fn prop_check_claim_monotonic_in_threshold() {
 
             let v_id = env.register(CredentialVerifier, (admin.clone(),));
             CredentialVerifierClient::new(&env, &v_id)
-                .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+                .set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
 
             let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
             let registry = ProofRegistryClient::new(&env, &pr_id);
@@ -1540,6 +1571,7 @@ fn prop_check_claim_monotonic_in_threshold() {
                 &symbol_short!("funds"),
                 &Bytes::from_slice(&env, FUNDS_PROOF),
                 &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+                &None,
                 &9999,
             );
 
@@ -1594,6 +1626,7 @@ fn prop_expired_claims_always_false() {
                 &symbol_short!("kyc"),
                 &Bytes::from_slice(&env, PROOF),
                 &Bytes::from_slice(&env, PUBLIC_INPUTS),
+                &None,
                 &expiry,
             );
 
@@ -1634,6 +1667,7 @@ fn prop_revoked_claims_always_false() {
                 &symbol_short!("kyc"),
                 &Bytes::from_slice(&env, PROOF),
                 &Bytes::from_slice(&env, PUBLIC_INPUTS),
+                &None,
                 &5000,
             );
 
@@ -1755,7 +1789,7 @@ fn get_record_populates_threshold_for_parameterised_credentials() {
     );
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+        .set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
@@ -1766,6 +1800,7 @@ fn get_record_populates_threshold_for_parameterised_credentials() {
         &symbol_short!("funds"),
         &Bytes::from_slice(&env, FUNDS_PROOF),
         &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &None,
         &5000,
     );
 
