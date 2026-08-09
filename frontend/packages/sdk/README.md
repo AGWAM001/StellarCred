@@ -91,6 +91,22 @@ const incomeOk = await StellarCred.hasClaim(wallet, "income", {
 });
 ```
 
+### `getClaim(wallet, claimType, opts?)`
+
+Returns the full claim record with `verifiedAt` and `expiry` timestamps, or `null` if the wallet has no current proof of that type. Respects `trustedIssuers`.
+
+```ts
+const claim = await StellarCred.getClaim(wallet, "kyc");
+if (claim) {
+  console.log(claim); // { valid: true, verifiedAt: 1719000000, expiry: 1726776000 }
+}
+
+// Restrict to a trusted issuer
+const trustedClaim = await StellarCred.getClaim(wallet, "kyc", {
+  trustedIssuers: ["G...PERSONA_ISSUER"],
+});
+```
+
 #### Typed errors (`throwOnError`)
 
 By default `hasClaim` / `getClaims` are **fail-soft**: a missing `registryId` or an RPC/simulation failure returns `false` / `[]`, which is indistinguishable from "not verified." Pass `{ throwOnError: true }` to surface a typed error instead:

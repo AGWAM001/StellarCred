@@ -17,7 +17,6 @@ import {
   IconCloudUpload,
   IconStack2,
   IconInfoCircle,
-  IconQrcode,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet } from "@/lib/wallet-context";
@@ -75,6 +74,34 @@ function daysRemaining(cred: Credential): number {
   return Math.max(0, Math.ceil(secsLeft / 86_400));
 }
 
+import { useProofTimeline, addTimelineEvent } from "@/lib/useProofTimeline";
+import { Timeline } from "@/components/Timeline";
+import { IconHistory } from "@tabler/icons-react";
+
+// ── Credential expiry helpers ─────────────────────────────────────────────────
+
+function credExpiryTimestamp(cred: Credential): number {
+  return cred.issuedAt + credTtlSecs(cred);
+}
+
+function credIsExpired(cred: Credential): boolean {
+  return credExpiryTimestamp(cred) <= Math.floor(Date.now() / 1000);
+}
+
+function credExpiryWithinDays(cred: Credential, days: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const ts = credExpiryTimestamp(cred);
+  return ts > now && ts <= now + days * 86_400;
+}
+
+function formatExpiryDate(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 // ── Credential card ──────────────────────────────────────────────────────────
 
 function CredCard({
@@ -83,7 +110,6 @@ function CredCard({
   onProve,
   onRemove,
   onInspect,
-  onTransfer,
   isPreview,
   selection,
 }: {
@@ -92,7 +118,6 @@ function CredCard({
   onProve: () => void;
   onRemove: () => void;
   onInspect: () => void;
-  onTransfer?: () => void;
   isPreview?: boolean;
   /** Batch selection controls — omitted on cards that can't be batched. */
   selection?: {
@@ -103,6 +128,8 @@ function CredCard({
   };
 }) {
   const status = proofStatus(c);
+  const { events } = useProofTimeline(c);
+  const [showHistory, setShowHistory] = useState(false);
 
   return (
     <div className="card" style={{ padding: "1rem 1.25rem" }}>
@@ -113,40 +140,43 @@ function CredCard({
             <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{c.title}</span>
             <span className="mono faint" style={{ fontSize: "0.7rem" }}>{c.claim}</span>
           </div>
-          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem", display: "flex", alignItems: "center", gap: "0.35rem" }}>
-            {c.issuer} · <span>{truncateHash(c.commitment)}</span>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={onInspect}
-              title="View details"
-              style={{ padding: "0.1rem 0.2rem", color: "var(--faint)", lineHeight: 0 }}
-            >
-              <IconInfoCircle size={12} />
-            </button>
-            {status === "proved" && (
-              <>
-                {" · "}
-                <span style={{ color: "var(--accent)", opacity: 0.75 }}>
-                  expires in {daysRemaining(c)}d
+          <div style={{ fontSize: "0.75rem", color: "var(--faint)", marginTop: "0.15rem" }}>
+            <div>
+              {c.issuer} · <span>{truncateHash(c.commitment)}</span>
+              {status === "proved" && (
+                <>
+                  {" · "}
+                  <span style={{ color: "var(--accent)", opacity: 0.75 }}>
+                    expires in {daysRemaining(c)}d
+                  </span>
+                  {c.provedTxHash && (
+                    <>
+                      {" · "}
+                      <a
+                        href={EXPLORER_TX(c.provedTxHash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: "0.15rem" }}
+                      >
+                        {c.provedTxHash.slice(0, 6)}…<IconExternalLink size={10} />
+                      </a>
+                    </>
+                  )}
+                </>
+              )}
+              {status === "expired" && (
+                <> · <span style={{ color: "var(--danger)", opacity: 0.8 }}>expired</span></>
+              )}
+            </div>
+            <div style={{ marginTop: "0.1rem" }}>
+              {credIsExpired(c) ? (
+                <span style={{ color: "var(--danger)", fontWeight: 500 }}>Expired</span>
+              ) : (
+                <span style={{ color: credExpiryWithinDays(c, 30) ? "var(--warn)" : "var(--faint)" }}>
+                  Expires {formatExpiryDate(credExpiryTimestamp(c))}
                 </span>
-                {c.provedTxHash && (
-                  <>
-                    {" · "}
-                    <a
-                      href={EXPLORER_TX(c.provedTxHash)}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: "inherit", display: "inline-flex", alignItems: "center", gap: "0.15rem" }}
-                    >
-                      {c.provedTxHash.slice(0, 6)}…<IconExternalLink size={10} />
-                    </a>
-                  </>
-                )}
-              </>
-            )}
-            {status === "expired" && (
-              <> · <span style={{ color: "var(--danger)", opacity: 0.8 }}>expired</span></>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
@@ -157,24 +187,22 @@ function CredCard({
           {status === "proved" && <Badge variant="verified" dot={false}>On-chain</Badge>}
           <button
             className={`btn btn-sm ${status === "proved" ? "btn-secondary" : "btn-primary"}`}
-            disabled={!address}
-            title={!address ? "Connect a wallet first" : undefined}
+            disabled={!address || credIsExpired(c)}
+            title={!address ? "Connect a wallet first" : credIsExpired(c) ? "This credential has expired" : undefined}
             onClick={onProve}
           >
             {status === "proved"  ? "Re-prove" :
              status === "expired" ? "Re-prove" :
                                     "Generate proof"}
           </button>
-          {onTransfer && (
-            <button
-              className="btn btn-ghost btn-sm"
-              title="Transfer to another device"
-              onClick={onTransfer}
-              style={{ padding: "0.3rem 0.4rem", color: "var(--faint)" }}
-            >
-              <IconQrcode size={13} />
-            </button>
-          )}
+          <button
+            className="btn btn-ghost btn-sm"
+            title="History"
+            onClick={() => setShowHistory(!showHistory)}
+            style={{ padding: "0.3rem 0.4rem", color: showHistory ? "var(--accent)" : "var(--faint)" }}
+          >
+            <IconHistory size={13} />
+          </button>
           <button
             className="btn btn-ghost btn-sm"
             title="Remove"
@@ -185,6 +213,10 @@ function CredCard({
           </button>
         </div>
       </div>
+      
+      {showHistory && (
+        <Timeline events={events} />
+      )}
     </div>
   );
 }
@@ -234,7 +266,6 @@ function HolderInner() {
   const [creds, setCreds] = useState<Credential[]>([]);
   const [view, setView] = useState<PageView>({ kind: "list" });
   const [importing, setImporting] = useState(false);
-  const [importPayload, setImportPayload] = useState<string | null>(null);
   const [detailCred, setDetailCred] = useState<Credential | null>(null);
 
   useEffect(() => setCreds(loadCredentials()), []);
@@ -246,7 +277,6 @@ function HolderInner() {
   useEffect(() => {
     const payload = searchParams.get(IMPORT_PARAM);
     if (!payload) return;
-    setImportPayload(payload);
     router.replace("/holder");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -416,7 +446,6 @@ function HolderInner() {
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
                   onInspect={() => setDetailCred(c)}
-                  onTransfer={() => {}}
                   isPreview={isPreview}
                   selection={
                     canBatch
@@ -497,7 +526,6 @@ function HolderInner() {
                   onProve={() => setView({ kind: "single", cred: c })}
                   onRemove={() => setCreds(removeCredential(c.commitment))}
                   onInspect={() => setDetailCred(c)}
-                  onTransfer={() => {}}
                   isPreview={isPreview}
                 />
               ))}
@@ -524,13 +552,6 @@ function HolderInner() {
                 <IconPlus size={14} />
                 Import credential JSON
               </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => setImporting(true)}
-              >
-                <IconQrcode size={14} />
-                Scan QR
-              </button>
             </div>
           )}
         </div>
@@ -538,10 +559,7 @@ function HolderInner() {
 
       {detailCred && (
         <CredentialDetailModal
-          credential={{
-            ...detailCred,
-            claimParams: detailCred.claimParams as Record<string, unknown> | undefined,
-          }}
+          credential={detailCred as any}
           onClose={() => setDetailCred(null)}
         />
       )}
@@ -708,14 +726,16 @@ function ProofFlow({
   const [error, setError] = useState<ContractError | null>(null);
   const [errorPhase, setErrorPhase] = useState<"proving" | "submitting" | null>(null);
   const [showRaw, setShowRaw] = useState(false);
-  // elapsed time for the proving stage
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toast = useToast();
   const { networkMismatch } = useWallet();
+  const { addEvent } = useProofTimeline(cred);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
+
     toast.info(`Generating proof for ${cred.title}…`);
     (async () => {
       try {
@@ -729,8 +749,9 @@ function ProofFlow({
         const witness = await computeWitness(
           cred.type,
           cred as unknown as Record<string, unknown>,
+          signal,
         );
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         // Stage 2: prove (browser WASM)
         setStage("proving");
@@ -743,29 +764,30 @@ function ProofFlow({
         const result = await proveWithBackend(
           cred.type,
           witness,
+          signal,
           (step) => {
-            if (!cancelled) setStage(step);
+            if (!signal.aborted) setStage(step);
           }
         );
         clearInterval(timerRef.current!);
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         setProof(result);
         setStage("generated");
+        addEvent("generated");
         toast.success(`Proof generated for ${cred.title}`);
       } catch (e) {
         clearInterval(timerRef.current!);
-        if (!cancelled) {
-          const parsed = parseContractError((e as Error).message);
-          setError(parsed);
-          setErrorPhase("proving");
-          setStage("error");
-          toast.error(`Proof generation failed: ${parsed.friendly}`);
-        }
+        if (signal.aborted) return;
+        const parsed = parseContractError((e as Error).message);
+        setError(parsed);
+        setErrorPhase("proving");
+        setStage("error");
+        toast.error(`Proof generation failed: ${parsed.friendly}`);
       }
     })();
     return () => {
-      cancelled = true;
+      controller.abort();
       clearInterval(timerRef.current!);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -774,6 +796,7 @@ function ProofFlow({
   async function onSubmit() {
     if (!proof || networkMismatch) return;
     setStage("submitting");
+    addEvent("submitted");
     toast.info(`Submitting proof for ${cred.title} to Stellar…`);
     try {
       const hash = await submitProof({
@@ -787,6 +810,7 @@ function ProofFlow({
       setTxHash(hash);
       onProved(hash);
       setStage("confirmed");
+      addEvent("verified", { txHash: hash });
       toast.success(`Proof confirmed on-chain for ${cred.title}`, { txHash: hash });
     } catch (e) {
       const parsed = parseContractError((e as Error).message);
@@ -1155,6 +1179,7 @@ function BatchProofFlow({
           next[i] = { status: "ready", proof: result };
           return next;
         });
+        addTimelineEvent(cred.commitment, "generated");
       }
     })();
 
@@ -1191,13 +1216,19 @@ function BatchProofFlow({
       };
     });
 
+    currentCreds.forEach(cred => addTimelineEvent(cred.commitment, "submitted"));
+
     toast.info(`Submitting ${currentCreds.length} proofs to Stellar…`);
     submitProofs({ holder: currentHolder, submissions })
       .then((hash: string) => {
         setTxHash(hash);
+        const commitments = currentCreds.map((c) => c.commitment);
+        onProved(hash, commitments);
         setBatchStage("confirmed");
-        onProved(hash, currentCreds.map((c) => c.commitment));
-        toast.success(`All ${currentCreds.length} proofs confirmed on-chain`, { txHash: hash });
+
+        currentCreds.forEach(cred => addTimelineEvent(cred.commitment, "verified", { txHash: hash }));
+
+        toast.success(`Confirmed ${creds.length} proofs on-chain`, { txHash: hash });
       })
       .catch((e: any) => {
         const parsed = parseContractError((e as Error).message);

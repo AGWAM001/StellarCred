@@ -43,6 +43,10 @@ let _config = {
     env("STELLARCRED_NETWORK_PASSPHRASE", "NEXT_PUBLIC_NETWORK_PASSPHRASE") ||
     "Test SDF Network ; September 2015",
   baseUrl: env("STELLARCRED_BASE_URL", "NEXT_PUBLIC_STELLARCRED_BASE_URL") || "https://stellarcred.xyz",
+  retries: 3,
+  baseDelayMs: 500,
+  maxDelayMs: 5000,
+  jitter: true,
 };
 
 /**
@@ -55,6 +59,10 @@ export function configure(opts: {
   rpcUrl?: string;
   networkPassphrase?: string;
   baseUrl?: string;
+  retries?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  jitter?: boolean;
 }): void {
   _config = { ..._config, ...opts };
   // The cached client is bound to the old config — drop it so the next read
@@ -126,7 +134,7 @@ function warnIfMissingRegistryIdOnce(): void {
   _warnedMissingRegistryId = true;
   // eslint-disable-next-line no-console
   console.warn(
-    "[StellarCred] hasClaim()/getClaims() called with no `registryId` configured. " +
+    "[StellarCred] hasClaim()/getClaim()/getClaims() called with no `registryId` configured. " +
       "Every check will silently return false/[] until you set STELLARCRED_REGISTRY_ID " +
       "(or NEXT_PUBLIC_PROOF_REGISTRY_ID) or call StellarCred.configure({ registryId }). " +
       "Call StellarCred.healthCheck() to diagnose. This warning only logs in development.",
@@ -299,6 +307,42 @@ async function fanOut<T, R>(
   return Promise.all(items.map(fn));
 }
 
+function isRetryable(error: any): boolean {
+  if (error && typeof error.message === "string") {
+    const msg = error.message.toLowerCase();
+    // Non-retryable errors (e.g., bad args, 400 Bad Request, parsing errors)
+    if (
+      msg.includes("invalid argument") ||
+      msg.includes("bad request") ||
+      msg.includes("not found") ||
+      msg.includes("parse error")
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const { retries, baseDelayMs, maxDelayMs, jitter } = _config;
+  let attempt = 0;
+  while (true) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      if (attempt >= retries || !isRetryable(error)) {
+        throw error;
+      }
+      attempt++;
+      let delay = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs);
+      if (jitter) {
+        delay = delay / 2 + Math.random() * (delay / 2);
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 async function readIsVerified(
   wallet: string,
   claimType: string,
@@ -309,11 +353,11 @@ async function readIsVerified(
   if (!client) return null;
 
   try {
-    const { result } = await client.is_verified({
+    const { result } = await withRetry(() => client.is_verified({
       holder: wallet,
       credential_type: claimType,
       trusted_issuers: trustedIssuers,
-    });
+    }));
     if (!result) return null;
     const [valid, verifiedAt, expiry] = result;
     return { valid, verifiedAt: Number(verifiedAt), expiry: Number(expiry) };
@@ -336,12 +380,12 @@ async function readCheckClaim(
   if (!client) return false;
 
   try {
-    const { result } = await client.check_claim({
+    const { result } = await withRetry(() => client.check_claim({
       holder: wallet,
       credential_type: claimType,
       min_threshold: BigInt(minThreshold),
       trusted_issuers: trustedIssuers,
-    });
+    }));
     return result ?? false;
   } catch (err) {
     if (throwOnError) {
@@ -415,6 +459,39 @@ export async function hasClaim(
   }
   const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers, throwOnError);
   return !!r && r.valid;
+}
+
+/**
+ * Returns the full claim record (valid, verifiedAt, expiry) for a wallet and
+ * credential type, or `null` if the wallet has no current proof of that type.
+ *
+ * Unlike {@link hasClaim} which only returns a boolean, this gives UIs the
+ * verified-at timestamp and expiry so they can show claim freshness without
+ * pulling every claim type via {@link getClaims}.
+ *
+ * Respects `trustedIssuers` — only proofs from the given issuers are accepted.
+ *
+ * @example
+ * const claim = await getClaim("G1ABC…", "kyc");
+ * if (claim) {
+ *   console.log(`Verified at: ${new Date(claim.verifiedAt * 1000)}`);
+ *   console.log(`Expires: ${new Date(claim.expiry * 1000)}`);
+ * }
+ *
+ * @example
+ * // Only accept KYC from a trusted issuer
+ * const claim = await getClaim("G1ABC…", "kyc", {
+ *   trustedIssuers: ["G...PERSONA_ISSUER"],
+ * });
+ */
+export async function getClaim(
+  wallet: string,
+  claimType: string,
+  opts?: Pick<ClaimOptions, "trustedIssuers">,
+): Promise<{ valid: boolean; verifiedAt: number; expiry: number } | null> {
+  warnIfMissingRegistryIdOnce();
+  const r = await readIsVerified(wallet, claimType, opts?.trustedIssuers);
+  return r && r.valid ? r : null;
 }
 
 /**
@@ -550,8 +627,10 @@ export function buildVerifyUrl(options: {
     threshold_years?: string;
     /** For "income" / "funds" claims: minimum value in whole units (default varies). */
     threshold?: string;
-    /** For "jurisdiction" claims: ISO 3166-1 numeric codes to block (default []). */
+    /** For "jurisdiction" claims: ISO 3166-1 numeric codes (default []). */
     restricted?: string | string[];
+    /** For "jurisdiction" claims: "block" = denylist (default), "allow" = allowlist. */
+    mode?: "allow" | "block";
   };
   /**
    * Opaque CSRF-style correlation token (e.g. a per-session nonce). Embedded
@@ -582,11 +661,14 @@ export function buildVerifyUrl(options: {
   url.searchParams.set("return_url", returnUrl);
   url.searchParams.set("claim", options.claim);
   if (options.claimParams) {
-    const { threshold_years, threshold, restricted } = options.claimParams;
+    const { threshold_years, threshold, restricted, mode } = options.claimParams;
     if (threshold_years) url.searchParams.set("threshold_years", threshold_years);
     if (threshold) url.searchParams.set("threshold", threshold);
     if (restricted) {
       url.searchParams.set("restricted", Array.isArray(restricted) ? restricted.join(",") : restricted);
+    }
+    if (mode) {
+      url.searchParams.set("mode", mode === "allow" ? "1" : "0");
     }
   }
   return url.toString();
@@ -776,6 +858,7 @@ export const StellarCred = {
   healthCheck,
   isConfigured,
   hasClaim,
+  getClaim,
   hasClaims,
   getClaims,
   buildVerifyUrl,
