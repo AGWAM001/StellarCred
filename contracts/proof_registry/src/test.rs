@@ -381,6 +381,7 @@ fn pause_blocks_submit_reads_still_work_and_unpause_restores() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, PROOF),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &2000,
     );
     assert!(res.is_err());
@@ -408,6 +409,7 @@ fn pause_blocks_submit_reads_still_work_and_unpause_restores() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, PROOF),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
         &2000,
     );
     let (valid, _at, expiry) = h.registry.is_verified(&holder, &symbol_short!("kyc"), &None);
@@ -441,6 +443,7 @@ fn pause_blocks_batch_and_aggregate_submissions() {
             public_inputs: u8_slice_to_vec_u32(&env, PUBLIC_INPUTS),
             issuer_id: h.kyc_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
         ProofSubmission {
             credential_type: symbol_short!("funds"),
@@ -448,6 +451,7 @@ fn pause_blocks_batch_and_aggregate_submissions() {
             public_inputs: u8_slice_to_vec_u32(&env, FUNDS_PUBLIC_INPUTS),
             issuer_id: h.funds_issuer.clone(),
             expiry: 9999,
+            vk_version: None,
         },
     ];
 
@@ -472,6 +476,7 @@ fn pause_blocks_batch_and_aggregate_submissions() {
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id).set_vk(
         &symbol_short!("aggregate"),
+        &1u32,
         &Bytes::from_slice(&env, AGGREGATE_VK),
     );
 
@@ -1784,7 +1789,7 @@ fn get_record_populates_threshold_for_parameterised_credentials() {
     );
     let v_id = env.register(CredentialVerifier, (admin.clone(),));
     CredentialVerifierClient::new(&env, &v_id)
-        .set_vk(&symbol_short!("funds"), &Bytes::from_slice(&env, FUNDS_VK));
+        .set_vk(&symbol_short!("funds"), &1u32, &Bytes::from_slice(&env, FUNDS_VK));
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     let registry = ProofRegistryClient::new(&env, &pr_id);
     let holder = Address::generate(&env);
@@ -1795,6 +1800,7 @@ fn get_record_populates_threshold_for_parameterised_credentials() {
         &symbol_short!("funds"),
         &Bytes::from_slice(&env, FUNDS_PROOF),
         &Bytes::from_slice(&env, FUNDS_PUBLIC_INPUTS),
+        &None,
         &5000,
     );
 

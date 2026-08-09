@@ -119,6 +119,7 @@ fn verifies_jurisdiction_allowlist() {
     let vk = fixture!("jurisdiction_allow", "vk");
     c.set_vk(
         &Symbol::new(&env, "jurisdiction"),
+        &1u32,
         &Bytes::from_slice(&env, vk),
     );
 
@@ -128,6 +129,7 @@ fn verifies_jurisdiction_allowlist() {
         &Symbol::new(&env, "jurisdiction"),
         &bad_proof,
         &bad_inputs,
+        &None,
     ));
 }
 
