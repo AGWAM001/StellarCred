@@ -78,6 +78,30 @@ import { useProofTimeline, addTimelineEvent } from "@/lib/useProofTimeline";
 import { Timeline } from "@/components/Timeline";
 import { IconHistory } from "@tabler/icons-react";
 
+// ── Credential expiry helpers ─────────────────────────────────────────────────
+
+function credExpiryTimestamp(cred: Credential): number {
+  return cred.issuedAt + credTtlSecs(cred);
+}
+
+function credIsExpired(cred: Credential): boolean {
+  return credExpiryTimestamp(cred) <= Math.floor(Date.now() / 1000);
+}
+
+function credExpiryWithinDays(cred: Credential, days: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const ts = credExpiryTimestamp(cred);
+  return ts > now && ts <= now + days * 86_400;
+}
+
+function formatExpiryDate(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 // ── Credential card ──────────────────────────────────────────────────────────
 
 function CredCard({
@@ -696,6 +720,7 @@ function ProofFlow({
   onBack: () => void;
   onProved: (txHash: string) => void;
 }) {
+  const { networkMismatch } = useWallet();
   const [stage, setStage] = useState<Stage>("witness");
   const [proof, setProof] = useState<{ proof: Uint8Array; publicInputs: Uint8Array } | null>(null);
   const [txHash, setTxHash] = useState("");
