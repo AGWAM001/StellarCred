@@ -7,7 +7,10 @@ use credential_verifier::{CredentialVerifier, CredentialVerifierClient};
 use issuer_registry::{IssuerRegistry, IssuerRegistryClient};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
+    testutils::{
+        storage::Persistent as _, Address as _, Events as _, Ledger as _, MockAuth,
+        MockAuthInvoke,
+    },
     vec, Address, BytesN, Bytes, Env, IntoVal,
 };
 use proptest::prelude::*;
@@ -139,6 +142,37 @@ fn submit_then_verified() {
     let (valid, _at, expiry) = h.registry.is_verified(&holder, &symbol_short!("kyc"), &None);
     assert!(valid);
     assert_eq!(expiry, 1000);
+}
+
+#[test]
+fn submit_sets_ttl_through_expiry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let expiry = 90 * 86_400 + 10;
+
+    submit(&env, &h, &holder, expiry);
+
+    let key = DataKey::Proof(holder, symbol_short!("kyc"));
+    let ttl = env.as_contract(&h.registry_id, || env.storage().persistent().get_ttl(&key));
+    assert!(ttl >= 90 * DAY_IN_LEDGERS);
+    assert!(ttl >= ((expiry + SECONDS_PER_LEDGER - 1) / SECONDS_PER_LEDGER) as u32);
+}
+
+#[test]
+fn anyone_can_bump_valid_claim() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    submit(&env, &h, &holder, 1_000_000);
+
+    h.registry.bump_claim(&holder, &symbol_short!("kyc"));
+
+    let key = DataKey::Proof(holder, symbol_short!("kyc"));
+    let ttl = env.as_contract(&h.registry_id, || env.storage().persistent().get_ttl(&key));
+    assert!(ttl >= PROOF_TTL);
 }
 
 #[test]

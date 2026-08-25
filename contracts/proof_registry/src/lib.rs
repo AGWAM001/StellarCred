@@ -74,8 +74,13 @@ pub struct EventUnpaused {
     pub unpaused_at: u64,
 }
 
-// Persistent-entry lifetime management (~5s ledgers).
+// Persistent-entry lifetime management (~5s ledgers). Persistent storage rent
+// is charged for the requested lifetime; entries whose TTL reaches zero are
+// archived and no longer readable. Claims therefore keep a 90-day minimum,
+// extend through credential expiry when possible, and remain bounded by the
+// network's maximum entry TTL.
 const DAY_IN_LEDGERS: u32 = 17280;
+const SECONDS_PER_LEDGER: u64 = 5;
 const PROOF_BUMP_THRESHOLD: u32 = DAY_IN_LEDGERS;
 const PROOF_TTL: u32 = 90 * DAY_IN_LEDGERS;
 
@@ -352,9 +357,7 @@ impl ProofRegistry {
             vk_version: vk_version.unwrap_or(0),
         };
         env.storage().persistent().set(&key, &record);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+        Self::bump_ttl(&env, &key, expiry);
 
         // Emit: topics = ("proof_reg", "submitted", credential_type)
         //       data   = EventProofSubmitted { holder, issuer, verified_at, expiry }
@@ -445,9 +448,7 @@ impl ProofRegistry {
                 vk_version: effective_version,
             };
             env.storage().persistent().set(&key, &record);
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+            Self::bump_ttl(&env, &key, sub.expiry);
 
             // Emit one event per credential.
             // Topics: ("proof_reg", "submitted", credential_type)
@@ -654,12 +655,26 @@ impl ProofRegistry {
     pub fn claim_expiry(env: Env, holder: Address, credential_type: Symbol) -> u64 {
         let key = DataKey::Proof(holder, credential_type);
         let record = env.storage().persistent().get::<_, ProofRecord>(&key);
-        if record.is_some() {
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+        if let Some(ref record) = record {
+            Self::bump_ttl(&env, &key, record.expiry);
         }
         record.map(|r| r.expiry).unwrap_or(0)
+    }
+
+    /// Extend a still-valid claim's persistent storage entry. Anyone may pay
+    /// the storage rent for this operation, but expired or revoked claims are
+    /// intentionally not renewed because they must not become durable state.
+    pub fn bump_claim(env: Env, holder: Address, credential_type: Symbol) {
+        let key = DataKey::Proof(holder, credential_type);
+        let record: ProofRecord = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::ProofNotFound));
+        if record.revoked || record.expiry <= env.ledger().timestamp() {
+            panic_with_error!(&env, Error::ProofNotFound);
+        }
+        Self::bump_ttl(&env, &key, record.expiry);
     }
 
     /// `None` trusts any registered issuer (unchanged default behaviour). `Some`
@@ -800,9 +815,7 @@ impl ProofRegistry {
                 vk_version: 0,
             };
             env.storage().persistent().set(&key, &record);
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+            Self::bump_ttl(&env, &key, record.expiry);
         }
         // If raw_map.len() == 6, the record is already current — idempotent no-op.
     }
@@ -887,9 +900,21 @@ impl ProofRegistry {
             vk_version: 0,
         };
         env.storage().persistent().set(&key, &record);
+        Self::bump_ttl(env, &key, expiry);
+    }
+
+    fn bump_ttl(env: &Env, key: &DataKey, expiry: u64) {
+        let now = env.ledger().timestamp();
+        let seconds_until_expiry = expiry.saturating_sub(now);
+        let expiry_ttl = seconds_until_expiry
+            .saturating_add(SECONDS_PER_LEDGER - 1)
+            .checked_div(SECONDS_PER_LEDGER)
+            .unwrap_or(u64::MAX);
+        let requested_ttl = u64::from(PROOF_TTL).max(expiry_ttl);
+        let ttl = requested_ttl.min(u64::from(u32::MAX)) as u32;
         env.storage()
             .persistent()
-            .extend_ttl(&key, PROOF_BUMP_THRESHOLD, PROOF_TTL);
+            .extend_ttl(key, PROOF_BUMP_THRESHOLD, ttl);
     }
 
     /// Returns the number of 32-byte field elements a credential type occupies
