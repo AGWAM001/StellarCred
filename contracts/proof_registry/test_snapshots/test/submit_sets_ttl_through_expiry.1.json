@@ -88,7 +88,7 @@
                 },
                 "void",
                 {
-                  "u64": "735"
+                  "u64": "7776010"
                 }
               ]
             }
@@ -97,13 +97,12 @@
         }
       ]
     ],
-    [],
     []
   ],
   "ledger": {
     "protocol_version": 26,
     "sequence_number": 0,
-    "timestamp": 736,
+    "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -379,7 +378,7 @@
                       "symbol": "expiry"
                     },
                     "val": {
-                      "u64": "735"
+                      "u64": "7776010"
                     }
                   },
                   {
@@ -426,7 +425,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 1555200
+        "live_until": 1555202
       },
       {
         "entry": {
