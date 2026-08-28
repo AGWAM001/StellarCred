@@ -124,7 +124,7 @@ jobs:
       - name: Compile circuits
         run: |
           export PATH="$HOME/.nargo/bin:$PATH"
-          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof; do
+          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof set_membership; do
             echo "=== $dir ==="
             (cd "$dir" && nargo compile)
           done
@@ -147,6 +147,7 @@ jobs:
               employment_proof) echo employment ;;
               accreditation_proof) echo accreditation ;;
               aggregate_proof) echo aggregate ;;
+              set_membership) echo set_membership ;;
               *) echo "$1" ;;
             esac
           }
@@ -155,7 +156,7 @@ jobs:
           VK_TMP="/tmp/vk_check"
           rm -rf "$VK_TMP"
 
-          for dir in kyc_proof age_proof income_proof jurisdiction_proof funds_proof employment_proof aggregate_proof; do
+          for dir in kyc_proof age_proof income_proof jurisdiction_proof funds_proof employment_proof aggregate_proof accreditation_proof set_membership; do
             type=$(type_of "$dir")
             json="target/${dir}.json"
             out="$VK_TMP/$type"
