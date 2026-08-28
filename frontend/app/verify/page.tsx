@@ -357,7 +357,7 @@ function VerifyInner() {
           // Never router.push an external URL — do a real browser navigation.
           window.location.href = dest.toString();
         }
-      } catch (e) {
+      } catch {
         setUrlError("Invalid return URL: Must be a well-formed URL.");
         router.push("/holder");
       }

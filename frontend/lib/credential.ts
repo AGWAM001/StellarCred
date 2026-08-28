@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { CredentialType } from "./stellar";
 import { isStorageAvailable } from "./safe-storage";
 
@@ -220,16 +220,11 @@ export function useCredentialSync(): Credential[] {
   }, []);
 
   // Debounced reload to avoid thrash on rapid writes
-  const debouncedReload = useCallback(
-    (() => {
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      return () => {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(reload, 100); // 100ms debounce
-      };
-    })(),
-    [reload],
-  );
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debouncedReload = useCallback(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(reload, 100); // 100ms debounce
+  }, [reload]);
 
   // Listen for storage events from other tabs
   useEffect(() => {

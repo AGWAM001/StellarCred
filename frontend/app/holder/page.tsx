@@ -13,11 +13,9 @@ import {
   IconTrash,
   IconCertificate,
   IconLoader2,
-  IconServer,
   IconCpu,
   IconCloudUpload,
   IconStack2,
-  IconInfoCircle,
   IconDownload,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
@@ -29,7 +27,7 @@ import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import { proofSubmissionConfigured } from "@/lib/config";
 import { truncateHash } from "@/lib/format";
 import { EXPLORER_TX } from "@/lib/stellar";
-import { computeWitness, proveWithBackend } from "@/lib/proof";
+import { computeWitness, proveWithBackend, withTimeout, ProofTimeoutError, DEFAULT_PROOF_TIMEOUT_MS } from "@/lib/proof";
 import { useWarmProver } from "@/lib/use-warm-prover";
 import {
   submitProof,
@@ -56,7 +54,7 @@ import CopyButton from "@/components/CopyButton";
 import dynamic from "next/dynamic";
 import CredentialDetailModal from "@/components/CredentialDetailModal";
 import { useToast } from "@/components/Toast";
-import { QrScanner } from "@/components/QrScanner";
+
 import { IMPORT_PARAM } from "@/lib/transfer";
 
 // The encrypted-transfer modals are heavy (crypto.ts PBKDF2/AES-GCM, QR
@@ -144,9 +142,9 @@ function CredCard({
   address,
   onProve,
   onRemove,
-  onInspect,
+  onInspect: _onInspect,
   isPreview,
-  selection,
+  selection: _selection,
 }: {
   c: Credential;
   address: string;
@@ -510,7 +508,7 @@ function HolderInner() {
                 className="faint"
                 style={{ fontSize: "0.75rem", maxWidth: 380, margin: "1.25rem auto 0", lineHeight: 1.6 }}
               >
-                Credentials are stored only in this browser's local storage — clearing
+                Credentials are stored only in this browser&apos;s local storage — clearing
                 site data, switching browsers/devices, or private mode erases them.{" "}
                 <Link
                   href="/docs#storage"
@@ -860,7 +858,7 @@ function ProofFlow({
   const [proof, setProof] = useState<{ proof: Uint8Array; publicInputs: Uint8Array } | null>(null);
   const [txHash, setTxHash] = useState("");
   const [error, setError] = useState<ContractError | null>(null);
-  const [errorPhase, setErrorPhase] = useState<"proving" | "submitting" | null>(null);
+  const [errorPhase, setErrorPhase] = useState<"proving" | "submitting" | "timeout" | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -879,12 +877,17 @@ function ProofFlow({
           () => setElapsed(Math.floor((Date.now() - start) / 1000)),
           1000,
         );
-        // Stage 1: witness (server)
+        // Stage 1: witness (server) — wrapped with a deadline so a stalled
+        // prover fails visibly instead of spinning forever.
         setStage("witness");
-        const witness = await computeWitness(
-          cred.type,
-          cred as unknown as Record<string, unknown>,
-          signal,
+        const witness = await withTimeout(
+          (sig) =>
+            computeWitness(
+              cred.type,
+              cred as unknown as Record<string, unknown>,
+              sig,
+            ),
+          { signal, timeoutMs: DEFAULT_PROOF_TIMEOUT_MS },
         );
         if (signal.aborted) return;
 
@@ -896,15 +899,13 @@ function ProofFlow({
           1000,
         );
 
-        const result = await proveWithBackend(
-          cred.type,
-          witness,
-          signal,
-          (step) => {
-            if (!signal.aborted) setStage(step);
-          }
+        const result = await withTimeout(
+          (sig) =>
+            proveWithBackend(cred.type, witness, sig, (step) => {
+              if (!sig.aborted) setStage(step);
+            }),
+          { signal, timeoutMs: DEFAULT_PROOF_TIMEOUT_MS },
         );
-        clearInterval(timerRef.current!);
         if (signal.aborted) return;
 
         setProof(result);
@@ -912,13 +913,31 @@ function ProofFlow({
         addEvent("generated");
         toast.success(`Proof generated for ${cred.title}`);
       } catch (e) {
-        clearInterval(timerRef.current!);
         if (signal.aborted) return;
+        // ProofTimeoutError gets a distinct user-visible message — half the
+        // point is that stalled provers fail visibly, not as a generic error.
+        if (e instanceof ProofTimeoutError) {
+          setError({
+            code: null,
+            friendly:
+              "Proof generation timed out. The prover took too long — this can happen on slow devices or with large circuits. Please try again.",
+            raw: e.message,
+          });
+          setErrorPhase("timeout");
+          setStage("error");
+          toast.error("Proof timed out — please try again.");
+          return;
+        }
         const parsed = parseContractError((e as Error).message);
         setError(parsed);
         setErrorPhase("proving");
         setStage("error");
         toast.error(`Proof generation failed: ${parsed.friendly}`);
+      } finally {
+        // Always clean up: timer + abort controller. The finally-style
+        // pattern guarantees no early-return can leak a pending timeout
+        // or interval.
+        clearInterval(timerRef.current!);
       }
     })();
     return () => {
@@ -1119,11 +1138,13 @@ function ProofFlow({
           >
             <div className="row" style={{ gap: "0.5rem", color: "var(--danger)", fontWeight: 600, fontSize: "0.875rem" }}>
               <IconAlertTriangle size={15} />
-              {errorPhase === "proving"
-                ? "Proof generation failed"
-                : errorPhase === "submitting"
-                  ? "Submission failed — proof is ready to retry"
-                  : error.code !== null ? `Contract error #${error.code}` : "Could not complete"}
+              {errorPhase === "timeout"
+                ? "Proof timed out"
+                : errorPhase === "proving"
+                  ? "Proof generation failed"
+                  : errorPhase === "submitting"
+                    ? "Submission failed — proof is ready to retry"
+                    : error.code !== null ? `Contract error #${error.code}` : "Could not complete"}
             </div>
             {error.raw !== error.friendly && (
               <div style={{ marginTop: "0.6rem" }}>
