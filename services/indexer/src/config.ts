@@ -16,6 +16,12 @@ export interface Config {
   pollIntervalMs: number;
   startLedger: number;
   port: number;
+  /**
+   * Number of ledgers to lag behind the network head before persisting.
+   * This prevents near-head volatility (reorgs) from being indexed prematurely.
+   * Default: 6 (≈30 seconds at ~5 s/ledger on Stellar).
+   */
+  finalityLag: number;
   corsOrigins: string[];
   rateLimitWindowMs: number;
   rateLimitMax: number;
@@ -77,6 +83,7 @@ export function loadConfig(): Config {
       Number(optional("POLL_INTERVAL_SECONDS", "6")) * 1000,
     startLedger: Number(optional("START_LEDGER", "0")),
     port: Number(optional("PORT", "3001")),
+    finalityLag: Number(optional("FINALITY_LAG", "6")),
     corsOrigins: parseCorsOrigins(rawCors),
     rateLimitWindowMs: (Number.isFinite(windowSec) && windowSec > 0 ? windowSec : 60) * 1000,
     rateLimitMax: Number.isFinite(maxReq) && maxReq > 0 ? maxReq : 120,

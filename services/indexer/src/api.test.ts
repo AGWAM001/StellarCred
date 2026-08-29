@@ -54,6 +54,7 @@ function makeConfig(sqlitePath: string): Config {
     pollIntervalMs: 6000,
     startLedger: 0,
     port: 3001,
+    finalityLag: 6,
     corsOrigins: ["http://localhost:3000"],
     rateLimitWindowMs: 60000,
     rateLimitMax: 120,
