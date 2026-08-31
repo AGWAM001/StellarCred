@@ -61,7 +61,7 @@
                       "symbol": "revoked"
                     },
                     "val": {
-                      "bool": true
+                      "bool": false
                     }
                   },
                   {
@@ -69,7 +69,7 @@
                       "symbol": "threshold"
                     },
                     "val": {
-                      "u64": "5797082099088212724"
+                      "u64": "4453919557287092305"
                     }
                   },
                   {

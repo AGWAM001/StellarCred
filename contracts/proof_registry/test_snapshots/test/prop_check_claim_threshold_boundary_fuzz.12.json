@@ -68,9 +68,7 @@
                     "key": {
                       "symbol": "threshold"
                     },
-                    "val": {
-                      "u64": "1192388357385338101"
-                    }
+                    "val": "void"
                   },
                   {
                     "key": {

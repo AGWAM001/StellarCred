@@ -122,7 +122,13 @@ const AGG_FIELD_NUM_CREDENTIALS: u32 = 132;
 /// never the verifier's exported wasm symbols.
 #[contractclient(name = "VerifierClient")]
 pub trait VerifierInterface {
-    fn verify_proof(env: Env, credential_type: Symbol, proof: Bytes, public_inputs: Bytes, vk_version: Option<u32>) -> bool;
+    fn verify_proof(
+        env: Env,
+        credential_type: Symbol,
+        proof: Bytes,
+        public_inputs: Bytes,
+        vk_version: Option<u32>,
+    ) -> bool;
 }
 
 /// Typed client for the deployed IssuerRegistry contract.
@@ -396,13 +402,17 @@ impl ProofRegistry {
     /// One event is emitted per successfully verified credential.
     /// Topics: ("proof_reg", "submitted", credential_type)
     /// Data:   EventProofSubmitted { holder, issuer, verified_at, expiry }
-    // NOTE: We suppress the deprecation warning for `env.events().publish` here. 
-    // The idiomatic Soroban v26 replacement is to define a typed event struct using the 
-    // `#[contractevent]` macro; however, since the existing codebase uniformly uses the 
-    // value-based `publish` API, we maintain consistency with other modules to avoid 
+    // NOTE: We suppress the deprecation warning for `env.events().publish` here.
+    // The idiomatic Soroban v26 replacement is to define a typed event struct using the
+    // `#[contractevent]` macro; however, since the existing codebase uniformly uses the
+    // value-based `publish` API, we maintain consistency with other modules to avoid
     // introducing architectural mismatch.
     #[allow(deprecated)]
-    pub fn submit_proofs(env: Env, holder: Address, submissions: Vec<ProofSubmission>) -> Vec<bool> {
+    pub fn submit_proofs(
+        env: Env,
+        holder: Address,
+        submissions: Vec<ProofSubmission>,
+    ) -> Vec<bool> {
         holder.require_auth();
         Self::ensure_not_paused(&env);
 
@@ -460,7 +470,11 @@ impl ProofRegistry {
             let record = ProofRecord {
                 verified_at: now,
                 expiry: sub.expiry,
-                threshold: Self::extract_threshold(&env, &sub.credential_type, &public_inputs_bytes),
+                threshold: Self::extract_threshold(
+                    &env,
+                    &sub.credential_type,
+                    &public_inputs_bytes,
+                ),
                 revoked: false,
                 issuer: Some(sub.issuer_id.clone()),
                 vk_version: effective_version,
@@ -652,11 +666,7 @@ impl ProofRegistry {
 
     /// Returns the stored `ProofRecord` as-is (no validity computation), or `None`
     /// if absent. Pure read: does not extend TTL.
-    pub fn get_record(
-        env: Env,
-        holder: Address,
-        credential_type: Symbol,
-    ) -> Option<ProofRecord> {
+    pub fn get_record(env: Env, holder: Address, credential_type: Symbol) -> Option<ProofRecord> {
         env.storage()
             .persistent()
             .get::<_, ProofRecord>(&DataKey::Proof(holder, credential_type))
@@ -817,11 +827,7 @@ impl ProofRegistry {
 
         if raw_map.len() == 4 {
             // Legacy 4-field record — safe to deserialise as LegacyProofRecord.
-            let legacy: LegacyProofRecord = env
-                .storage()
-                .persistent()
-                .get(&key)
-                .unwrap();
+            let legacy: LegacyProofRecord = env.storage().persistent().get(&key).unwrap();
 
             let record = ProofRecord {
                 verified_at: legacy.verified_at,
@@ -848,7 +854,11 @@ impl ProofRegistry {
     }
 
     /// Extract the numeric threshold from the proof's public inputs.
-    fn extract_threshold(env: &Env, credential_type: &Symbol, public_inputs: &Bytes) -> Option<u64> {
+    fn extract_threshold(
+        env: &Env,
+        credential_type: &Symbol,
+        public_inputs: &Bytes,
+    ) -> Option<u64> {
         if *credential_type == symbol_short!("age") {
             Some(Self::read_u64_field(public_inputs, 66))
         } else if *credential_type == symbol_short!("income")
@@ -871,15 +881,15 @@ impl ProofRegistry {
         }
         u64::from_be_bytes(b)
     }
-      fn validate_expiry(env: &Env, expiry: u64) {
-      let now = env.ledger().timestamp();
-     if expiry <= now {
-        panic_with_error!(env, Error::InvalidExpiry);
+    fn validate_expiry(env: &Env, expiry: u64) {
+        let now = env.ledger().timestamp();
+        if expiry <= now {
+            panic_with_error!(env, Error::InvalidExpiry);
+        }
+        if expiry > now.saturating_add(MAX_CREDENTIAL_TTL_SECS) {
+            panic_with_error!(env, Error::InvalidExpiry);
+        }
     }
-      if expiry > now.saturating_add(MAX_CREDENTIAL_TTL_SECS) {
-        panic_with_error!(env, Error::InvalidExpiry);
-    }
-}
     /// True iff the secp256k1 public key embedded in `public_inputs` (fields
     /// 1..65, one byte per field in the low byte) equals `expected` (x || y).
     fn public_inputs_match_pubkey(public_inputs: &Bytes, expected: &BytesN<64>) -> bool {
@@ -994,7 +1004,10 @@ impl ProofRegistry {
     }
 
     fn is_paused(env: &Env) -> bool {
-        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     fn ensure_not_paused(env: &Env) {
@@ -1005,4 +1018,3 @@ impl ProofRegistry {
 }
 
 mod test;
-

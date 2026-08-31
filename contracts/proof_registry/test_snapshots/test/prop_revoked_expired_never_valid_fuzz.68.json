@@ -48,7 +48,7 @@
                       "symbol": "expiry"
                     },
                     "val": {
-                      "u64": "10000"
+                      "u64": "0"
                     }
                   },
                   {
@@ -64,7 +64,7 @@
                       "symbol": "revoked"
                     },
                     "val": {
-                      "bool": true
+                      "bool": false
                     }
                   },
                   {
@@ -72,7 +72,7 @@
                       "symbol": "threshold"
                     },
                     "val": {
-                      "u64": "419338"
+                      "u64": "124089"
                     }
                   },
                   {

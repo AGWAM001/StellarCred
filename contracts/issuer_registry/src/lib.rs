@@ -146,11 +146,7 @@ impl IssuerRegistry {
                 .extend_ttl(&list_key, BUMP_THRESHOLD, ENTRY_TTL);
             // Bump the count.
             let count_key = DataKey::IssuerCount;
-            let count: u32 = env
-                .storage()
-                .persistent()
-                .get(&count_key)
-                .unwrap_or(0u32);
+            let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0u32);
             env.storage().persistent().set(&count_key, &(count + 1));
             env.storage()
                 .persistent()
@@ -288,7 +284,11 @@ impl IssuerRegistry {
         logo: Option<String>,
     ) {
         Self::require_admin(&env);
-        if !env.storage().persistent().has(&DataKey::Issuer(issuer.clone())) {
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::Issuer(issuer.clone()))
+        {
             panic_with_error!(&env, Error::IssuerNotFound);
         }
         // Enforce per-field length caps to bound storage rent.

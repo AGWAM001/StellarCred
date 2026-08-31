@@ -48,7 +48,7 @@
                       "symbol": "expiry"
                     },
                     "val": {
-                      "u64": "10000"
+                      "u64": "0"
                     }
                   },
                   {
@@ -71,9 +71,7 @@
                     "key": {
                       "symbol": "threshold"
                     },
-                    "val": {
-                      "u64": "419337"
-                    }
+                    "val": "void"
                   },
                   {
                     "key": {

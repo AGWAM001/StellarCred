@@ -84,9 +84,8 @@ fn prop_revoked_issuer_never_valid() {
         ..proptest::test_runner::Config::default()
     };
     let mut runner = proptest::test_runner::TestRunner::new(config);
-    runner.run(
-        &(0u64..u64::MAX, 0u64..u64::MAX),
-        |(_seed_a, _seed_b)| {
+    runner
+        .run(&(0u64..u64::MAX, 0u64..u64::MAX), |(_seed_a, _seed_b)| {
             let env = Env::default();
             env.mock_all_auths();
             let (_admin, client) = setup(&env);
@@ -113,9 +112,8 @@ fn prop_revoked_issuer_never_valid() {
             prop_assert!(!kyc_valid, "Revoked issuer should not be valid for kyc");
             prop_assert!(!age_valid, "Revoked issuer should not be valid for age");
             Ok(())
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 }
 
 /// Property: An unregistered issuer is never valid.
@@ -128,26 +126,27 @@ fn prop_unregistered_issuer_never_valid() {
         ..proptest::test_runner::Config::default()
     };
     let mut runner = proptest::test_runner::TestRunner::new(config);
-    runner.run(&(0u64..u64::MAX), |_seed| {
-        let env = Env::default();
-        env.mock_all_auths();
-        let (_admin, client) = setup(&env);
+    runner
+        .run(&(0u64..u64::MAX), |_seed| {
+            let env = Env::default();
+            env.mock_all_auths();
+            let (_admin, client) = setup(&env);
 
-        // Address::generate creates a unique address not registered
-        // in the IssuerRegistry.
-        let unregistered = Address::generate(&env);
+            // Address::generate creates a unique address not registered
+            // in the IssuerRegistry.
+            let unregistered = Address::generate(&env);
 
-        prop_assert!(
-            !client.is_valid_issuer(&unregistered, &symbol_short!("kyc")),
-            "Unregistered issuer should never be valid"
-        );
-        prop_assert!(
-            !client.is_valid_issuer(&unregistered, &symbol_short!("age")),
-            "Unregistered issuer should never be valid for any type"
-        );
-        Ok(())
-    })
-    .unwrap();
+            prop_assert!(
+                !client.is_valid_issuer(&unregistered, &symbol_short!("kyc")),
+                "Unregistered issuer should never be valid"
+            );
+            prop_assert!(
+                !client.is_valid_issuer(&unregistered, &symbol_short!("age")),
+                "Unregistered issuer should never be valid for any type"
+            );
+            Ok(())
+        })
+        .unwrap();
 }
 
 #[test]
@@ -175,7 +174,10 @@ fn set_and_get_issuer_metadata() {
 
     let meta = client.get_issuer_metadata(&issuer).unwrap();
     assert_eq!(meta.name, Some(String::from_str(&env, "Test Issuer")));
-    assert_eq!(meta.url, Some(String::from_str(&env, "https://example.com")));
+    assert_eq!(
+        meta.url,
+        Some(String::from_str(&env, "https://example.com"))
+    );
     assert!(meta.logo.is_none());
 
     // Update to add logo and change name.
@@ -399,12 +401,7 @@ fn metadata_name_over_limit_panics() {
     client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
 
     // name = 65 bytes, one over the 64-byte limit.
-    client.set_issuer_metadata(
-        &issuer,
-        &Some(str_of_len(&env, 65)),
-        &None,
-        &None,
-    );
+    client.set_issuer_metadata(&issuer, &Some(str_of_len(&env, 65)), &None, &None);
 }
 
 #[test]
@@ -419,12 +416,7 @@ fn metadata_url_over_limit_panics() {
     client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
 
     // url = 257 bytes, one over the 256-byte limit.
-    client.set_issuer_metadata(
-        &issuer,
-        &None,
-        &Some(str_of_len(&env, 257)),
-        &None,
-    );
+    client.set_issuer_metadata(&issuer, &None, &Some(str_of_len(&env, 257)), &None);
 }
 
 #[test]
@@ -439,10 +431,5 @@ fn metadata_logo_over_limit_panics() {
     client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
 
     // logo = 257 bytes, one over the 256-byte limit.
-    client.set_issuer_metadata(
-        &issuer,
-        &None,
-        &None,
-        &Some(str_of_len(&env, 257)),
-    );
+    client.set_issuer_metadata(&issuer, &None, &None, &Some(str_of_len(&env, 257)));
 }
