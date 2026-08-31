@@ -61,16 +61,14 @@
                       "symbol": "revoked"
                     },
                     "val": {
-                      "bool": true
+                      "bool": false
                     }
                   },
                   {
                     "key": {
                       "symbol": "threshold"
                     },
-                    "val": {
-                      "u64": "488690319672091796"
-                    }
+                    "val": "void"
                   },
                   {
                     "key": {
