@@ -85,6 +85,26 @@ pub struct EventUnpaused {
 // archived and no longer readable. Claims therefore keep a 90-day minimum,
 // extend through credential expiry when possible, and remain bounded by the
 // network's maximum entry TTL.
+/// Payload emitted when a holder grants a verifier delegated read access
+/// (#396). `credential_type` is already in the event topic tuple, matching
+/// `EventProofSubmitted`'s convention, so it isn't repeated here.
+#[contracttype]
+#[derive(Clone)]
+pub struct EventVerificationGranted {
+    pub holder: Address,
+    pub verifier: Address,
+    pub expiry: u64,
+}
+
+/// Payload emitted when a holder revokes a previously-granted delegation.
+#[contracttype]
+#[derive(Clone)]
+pub struct EventVerificationRevoked {
+    pub holder: Address,
+    pub verifier: Address,
+}
+
+// Persistent-entry lifetime management
 const DAY_IN_LEDGERS: u32 = 17280;
 const SECONDS_PER_LEDGER: u64 = 5;
 const PROOF_BUMP_THRESHOLD: u32 = DAY_IN_LEDGERS;
@@ -216,6 +236,10 @@ pub enum DataKey {
     Paused,
     /// Cached verification, keyed by (holder, credential_type).
     Proof(Address, Symbol),
+    /// (holder, verifier, credential_type) -> expiry (unix seconds). A
+    /// scoped, time-boxed grant letting `verifier` read `holder`'s
+    /// `credential_type` result via `check_delegated_verification` (#396).
+    Delegation(Address, Address, Symbol),
 }
 
 #[contracterror]
@@ -636,6 +660,92 @@ impl ProofRegistry {
     /// `trusted_issuers`, if `Some`, restricts which issuer's proof is accepted
     /// — see `is_verified`. `None` accepts any registered issuer (unchanged
     /// behaviour).
+    /// Grant `verifier` a scoped, time-boxed right to read `holder`'s
+    /// `credential_type` result via `check_delegated_verification`, until
+    /// `expiry` (#396). Purely additive: `is_verified` remains a public read
+    /// exactly as before for every caller — this is a discoverable,
+    /// on-chain consent record apps can condition *their own* gated
+    /// experiences on, not a change to the underlying read's semantics
+    /// (Soroban storage has no confidentiality to gate in the first place).
+    /// Granting the same (holder, verifier, credential_type) again simply
+    /// overwrites the previous expiry.
+    #[allow(deprecated)]
+    pub fn grant_verification(
+        env: Env,
+        holder: Address,
+        verifier: Address,
+        credential_type: Symbol,
+        expiry: u64,
+    ) {
+        holder.require_auth();
+        Self::validate_expiry(&env, expiry);
+
+        let key = DataKey::Delegation(holder.clone(), verifier.clone(), credential_type.clone());
+        env.storage().persistent().set(&key, &expiry);
+        Self::bump_ttl(&env, &key, expiry);
+
+        env.events().publish(
+            (
+                symbol_short!("proof_reg"),
+                symbol_short!("dlg_grant"),
+                credential_type,
+            ),
+            EventVerificationGranted {
+                holder,
+                verifier,
+                expiry,
+            },
+        );
+    }
+
+    /// Revoke a previously-granted delegation. The holder authorizes their
+    /// own revocation, same as `revoke_proof`. A no-op (not an error) if no
+    /// such delegation exists.
+    #[allow(deprecated)]
+    pub fn revoke_verification(env: Env, holder: Address, verifier: Address, credential_type: Symbol) {
+        holder.require_auth();
+        env.storage().persistent().remove(&DataKey::Delegation(
+            holder.clone(),
+            verifier.clone(),
+            credential_type.clone(),
+        ));
+        env.events().publish(
+            (
+                symbol_short!("proof_reg"),
+                symbol_short!("dlg_revok"),
+                credential_type,
+            ),
+            EventVerificationRevoked { holder, verifier },
+        );
+    }
+
+    /// `verifier`'s delegated view of `holder`'s `credential_type` result
+    /// (#396): returns `is_verified`'s own `(valid, verified_at, expiry)` —
+    /// but only if `verifier` currently holds a non-expired
+    /// `grant_verification` delegation from `holder` for that credential
+    /// type; otherwise `(false, 0, 0)`, mirroring `is_verified`'s own
+    /// "never submitted" shape so callers can't distinguish "no delegation"
+    /// from "no claim" by shape alone (deliberately — see the module-level
+    /// note on this not being a confidentiality boundary).
+    pub fn check_delegated_verification(
+        env: Env,
+        holder: Address,
+        verifier: Address,
+        credential_type: Symbol,
+    ) -> (bool, u64, u64) {
+        let now = env.ledger().timestamp();
+        let delegation_key =
+            DataKey::Delegation(holder.clone(), verifier, credential_type.clone());
+        let delegated = match env.storage().persistent().get::<_, u64>(&delegation_key) {
+            Some(expiry) => expiry > now,
+            None => false,
+        };
+        if !delegated {
+            return (false, 0, 0);
+        }
+        Self::is_verified(env, holder, credential_type, None)
+    }
+
     pub fn check_claim(
         env: Env,
         holder: Address,

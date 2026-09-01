@@ -1464,6 +1464,51 @@ fn batch_empty_is_rejected() {
 
 #[test]
 fn batch_duplicate_credential_type_is_rejected() {
+    // First slot valid, second slot (age) has an over-max expiry — whole call must revert.
+    let res = registry.try_submit_aggregate_proof(
+        &holder,
+        &vec![&env, issuer.clone(), issuer.clone()],
+        &vec![&env, symbol_short!("kyc"), symbol_short!("age")],
+        &Bytes::from_slice(&env, AGGREGATE_PROOF),
+        &Bytes::from_slice(&env, AGGREGATE_PUBLIC_INPUTS),
+        &vec![&env, 9999u64, u64::MAX],
+    );
+    assert!(res.is_err());
+    assert!(
+        !registry
+            .is_verified(&holder, &symbol_short!("kyc"), &None)
+            .0
+    );
+}
+// ── Delegated verification (#396) ────────────────────────────────────────────
+
+#[test]
+fn grant_then_verifier_can_check() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    submit(&env, &h, &holder, 9999);
+
+    h.registry
+        .grant_verification(&holder, &verifier, &symbol_short!("kyc"), &5000);
+
+    let (valid, verified_at, expiry) = h.registry.check_delegated_verification(
+        &holder,
+        &verifier,
+        &symbol_short!("kyc"),
+    );
+    assert!(valid);
+    assert_eq!(expiry, 9999); // the underlying claim's own expiry, not the grant's
+    let (_, expected_at, _) = h
+        .registry
+        .is_verified(&holder, &symbol_short!("kyc"), &None);
+    assert_eq!(verified_at, expected_at);
+}
+
+#[test]
+fn check_delegated_verification_without_a_grant_returns_false() {
     let env = Env::default();
     env.mock_all_auths();
     let h = deploy(&env);
@@ -1584,6 +1629,40 @@ fn revoke_all_clears_submitted_proofs() {
     assert!(
         !registry
             .is_verified(&holder, &symbol_short!("age"), &None)
+    let verifier = Address::generate(&env);
+    submit(&env, &h, &holder, 9999);
+
+    // The claim itself is valid, but this verifier was never delegated to.
+    let (valid, verified_at, expiry) = h.registry.check_delegated_verification(
+        &holder,
+        &verifier,
+        &symbol_short!("kyc"),
+    );
+    assert!(!valid);
+    assert_eq!(verified_at, 0);
+    assert_eq!(expiry, 0);
+}
+
+#[test]
+fn grant_is_scoped_to_the_named_verifier_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let granted_verifier = Address::generate(&env);
+    let other_verifier = Address::generate(&env);
+    submit(&env, &h, &holder, 9999);
+    h.registry
+        .grant_verification(&holder, &granted_verifier, &symbol_short!("kyc"), &5000);
+
+    assert!(
+        h.registry
+            .check_delegated_verification(&holder, &granted_verifier, &symbol_short!("kyc"))
+            .0
+    );
+    assert!(
+        !h.registry
+            .check_delegated_verification(&holder, &other_verifier, &symbol_short!("kyc"))
             .0
     );
 }
@@ -1741,6 +1820,33 @@ fn set_admin_by_non_admin_panics() {
 /// one, holders with pre-existing proofs must re-submit them.
 #[test]
 fn legacy_record_missing_issuer_key_fails_to_read() {
+#[test]
+fn grant_expires_correctly() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    submit(&env, &h, &holder, 20_000_000); // claim itself long-lived (within the 1-year cap)
+    h.registry
+        .grant_verification(&holder, &verifier, &symbol_short!("kyc"), &5000);
+
+    assert!(
+        h.registry
+            .check_delegated_verification(&holder, &verifier, &symbol_short!("kyc"))
+            .0
+    );
+
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+    assert!(
+        !h.registry
+            .check_delegated_verification(&holder, &verifier, &symbol_short!("kyc"))
+            .0
+    );
+}
+
+#[test]
+fn revoke_verification_removes_the_grant() {
     let env = Env::default();
     env.mock_all_auths();
     let h = deploy(&env);
@@ -2168,6 +2274,28 @@ fn get_record_returns_raw_record_without_validity_check() {
 /// Only the contract admin may call `migrate_record`.
 #[test]
 fn migrate_record_only_admin() {
+    let verifier = Address::generate(&env);
+    submit(&env, &h, &holder, 9999);
+    h.registry
+        .grant_verification(&holder, &verifier, &symbol_short!("kyc"), &5000);
+    assert!(
+        h.registry
+            .check_delegated_verification(&holder, &verifier, &symbol_short!("kyc"))
+            .0
+    );
+
+    h.registry
+        .revoke_verification(&holder, &verifier, &symbol_short!("kyc"));
+
+    assert!(
+        !h.registry
+            .check_delegated_verification(&holder, &verifier, &symbol_short!("kyc"))
+            .0
+    );
+}
+
+#[test]
+fn revoke_verification_on_a_never_granted_delegation_is_a_no_op() {
     let env = Env::default();
     env.mock_all_auths();
     let h = deploy(&env);
@@ -2202,6 +2330,15 @@ fn migrate_record_only_admin() {
 /// no-op — the call succeeds without error.
 #[test]
 fn migrate_record_idempotent() {
+    let verifier = Address::generate(&env);
+
+    // Must not panic — matches the doc comment's "no-op, not an error".
+    h.registry
+        .revoke_verification(&holder, &verifier, &symbol_short!("kyc"));
+}
+
+#[test]
+fn delegated_check_reflects_a_revoked_underlying_claim_even_with_a_live_grant() {
     let env = Env::default();
     env.mock_all_auths();
     let h = deploy(&env);
@@ -2676,6 +2813,23 @@ fn batch_duplicate_type_invariant_rejects_all_combinations() {
     assert!(
         !h.registry
             .is_verified(&holder, &symbol_short!("funds"), &None)
+    let verifier = Address::generate(&env);
+    submit(&env, &h, &holder, 9999);
+    h.registry
+        .grant_verification(&holder, &verifier, &symbol_short!("kyc"), &5000);
+    assert!(
+        h.registry
+            .check_delegated_verification(&holder, &verifier, &symbol_short!("kyc"))
+            .0
+    );
+
+    // The grant itself is still live, but the underlying claim is gone —
+    // check_delegated_verification must reflect that, not just the grant.
+    h.registry.revoke_proof(&holder, &symbol_short!("kyc"));
+
+    assert!(
+        !h.registry
+            .check_delegated_verification(&holder, &verifier, &symbol_short!("kyc"))
             .0
     );
 }
@@ -2884,4 +3038,44 @@ fn successful_batch_preserves_issuer_and_threshold() {
         &None,
         &Some(vec![&env, h.funds_issuer.clone()]), // wrong issuer
     ));
+}
+#[test]
+fn grant_rejects_an_expiry_in_the_past() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+
+    let res = h.registry.try_grant_verification(
+        &holder,
+        &verifier,
+        &symbol_short!("kyc"),
+        &500,
+    );
+    assert!(res.is_err());
+}
+
+#[test]
+fn granting_the_same_verifier_again_overwrites_the_previous_expiry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    submit(&env, &h, &holder, 9999);
+    h.registry
+        .grant_verification(&holder, &verifier, &symbol_short!("kyc"), &2000);
+    h.registry
+        .grant_verification(&holder, &verifier, &symbol_short!("kyc"), &6000);
+
+    env.ledger().with_mut(|li| li.timestamp = 3000);
+    // Would be expired under the first grant (2000); still valid under the
+    // second (6000), proving the overwrite actually took effect.
+    assert!(
+        h.registry
+            .check_delegated_verification(&holder, &verifier, &symbol_short!("kyc"))
+            .0
+    );
 }
