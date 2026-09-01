@@ -372,7 +372,7 @@ function parseEvent(
   return { kind: "unknown" };
 }
 
-// ── Ingester ───────────────────────────────────────────────────────────────
+// ── Ingester ────────────────────────────────────────────────────────────────
 
 export interface Ingester {
   /** Run one ingestion cycle (fetch + write). Returns number of events processed. */
@@ -386,6 +386,8 @@ export interface Ingester {
   start(): void;
   /** Stop the polling loop. */
   stop(): void;
+  /** Graceful shutdown: stop scheduling and await in-flight tick. */
+  shutdown(): Promise<void>;
   /** Current health snapshot — safe to read at any time. */
   getHealth(): IngesterHealth;
 }
@@ -397,6 +399,7 @@ export function createIngester(config: Config, db: Db): Ingester {
 
   let running = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let inFlightTick: Promise<number> | null = null;
   const health = freshHealth();
 
   // ── Fetch current Horizon head ledger (cached per tick) ────────────────
@@ -644,7 +647,8 @@ export function createIngester(config: Config, db: Db): Ingester {
     timer = setTimeout(async () => {
       if (!running) return;
       try {
-        const n = await tick();
+        inFlightTick = tick();
+        const n = await inFlightTick;
         if (n > 0) {
           console.log(`[indexer] processed ${n} event(s)`);
         }
@@ -673,6 +677,18 @@ export function createIngester(config: Config, db: Db): Ingester {
         clearTimeout(timer);
         timer = null;
       }
+    },
+    async shutdown() {
+      running = false;
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (inFlightTick !== null) {
+        console.log("[indexer] Waiting for in-flight tick…");
+        await inFlightTick;
+      }
+      console.log("[indexer] Ingester stopped.");
     },
     getHealth() {
       return { ...health };
