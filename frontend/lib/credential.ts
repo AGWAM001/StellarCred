@@ -206,11 +206,6 @@ async function deriveAtRestKey(
     ["deriveKey"],
   );
 
-  // Construct a fresh ArrayBuffer (not SharedArrayBuffer) that the
-  // Web Crypto API always accepts for PBKDF2 salt.
-  const saltBuf = new ArrayBuffer(salt.byteLength);
-  new Uint8Array(saltBuf).set(salt);
-
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
