@@ -12,11 +12,11 @@ import { RPC_URL, NETWORK_PASSPHRASE, CONTRACTS } from "./stellar";
 type SDK = typeof import("@stellar/stellar-sdk");
 
 let sdkPromise: Promise<SDK> | null = null;
-let sdkModule: SDK | null = null;
+let _sdkModule: SDK | null = null;
 function sdk(): Promise<SDK> {
   if (!sdkPromise) {
     sdkPromise = import("@stellar/stellar-sdk").then((m) => {
-      sdkModule = m;
+      _sdkModule = m;
       return m;
     });
   }
