@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { useCredentialSync, saveCredential, loadCredentials, type Credential } from "../credential";
+import { useCredentialSync, type Credential } from "../credential";
 import { isStorageAvailable } from "../safe-storage";
 
 // Mock safe-storage
@@ -25,7 +25,7 @@ describe("useCredentialSync - Cross-tab storage sync", () => {
     }
   });
 
-  it("loads initial credentials from localStorage", () => {
+  it("loads initial credentials from localStorage", async () => {
     const mockCred: Credential = {
       type: "kyc",
       title: "KYC Complete",
@@ -47,7 +47,9 @@ describe("useCredentialSync - Cross-tab storage sync", () => {
 
     const { result } = renderHook(() => useCredentialSync());
 
-    expect(result.current).toHaveLength(1);
+    await waitFor(() => {
+      expect(result.current).toHaveLength(1);
+    });
     expect(result.current[0].type).toBe("kyc");
   });
 
