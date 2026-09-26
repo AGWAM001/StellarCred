@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CREDENTIAL_TYPES, type ClaimParams   type Credential as IssuedCredential,
-} from "@stellarcred/issuer";
+import { CREDENTIAL_TYPES, type ClaimParams } from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
-import { currentDeploymentRef, type DeploymentRef } from "@/lib/deployment";
+import { currentDeploymentRef } from "@/lib/deployment";
 import { readJsonBody, bodyErrorResponse } from "../../../lib/request-limits";
 import {
   logger,
@@ -436,84 +435,20 @@ async function executeRequest(
   }
 
   try {
-    // De-duplicate types so the same claim isn't issued twice in one call.
-    const uniqueTypes = Array.from(new Set(credentialTypes));
-    const credentials: Array<IssuedCredential & { deployment: DeploymentRef }> = [];
-    for (const type of uniqueTypes) {
-      logger.info(
-        stripSensitiveFields({
-          event: "signing_started",
-          credentialType: type,
-          issuerId,
-          walletAddress,
-          requestId,
-        }),
-      );
-      const credential = await issuer.issue({
-        type: type as CredentialType,
-        holder,
-        issuerId,
-        issuerName,
-        expiry,
-        attribute: attributes,
-        claimParams,
-      });
-      // Record which deployment minted this credential (network + contract
-      // IDs) so imports onto a different deployment are rejected at import
-      // time instead of failing confusingly at proof submission (#545).
-      credentials.push({ ...credential, deployment: currentDeploymentRef() });
-      logger.info(
-        stripSensitiveFields({
-          event: "signing_success",
-          credentialType: type,
-          issuerId,
-          walletAddress,
-          requestId,
-        }),
-      );
-    }
-
-    // ── Hash-chained, PII-free issuance audit log ───────────────────────────
-    // Append one entry per signed commitment. Entries carry ONLY the
-    // commitment (a Poseidon2 hash — not the underlying attribute), the
-    // issuer id, the issuance timestamp, and the request id — never
-    // first_name/last_name/id_number/wallet address. Each entry chains to the
-    // previous entry's hash so tampering is detectable via the
-    // `pnpm verify:audit-log` command (docs/audit-log.md).
-    try {
-      await auditLogBootstrap(auditLogFilePath());
-      for (const credential of credentials) {
-        const entry = auditLogAppend({
-          timestamp: credential.issuedAt,
-          requestId,
-          issuer: issuerId ?? "",
-          commitment: credential.commitment,
-        });
-        logger.info(
-          stripSensitiveFields({
-            event: "audit_log_appended",
-            credentialType: credential.type,
-            issuerId,
-            requestId,
-            auditIndex: entry.index,
-            auditHash: entry.hash,
-          }),
-        );
-      }
-      await auditLogPersist(auditLogFilePath());
-    } catch (auditError) {
-      // The audit log must never break issuance; surface the failure loudly
-      // so operators know the trail is incomplete.
-      logger.error(
-        stripSensitiveFields({
-          event: "audit_log_persist_failed",
-          issuerId,
-          walletAddress,
-          error: (auditError as Error).message,
-          requestId,
-        }),
-      );
-    }
+    const issuedCredentials = await issueAndAuditCredentials({
+      credentialTypes,
+      holder,
+      issuerId,
+      issuerName,
+      expiry,
+      attributes,
+      claimParams,
+      requestId,
+    });
+    const credentials = issuedCredentials.map((credential) => ({
+      ...credential,
+      deployment: currentDeploymentRef(),
+    }));
 
     outcome = "success";
     return sendResponse(NextResponse.json({ credentials }));
