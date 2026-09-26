@@ -556,14 +556,53 @@ class CredentialVerifier {
   // Get latest VK version for credential type
   get_latest_version(credential_type: Symbol): Promise<u32>
 
-  // Get contract version (SDK 0.2.0+)
+// Get contract version (SDK 0.2.0+)
   version(): Promise<u32>
 }
 ```
 
 ---
 
+## Server-Side Verification & Spoofing Prevention (`verifyWalletClaim`)
+
+### ⚠️ Security Warning: Wallet Address Spoofing
+
+When building a backend service or API gateway, **never** rely solely on an untrusted wallet address provided in client requests (e.g. headers or request body) even if you call `hasClaim(address)`. On-chain proofs and addresses are publicly visible, meaning an unauthenticated attacker could simply supply another person's verified wallet address to gain unauthorized access.
+
+### Recommended Secure Pattern
+
+Use `createWalletChallenge` on your server to produce a short-lived, replay-protected challenge, have the user sign it with their Stellar wallet, and then call `verifyWalletClaim`.
+
+```typescript
+import { createWalletChallenge, verifyWalletClaim } from "@stellarcred/sdk";
+
+// 1. In your challenge generation endpoint (e.g. GET /api/challenge):
+const challenge = createWalletChallenge({
+  domain: "myprotocol.org",
+  statement: "Authenticate to access trading dashboard",
+  ttlMs: 5 * 60 * 1000,
+});
+
+// 2. In your verification endpoint (e.g. POST /api/login):
+const result = await verifyWalletClaim({
+  wallet: req.body.wallet,
+  challenge: req.body.challenge,
+  signature: req.body.signature,
+  claim: "kyc",
+});
+
+if (!result.ok) {
+  // result.error explains why (invalid signature, challenge expired/replayed, or no on-chain claim)
+  return res.status(403).json({ error: result.error });
+}
+
+// Access granted: caller proved wallet control AND satisfies credential requirements
+```
+
+---
+
 ## Support
+
 
 For issues or questions:
 

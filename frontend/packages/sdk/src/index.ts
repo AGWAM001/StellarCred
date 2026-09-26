@@ -1279,6 +1279,36 @@ export function watchClaim(
 }
 
 // ---------------------------------------------------------------------------
+
+// Challenge generation & server-side wallet verification (#543)
+// ---------------------------------------------------------------------------
+
+import {
+  createWalletChallenge,
+  verifyWalletSignature,
+  verifyWalletClaim,
+  MemoryChallengeStore,
+  defaultChallengeStore,
+} from "./challenge";
+
+export {
+  createWalletChallenge,
+  verifyWalletSignature,
+  verifyWalletClaim,
+  MemoryChallengeStore,
+  defaultChallengeStore,
+};
+
+export type {
+  WalletChallenge,
+  CreateChallengeOptions,
+  ChallengeStore,
+  VerifyWalletClaimParams,
+  VerifyWalletClaimResult,
+} from "./challenge";
+
+
+// ---------------------------------------------------------------------------
 // Namespace export (StellarCred.hasClaim / StellarCred.getClaims / etc.)
 // ---------------------------------------------------------------------------
 
@@ -1296,6 +1326,9 @@ export const StellarCred = {
   buildBadgeEmbedCode,
   parseReturnParams,
   watchClaim,
+  createWalletChallenge,
+  verifyWalletSignature,
+  verifyWalletClaim,
   CLAIM_TYPES,
   TimeoutError,
   ConfigError,
