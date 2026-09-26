@@ -2,6 +2,11 @@
 
 import type { Credential } from "./credential";
 import { loadCredentials, saveCredential } from "./credential";
+import {
+  currentDeploymentRef,
+  deploymentMismatchMessage,
+  type DeploymentRef,
+} from "./deployment";
 
 /** OWASP-recommended minimum for PBKDF2-HMAC-SHA256 (2023+). */
 const PBKDF2_ITERATIONS = 600_000;
@@ -19,6 +24,12 @@ export interface EncryptedBackup {
   ciphertext: string;
   /** KDF iteration count — stored so future tuning is possible. */
   iterations: number;
+  /**
+   * Deployment that created the backup (Issue #545). Recorded at export so
+   * restoring onto a different network / contract set is caught here, at
+   * import time, instead of failing confusingly at proof submission.
+   */
+  deployment?: DeploymentRef;
 }
 
 function toBase64(buf: ArrayBuffer | Uint8Array): string {
@@ -102,11 +113,14 @@ export async function createEncryptedBackup(
     iv: toBase64(ivBytes),
     ciphertext: toBase64(ciphertext),
     iterations: PBKDF2_ITERATIONS,
+    deployment: currentDeploymentRef(),
   };
 }
 
 /** Accept both v1 (legacy, 100k iterations) and v2 (current, 600k) backups. */
-type BackupEnvelope = EncryptedBackup | (Omit<EncryptedBackup, "version" | "iterations"> & { version: 1 });
+type BackupEnvelope =
+  | EncryptedBackup
+  | (Omit<EncryptedBackup, "version" | "iterations" | "deployment"> & { version: 1 });
 
 export async function decryptBackup(
   backup: BackupEnvelope,
@@ -115,6 +129,15 @@ export async function decryptBackup(
   if (backup.version !== 1 && backup.version !== 2) {
     throw new Error("Unsupported backup version");
   }
+
+  // Cross-deployment guard (#545). The envelope's deployment is stored in
+  // plaintext, so a backup from another network / contract set is rejected
+  // before the expensive PBKDF2 derivation, and per-credential references
+  // are checked after decryption in case the envelope field is absent.
+  const envelopeMismatch = deploymentMismatchMessage(
+    "deployment" in backup ? backup.deployment : undefined,
+  );
+  if (envelopeMismatch) throw new Error(envelopeMismatch);
 
   // v1 backups don't store iterations — use the legacy count.
   // v2 backups store the exact count used during encryption.
@@ -163,6 +186,10 @@ export async function decryptBackup(
     ) {
       throw new Error("Invalid backup contents: malformed credential entry");
     }
+    // Credentials restored via v1/legacy envelopes carry no envelope
+    // deployment, so enforce the same-origin rule per credential too (#545).
+    const mismatch = deploymentMismatchMessage(item.deployment);
+    if (mismatch) throw new Error(mismatch);
   }
 
   return parsed as Credential[];
@@ -172,6 +199,10 @@ export async function mergeCredentials(imported: Credential[]): Promise<Credenti
   let current = await loadCredentials();
 
   for (const cred of imported) {
+    // Defense in depth: callers other than decryptBackup must not be able to
+    // merge a foreign-deployment credential past the import-time guard (#545).
+    const mismatch = deploymentMismatchMessage(cred.deployment);
+    if (mismatch) throw new Error(mismatch);
     current = await saveCredential(cred);
   }
 
