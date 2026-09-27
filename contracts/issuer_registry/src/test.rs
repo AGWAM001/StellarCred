@@ -5,18 +5,16 @@ use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
     vec, Address, Bytes, BytesN, Env, IntoVal, Symbol,
 };
+use test_support::deploy_issuer_registry;
 
-fn setup(env: &Env) -> (Address, IssuerRegistryClient<'_>) {
-    let admin = Address::generate(env);
-    let contract_id = env.register(IssuerRegistry, (admin.clone(),));
-    (admin, IssuerRegistryClient::new(env, &contract_id))
-}
+// Deployment lives in the shared `test_support` harness; this suite is about
+// issuer records and roles, so the rest of each test is the scenario itself.
 
 #[test]
 fn register_and_query() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
@@ -34,7 +32,7 @@ fn register_and_query() {
 fn get_issuers_lists_registered() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer_a = Address::generate(&env);
     let issuer_b = Address::generate(&env);
@@ -55,7 +53,7 @@ fn get_issuers_lists_registered() {
 fn revoked_issuer_is_invalid() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[1u8; 64]);
@@ -69,7 +67,7 @@ fn revoked_issuer_is_invalid() {
 #[test]
 fn unknown_issuer_is_invalid() {
     let env = Env::default();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let stranger = Address::generate(&env);
     assert!(!client.is_valid_issuer(&stranger, &symbol_short!("kyc")));
 }
@@ -90,7 +88,7 @@ fn prop_revoked_issuer_never_valid() {
         .run(&(0u64..u64::MAX, 0u64..u64::MAX), |(_seed_a, _seed_b)| {
             let env = Env::default();
             env.mock_all_auths();
-            let (_admin, client) = setup(&env);
+            let (_admin, client) = deploy_issuer_registry(&env);
 
             let issuer = Address::generate(&env);
             let pubkey = BytesN::from_array(&env, &[1u8; 64]);
@@ -132,7 +130,7 @@ fn prop_unregistered_issuer_never_valid() {
         .run(&(0u64..u64::MAX), |_seed| {
             let env = Env::default();
             env.mock_all_auths();
-            let (_admin, client) = setup(&env);
+            let (_admin, client) = deploy_issuer_registry(&env);
 
             // Address::generate creates a unique address not registered
             // in the IssuerRegistry.
@@ -155,7 +153,7 @@ fn prop_unregistered_issuer_never_valid() {
 fn set_and_get_issuer_metadata() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
@@ -202,7 +200,7 @@ fn set_and_get_issuer_metadata() {
 #[test]
 fn get_issuer_metadata_returns_none_for_unknown() {
     let env = Env::default();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let stranger = Address::generate(&env);
     let meta = client.get_issuer_metadata(&stranger);
     assert!(meta.is_none());
@@ -214,7 +212,7 @@ fn get_issuer_metadata_returns_none_for_unknown() {
 fn issuer_count_tracks_registrations() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     assert_eq!(client.issuer_count(), 0);
 
@@ -238,7 +236,7 @@ fn issuer_count_tracks_registrations() {
 fn get_issuers_page_returns_correct_slice() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let pubkey = BytesN::from_array(&env, &[2u8; 64]);
     let types = vec![&env, symbol_short!("kyc")];
@@ -273,7 +271,7 @@ fn get_issuers_page_returns_correct_slice() {
 fn get_issuers_page_out_of_bounds_returns_empty() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     // No issuers at all.
     let page = client.get_issuers_page(&0, &5);
@@ -294,7 +292,7 @@ fn get_issuers_page_out_of_bounds_returns_empty() {
 fn get_issuers_page_limit_cap_is_enforced() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let pubkey = BytesN::from_array(&env, &[4u8; 64]);
     let types = vec![&env, symbol_short!("kyc")];
@@ -316,7 +314,7 @@ fn get_issuers_page_after_revocation_is_consistent() {
     // filter revoked issuers via get_issuer(...).revoked.
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let pubkey = BytesN::from_array(&env, &[5u8; 64]);
     let types = vec![&env, symbol_short!("kyc")];
@@ -346,7 +344,7 @@ fn get_issuers_page_after_revocation_is_consistent() {
 fn set_issuer_metadata_requires_admin() {
     let env = Env::default();
     // Do NOT call mock_all_auths() – require_admin() will reject the call.
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let issuer = Address::generate(&env);
     client.set_issuer_metadata(&issuer, &Some(String::from_str(&env, "x")), &None, &None);
 }
@@ -367,7 +365,7 @@ fn str_of_len(env: &Env, len: u32) -> String {
 fn metadata_at_max_length_succeeds() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
@@ -396,7 +394,7 @@ fn metadata_at_max_length_succeeds() {
 fn metadata_name_over_limit_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
@@ -416,7 +414,7 @@ fn metadata_name_over_limit_panics() {
 fn metadata_url_over_limit_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
@@ -436,7 +434,7 @@ fn metadata_url_over_limit_panics() {
 fn metadata_logo_over_limit_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
@@ -457,7 +455,7 @@ fn metadata_logo_over_limit_panics() {
 fn register_issuer_emits_expected_event() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
@@ -486,7 +484,7 @@ fn register_issuer_emits_expected_event() {
 fn revoke_issuer_emits_expected_event() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[1u8; 64]);
@@ -518,7 +516,7 @@ fn revoke_issuer_emits_expected_event() {
 fn set_issuer_metadata_emits_no_events() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[7u8; 64]);
@@ -555,7 +553,7 @@ fn set_issuer_metadata_emits_no_events() {
 fn constructor_seeds_admin_role() {
     let env = Env::default();
     env.mock_all_auths();
-    let (admin, client) = setup(&env);
+    let (admin, client) = deploy_issuer_registry(&env);
 
     assert!(client.has_role(&symbol_short!("admin"), &admin));
     let stranger = Address::generate(&env);
@@ -566,7 +564,7 @@ fn constructor_seeds_admin_role() {
 fn admin_can_grant_and_revoke_roles() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let delegate = Address::generate(&env);
     let other = Address::generate(&env);
 
@@ -594,7 +592,7 @@ fn admin_can_grant_and_revoke_roles() {
 fn grant_revoke_require_root_admin() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let delegate = Address::generate(&env);
 
     // No auths mocked → the root admin's required auth fails.
@@ -612,7 +610,7 @@ fn grant_revoke_require_root_admin() {
 fn register_issuer_requires_admin_role() {
     let env = Env::default();
     env.mock_all_auths();
-    let (admin, client) = setup(&env);
+    let (admin, client) = deploy_issuer_registry(&env);
     let contract_id = client.address.clone();
     let delegate = Address::generate(&env);
     let stranger = Address::generate(&env);
@@ -661,7 +659,7 @@ fn register_issuer_requires_admin_role() {
 fn revoke_issuer_requires_admin_role() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let delegate = Address::generate(&env);
 
     // Delegate the admin role and register an issuer as the delegate.
@@ -693,7 +691,7 @@ fn revoke_issuer_requires_admin_role() {
 fn set_issuer_metadata_requires_admin_role() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let delegate = Address::generate(&env);
     let stranger = Address::generate(&env);
 
@@ -763,7 +761,7 @@ fn set_issuer_metadata_requires_admin_role() {
 fn has_role_is_a_public_view() {
     let env = Env::default();
     env.mock_all_auths();
-    let (admin, client) = setup(&env);
+    let (admin, client) = deploy_issuer_registry(&env);
     let delegate = Address::generate(&env);
 
     // Readable with zero mocked auths — no authorization required.
@@ -778,7 +776,7 @@ fn has_role_is_a_public_view() {
 fn register_issuer_by_unmocked_admin_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let pubkey = BytesN::from_array(&env, &[1u8; 64]);
@@ -819,7 +817,7 @@ fn rotate_issuer_key_keeps_retired_key_valid_within_window() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -854,7 +852,7 @@ fn rotated_out_key_stops_validating_after_window() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -873,7 +871,7 @@ fn rotate_issuer_key_emits_expected_event() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -908,7 +906,7 @@ fn rotate_issuer_key_rejects_the_current_key() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -922,7 +920,7 @@ fn rotate_issuer_key_rejects_reuse_of_a_retired_key() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -938,7 +936,7 @@ fn rotate_issuer_key_rejects_a_window_that_already_closed() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     register_k0(&env, &client, &issuer);
@@ -952,7 +950,7 @@ fn rotate_issuer_key_rejects_a_window_beyond_the_cap() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     register_k0(&env, &client, &issuer);
@@ -970,7 +968,7 @@ fn rotate_issuer_key_fails_once_the_history_is_full() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     register_k0(&env, &client, &issuer);
@@ -992,7 +990,7 @@ fn expired_keys_are_pruned_and_do_not_block_future_rotations() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1018,7 +1016,7 @@ fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1063,7 +1061,7 @@ fn revoke_issuer_key_on_the_current_key_blocks_issuance_until_rotation() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1121,7 +1119,7 @@ fn revoke_issuer_key_rejects_an_unknown_key() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     register_k0(&env, &client, &issuer);
@@ -1135,7 +1133,7 @@ fn revoke_issuer_key_rejects_a_second_revocation() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1149,7 +1147,7 @@ fn revoke_issuer_key_rejects_a_key_whose_window_closed() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1166,7 +1164,7 @@ fn full_issuer_revocation_invalidates_the_whole_key_set() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1187,7 +1185,7 @@ fn get_issuer_keys_reports_the_current_key_first() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     // An issuer that never rotated has exactly one key: the current one.
     let issuer = Address::generate(&env);
@@ -1209,7 +1207,7 @@ fn refresh_issuer_keys_ttl_keeps_the_key_history_readable() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1236,7 +1234,7 @@ fn refresh_issuer_keys_ttl_keeps_the_key_history_readable() {
 fn refresh_issuer_keys_ttl_rejects_an_unknown_issuer() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     client.refresh_issuer_keys_ttl(&Address::generate(&env));
 }
@@ -1246,7 +1244,7 @@ fn refresh_issuer_keys_ttl_requires_admin_role() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     register_k0(&env, &client, &issuer);
@@ -1263,7 +1261,7 @@ fn register_issuer_rejects_a_pubkey_change() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1283,7 +1281,7 @@ fn register_issuer_rejects_a_pubkey_change() {
 fn register_issuer_still_updates_credential_types_with_the_same_key() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1304,7 +1302,7 @@ fn rotate_issuer_key_requires_admin_role() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let contract_id = client.address.clone();
 
     let issuer = Address::generate(&env);
@@ -1353,7 +1351,7 @@ fn revoke_issuer_key_requires_admin_role() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
-    let (_admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
 
     let issuer = Address::generate(&env);
     let k0 = register_k0(&env, &client, &issuer);
@@ -1382,7 +1380,7 @@ fn prop_retired_key_is_valid_only_within_its_window() {
             let env = Env::default();
             env.mock_all_auths();
             env.ledger().set_timestamp(T0);
-            let (_admin, client) = setup(&env);
+            let (_admin, client) = deploy_issuer_registry(&env);
 
             let issuer = Address::generate(&env);
             let k0 = register_k0(&env, &client, &issuer);

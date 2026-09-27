@@ -80,8 +80,10 @@ test-contracts:
 	cargo test --locked
 
 ## lint-contracts: Run clippy on contract crates with warnings as errors
+# --workspace so the host-only test harness crate is linted too: a bare build
+# skips it, since only the deployable contracts are default workspace members.
 lint-contracts:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --workspace --all-targets -- -D warnings
 
 # ------------------------------------------------------------------------------
 # Circuits (Noir / Aztec Barretenberg)

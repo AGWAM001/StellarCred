@@ -170,7 +170,10 @@ jobs:
         # Blocking — clippy warnings are treated as errors for all contract
         # crates. Any new lint must either be fixed or explicitly allowed with
         # a documented reason using #[allow(clippy::lint_name)] inline.
-        run: cargo clippy --all-targets -- -D warnings
+        # --workspace so the host-only test harness (contracts/test_support) is
+        # linted too; a bare build skips it, since only the deployable contracts
+        # are default workspace members.
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   # ── Circuits: Noir compile + VK freshness check ────────────────────────────
   # Runs in parallel with contracts, frontend, and indexer.
