@@ -109,6 +109,8 @@ describe("loadEnv", () => {
     );
     expect(() => loadEnv({ NEXT_PUBLIC_PLAID_SECRET: "leaked" })).toThrow(EnvValidationError);
     expect(() => loadEnv({ NEXT_PUBLIC_PLAID_ACCESS_TOKENS: "leaked" })).toThrow(
+      EnvValidationError,
+    );
     expect(() => loadEnv({ NEXT_PUBLIC_PERSONA_WEBHOOK_SECRET: "leaked" })).toThrow(
       EnvValidationError,
     );
