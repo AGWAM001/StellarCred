@@ -30,6 +30,18 @@ const AGGREGATE_VK: &[u8] = include_bytes!("../../../fixtures/aggregate/vk");
 const AGGREGATE_PROOF: &[u8] = include_bytes!("../../../fixtures/aggregate/proof");
 const AGGREGATE_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/aggregate/public_inputs");
 
+// Negative test fixtures (Issue #537) — same case directories as the
+// credential_verifier tests (fixtures/negative/<case>/{vk,proof,public_inputs}).
+const NEGATIVE_KYC_TRUNCATED_PROOF: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_truncated_inputs/proof");
+const NEGATIVE_KYC_TRUNCATED_PUBLIC_INPUTS: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_truncated_inputs/public_inputs");
+
+const NEGATIVE_KYC_WRONG_CIRCUIT_PROOF: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_wrong_circuit/proof");
+const NEGATIVE_KYC_WRONG_CIRCUIT_PUBLIC_INPUTS: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_wrong_circuit/public_inputs");
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn pubkey_from_offset(env: &Env, public_inputs: &[u8], start_field: u32) -> BytesN<64> {
@@ -331,6 +343,50 @@ fn rejects_invalid_proof() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, &bad),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
+        &9999,
+    );
+    assert!(res.is_err());
+}
+
+/// Rejects a proof with truncated public_inputs (wrong count).
+/// The public_inputs are missing the last 32 bytes (issuer_y), so
+/// verification should fail due to malformed input.
+#[test]
+fn rejects_proof_with_truncated_public_inputs() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    let res = h.registry.try_submit_proof(
+        &holder,
+        &h.issuer,
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, NEGATIVE_KYC_TRUNCATED_PROOF),
+        &Bytes::from_slice(&env, NEGATIVE_KYC_TRUNCATED_PUBLIC_INPUTS),
+        &None,
+        &9999,
+    );
+    assert!(res.is_err());
+}
+
+/// Rejects a proof from a different circuit type verified against the wrong VK.
+/// An age_proof verified against a kyc VK should fail because the proof
+/// structure and public_inputs don't match the VK's expectations.
+#[test]
+fn rejects_proof_from_wrong_circuit_type() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    let res = h.registry.try_submit_proof(
+        &holder,
+        &h.issuer,
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, NEGATIVE_KYC_WRONG_CIRCUIT_PROOF),
+        &Bytes::from_slice(&env, NEGATIVE_KYC_WRONG_CIRCUIT_PUBLIC_INPUTS),
         &None,
         &9999,
     );
