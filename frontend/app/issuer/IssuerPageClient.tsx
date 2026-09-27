@@ -17,6 +17,8 @@ import { ConfigBanner } from "@/components/ConfigBanner";
 import { issuanceConfigured } from "@/lib/config";
 import { truncateAddress, truncatePubkey } from "@/lib/format";
 import type { RegisteredIssuer } from "@/lib/issuer-registry";
+import { CredentialTemplateGallery } from "@/components/CredentialTemplateGallery";
+import type { CredentialTemplate } from "@/lib/credential-templates";
 
 const TYPES = Object.entries(TYPE_META) as [
   CredentialType,
@@ -62,6 +64,7 @@ export default function IssuerPageClient() {
   const [type, setType] = useState<CredentialType>("kyc");
   const [attribute, setAttribute] = useState(DEFAULT_ATTR.kyc);
   const [expiry, setExpiry] = useState("90 days");
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [issued, setIssued] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -119,8 +122,16 @@ export default function IssuerPageClient() {
   const needsAttr = !!meta.attribute;
 
   function onType(nextType: CredentialType) {
+    setSelectedTemplateId(null);
     setType(nextType);
     setAttribute(DEFAULT_ATTR[nextType]);
+  }
+
+  function onApplyTemplate(template: CredentialTemplate) {
+    setSelectedTemplateId(template.id);
+    setType(template.type);
+    setAttribute(template.defaultAttribute);
+    setExpiry(template.defaultExpiry);
   }
 
   async function onIssue() {
@@ -210,6 +221,12 @@ export default function IssuerPageClient() {
         — registration, signing-key custody, what your signature attests to,
         rotation and revocation.
       </div>
+
+      <CredentialTemplateGallery
+        selectedTemplateId={selectedTemplateId}
+        allowedTypes={selectedIssuer ? (selectedIssuer.credentialTypes as CredentialType[]) : undefined}
+        onSelectTemplate={onApplyTemplate}
+      />
 
       <div
         className="grid grid-2"

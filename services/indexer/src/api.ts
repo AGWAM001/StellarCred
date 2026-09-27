@@ -19,13 +19,13 @@
  *         consecutiveErrors, fetchAttempts, fetchFailures }
  *
  *   GET /claims?wallet=G…
- *     → { wallet: string, claims: ClaimRow[] }
+ *     → { wallet: string, claims: SerializedClaim[] }
  *
  *   GET /stats
  *     → { stats: StatsRow[] }
  *
  *   GET /recent?limit=20&cursor=<opaque>
- *     → { claims: ClaimRow[], limit: number, nextCursor: string | null }
+ *     → { claims: SerializedClaim[], limit: number, nextCursor: string | null }
  *
  *   GET /issuers/:issuer/stats
  *     → { issuer, total, active, revoked, credential_types: string[], first_seen: number | null }
@@ -48,6 +48,22 @@
  *
  * All responses are JSON. No write endpoints exist.
  * No identity fields are stored, so all data here is public chain data.
+ *
+ * SerializedClaim response schema (pinned by tests in api.test.ts, identical
+ * across both DB_DRIVER backends — see serializeClaim below):
+ *
+ *   id               number   insertion cursor; the /recent tiebreaker
+ *   wallet           string
+ *   credential_type  string
+ *   issuer           string
+ *   verified_at      number   unix seconds
+ *   expiry           number   unix seconds
+ *   ledger_sequence  number
+ *   threshold        number | null
+ *   revoked          number   0 or 1 — intentionally not a boolean; this is
+ *                             the shape existing consumers (SDK/UI) already
+ *                             code against, so it's pinned as-is rather than
+ *                             changed to avoid a breaking wire-format change.
  */
 
 import express, {
@@ -56,13 +72,14 @@ import express, {
   NextFunction,
   RequestHandler,
 } from "express";
-import type { Db } from "./db";
+import type { Db, ClaimRow, SubmissionStatus } from "./db";
 import type { Ingester } from "./ingester";
 import type { Config } from "./config";
 import { parseCorsOrigins } from "./config";
 import { createCorsMiddleware } from "./cors";
 import { RateLimiter } from "./rate-limit";
 import type { RecentCursor } from "./db";
+import { requireAuth } from "./auth";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 20;
@@ -82,6 +99,46 @@ const MAX_APP_NAME = 120;
 const MAX_DESCRIPTION = 2000;
 const MAX_CLAIMS = 10;
 const MAX_CONTACT_EMAIL = 254;
+// ── Response schema (#349) ──────────────────────────────────────────────────
+//
+// `ClaimRow` (db.ts) is the internal row shape the two DB adapters happen to
+// hand back — on Postgres, `pg` parses BIGINT columns (id, verified_at,
+// expiry, ledger_sequence, threshold) as strings by default to avoid silent
+// precision loss, while better-sqlite3 hands back plain JS numbers for the
+// same INTEGER columns. Left unhandled, a consumer coding against one
+// backend's shape breaks against the other's. `serializeClaim` is the one
+// place that boundary gets normalized, and its explicit field list also
+// means a future internal-only column added to the `claims` table can't
+// leak into the API response by accident the way a bare `...row` spread
+// would allow.
+
+/** The wire shape every claim-bearing endpoint (/claims, /recent) returns. */
+export interface SerializedClaim {
+  id: number;
+  wallet: string;
+  credential_type: string;
+  issuer: string;
+  verified_at: number;
+  expiry: number;
+  ledger_sequence: number;
+  threshold: number | null;
+  /** 0 or 1 — see the module doc comment for why this isn't a boolean. */
+  revoked: number;
+}
+
+export function serializeClaim(row: ClaimRow): SerializedClaim {
+  return {
+    id: Number(row.id),
+    wallet: row.wallet,
+    credential_type: row.credential_type,
+    issuer: row.issuer,
+    verified_at: Number(row.verified_at),
+    expiry: Number(row.expiry),
+    ledger_sequence: Number(row.ledger_sequence),
+    threshold: row.threshold === null ? null : Number(row.threshold),
+    revoked: Number(row.revoked),
+  };
+}
 
 // ── Opaque cursor encoding ───────────────────────────────────────────────────
 // The nextCursor token is the base64url form of "<ledgerSequence>:<id>" — the
@@ -158,6 +215,15 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
   app.locals["rateLimiter"] = rateLimiter;
   app.use(rateLimiter.middleware());
 
+  // ── Auth guard ───────────────────────────────────────────────────────────
+  // requireAuth(undefined) → no-op; public mode, all endpoints open (default).
+  // requireAuth("secret")  → enforces Bearer / X-API-Key on guarded routes.
+  // Resolved from config first so tests can inject the key directly without
+  // touching the environment.
+  const envApiKey = process.env["API_KEY"]?.trim();
+  const apiKey = config?.apiKey ?? (envApiKey || undefined);
+  const guard = requireAuth(apiKey);
+
   // ── GET /health ──────────────────────────────────────────────────────────
   // Exposes ingester lag so operators can alert when the indexer falls behind.
   //
@@ -195,9 +261,79 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
     })
   );
 
+  // ── GET /metrics ──────────────────────────────────────────────────────────
+  // Exposes Prometheus metrics for the indexer.
+  //   - indexer_events_processed_total: total events processed since start
+  //   - indexer_fetch_errors_total: total fetch errors since start
+  //   - indexer_uptime_seconds: uptime in seconds since start
+  //   - indexer_db_write_latency_seconds: latest tick DB write latency in seconds
+  //   - indexer_ledgers_behind_head: ledgers between head and last processed
+  //
+  // This endpoint is left public (no auth required) so monitoring stacks can
+  // scrape it, but it is separate from the claim API routes so it is not
+  // colliding with public dApp/wallet endpoints. If operators want to gate it,
+  // they can add a reverse-proxy or firewall rule in front of /metrics.
+  app.get(
+    "/metrics",
+    asyncHandler(async (_req, res) => {
+      const metrics = ingester.getMetrics();
+      const lines: string[] = [];
+
+      // Events processed total
+      lines.push(
+        `# HELP indexer_events_processed_total Total number of events processed since the ingester started.`,
+      );
+      lines.push(
+        `# TYPE indexer_events_processed_total counter`,
+      );
+      lines.push(`indexer_events_processed_total ${metrics.eventsProcessedTotal}`);
+
+      // Fetch errors total
+      lines.push(
+        `# HELP indexer_fetch_errors_total Total number of fetch errors (all retries exhausted) since start.`,
+      );
+      lines.push(
+        `# TYPE indexer_fetch_errors_total counter`,
+      );
+      lines.push(`indexer_fetch_errors_total ${metrics.fetchErrorsTotal}`);
+
+      // Uptime in seconds
+      lines.push(
+        `# HELP indexer_uptime_seconds Uptime in seconds since the ingester started.`,
+      );
+      lines.push(
+        `# TYPE indexer_uptime_seconds gauge`,
+      );
+      lines.push(`indexer_uptime_seconds ${metrics.uptimeSeconds}`);
+
+      // DB write latency in seconds
+      lines.push(
+        `# HELP indexer_db_write_latency_seconds Latest tick DB write latency in seconds.`,
+      );
+      lines.push(
+        `# TYPE indexer_db_write_latency_seconds gauge`,
+      );
+      lines.push(`indexer_db_write_latency_seconds ${metrics.dbWriteLatencySeconds}`);
+
+      // Ledgers behind head
+      lines.push(
+        `# HELP indexer_ledgers_behind_head Number of ledgers between network head and last processed ledger.`,
+      );
+      lines.push(
+        `# TYPE indexer_ledgers_behind_head gauge`,
+      );
+      lines.push(`indexer_ledgers_behind_head ${metrics.lag}`);
+
+      res.type("text/plain").send(lines.join("\n") + "\n");
+    })
+  );
+
   // ── GET /claims?wallet=G… ────────────────────────────────────────────────
+  // Gated when API_KEY is set: per-wallet claim history makes per-holder
+  // correlation much easier than per-ledger chain queries.
   app.get(
     "/claims",
+    guard,
     asyncHandler(async (req, res) => {
       const wallet = req.query["wallet"];
       if (typeof wallet !== "string" || wallet.trim() === "") {
@@ -208,13 +344,15 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
       }
 
       const claims = await db.claimsByWallet(wallet.trim());
-      res.json({ wallet: wallet.trim(), claims });
+      res.json({ wallet: wallet.trim(), claims: claims.map(serializeClaim) });
     })
   );
 
   // ── GET /stats ───────────────────────────────────────────────────────────
+  // Gated when API_KEY is set: reveals total verified-holder counts per type.
   app.get(
     "/stats",
+    guard,
     asyncHandler(async (_req, res) => {
       const stats = await db.stats();
       res.json({ stats });
@@ -224,6 +362,7 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
   // ── GET /recent?limit=20&cursor=<opaque> ──────────────────────────────────
   app.get(
     "/recent",
+    guard,
     asyncHandler(async (req, res) => {
       const rawLimit = parseInt(String(req.query["limit"] ?? DEFAULT_LIMIT), 10);
       const limit = isNaN(rawLimit) || rawLimit < 1
@@ -245,7 +384,7 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
 
       const { claims, nextCursor } = await db.recent(limit, cursor);
       res.json({
-        claims,
+        claims: claims.map(serializeClaim),
         limit,
         nextCursor: nextCursor ? encodeCursor(nextCursor) : null,
       });
@@ -268,6 +407,57 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
       }
       const stats = await db.issuerStats(issuer.trim());
       res.json(stats);
+    })
+  );
+
+  // ── GET /issuers/:issuer/credentials ──────────────────────────────────────
+  // Returns all credentials issued by this issuer, for the revocation dashboard (#540).
+  app.get(
+    "/issuers/:issuer/credentials",
+    asyncHandler(async (req, res) => {
+      const issuer = req.params["issuer"];
+      if (typeof issuer !== "string" || issuer.trim() === "") {
+        res.status(400).json({ error: "issuer path parameter is required" });
+        return;
+      }
+      const rawClaims = await db.claimsByIssuer(issuer.trim());
+      res.json({
+        issuer: issuer.trim(),
+        credentials: rawClaims.map(serializeClaim),
+      });
+    })
+  );
+
+  // ── GET /issuers/:issuer/analytics ────────────────────────────────────────
+  // Verification volume over time, success rates, top verifiers, and exportable events (#542).
+  app.get(
+    "/issuers/:issuer/analytics",
+    asyncHandler(async (req, res) => {
+      const issuer = req.params["issuer"];
+      if (typeof issuer !== "string" || issuer.trim() === "") {
+        res.status(400).json({ error: "issuer path parameter is required" });
+        return;
+      }
+      const analytics = await db.issuerAnalytics(issuer.trim());
+      res.json(analytics);
+    })
+  );
+
+  // ── GET /credentials/:commitment/events ───────────────────────────────────
+  // Returns on-chain lifecycle events for a specific credential commitment (#541).
+  app.get(
+    "/credentials/:commitment/events",
+    asyncHandler(async (req, res) => {
+      const commitment = req.params["commitment"];
+      if (typeof commitment !== "string" || commitment.trim() === "") {
+        res.status(400).json({ error: "commitment path parameter is required" });
+        return;
+      }
+      const wallet = typeof req.query["wallet"] === "string" ? req.query["wallet"].trim() : undefined;
+      const type = typeof req.query["type"] === "string" ? req.query["type"].trim() : undefined;
+
+      const history = await db.credentialEvents(commitment.trim(), wallet, type);
+      res.json(history);
     })
   );
 
@@ -380,6 +570,33 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
       );
 
       res.status(201).json({ id, status: "pending" });
+    })
+  );
+
+  // ── PATCH /apps/:id/status ───────────────────────────────────────────────
+  // Update submission review status (approved | rejected | pending).
+  app.patch(
+    "/apps/:id/status",
+    guard,
+    asyncHandler(async (req, res) => {
+      const id = parseInt(req.params["id"], 10);
+      if (isNaN(id)) {
+        res.status(400).json({ error: "invalid id" });
+        return;
+      }
+      const { status } = req.body ?? {};
+      if (status !== "approved" && status !== "rejected" && status !== "pending") {
+        res.status(400).json({ error: "status must be one of: approved, rejected, pending" });
+        return;
+      }
+      const existing = await db.getAppSubmission(id);
+      if (!existing) {
+        res.status(404).json({ error: "app not found" });
+        return;
+      }
+      await db.updateSubmissionStatus(id, status as SubmissionStatus);
+      const updated = await db.getAppSubmission(id);
+      res.json({ app: updated });
     })
   );
 

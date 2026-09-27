@@ -2,16 +2,34 @@
 
 import type { Credential } from "./credential";
 import { loadCredentials, saveCredential } from "./credential";
+import {
+  currentDeploymentRef,
+  deploymentMismatchMessage,
+  type DeploymentRef,
+} from "./deployment";
 
-const PBKDF2_ITERATIONS = 100_000;
+/** OWASP-recommended minimum for PBKDF2-HMAC-SHA256 (2023+). */
+const PBKDF2_ITERATIONS = 600_000;
+
+/** Legacy iteration count — old v1 backups used this value. */
+const PBKDF2_ITERATIONS_V1 = 100_000;
+
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 
 export interface EncryptedBackup {
-  version: 1;
+  version: 2;
   salt: string;
   iv: string;
   ciphertext: string;
+  /** KDF iteration count — stored so future tuning is possible. */
+  iterations: number;
+  /**
+   * Deployment that created the backup (Issue #545). Recorded at export so
+   * restoring onto a different network / contract set is caught here, at
+   * import time, instead of failing confusingly at proof submission.
+   */
+  deployment?: DeploymentRef;
 }
 
 function toBase64(buf: ArrayBuffer | Uint8Array): string {
@@ -23,7 +41,7 @@ function toBase64(buf: ArrayBuffer | Uint8Array): string {
   return btoa(binary);
 }
 
-function fromBase64(b64: string): ArrayBuffer {
+function fromBase64(b64: string): Uint8Array {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
 
@@ -31,12 +49,13 @@ function fromBase64(b64: string): ArrayBuffer {
     bytes[i] = binary.charCodeAt(i);
   }
 
-  return bytes.buffer.slice(0);
+  return bytes;
 }
 
 async function deriveKey(
   passphrase: string,
-  salt: ArrayBuffer
+  salt: Uint8Array,
+  iterations = PBKDF2_ITERATIONS,
 ): Promise<CryptoKey> {
   const enc = new TextEncoder();
 
@@ -51,8 +70,8 @@ async function deriveKey(
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
-      iterations: PBKDF2_ITERATIONS,
+      salt: salt as BufferSource,
+      iterations,
       hash: "SHA-256",
     },
     keyMaterial,
@@ -77,38 +96,61 @@ export async function createEncryptedBackup(
   const saltBytes = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
   const ivBytes = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
 
-  const key = await deriveKey(passphrase, saltBytes.buffer.slice(0));
+  const key = await deriveKey(passphrase, saltBytes);
 
   const ciphertext = await crypto.subtle.encrypt(
     {
       name: "AES-GCM",
-      iv: ivBytes.buffer.slice(0),
+      iv: ivBytes as BufferSource,
     },
     key,
     plaintext
   );
 
   return {
-    version: 1,
+    version: 2,
     salt: toBase64(saltBytes),
     iv: toBase64(ivBytes),
     ciphertext: toBase64(ciphertext),
+    iterations: PBKDF2_ITERATIONS,
+    deployment: currentDeploymentRef(),
   };
 }
 
+/** Accept both v1 (legacy, 100k iterations) and v2 (current, 600k) backups. */
+type BackupEnvelope =
+  | EncryptedBackup
+  | (Omit<EncryptedBackup, "version" | "iterations" | "deployment"> & { version: 1 });
+
 export async function decryptBackup(
-  backup: EncryptedBackup,
+  backup: BackupEnvelope,
   passphrase: string
 ): Promise<Credential[]> {
-  if (backup.version !== 1) {
+  if (backup.version !== 1 && backup.version !== 2) {
     throw new Error("Unsupported backup version");
   }
+
+  // Cross-deployment guard (#545). The envelope's deployment is stored in
+  // plaintext, so a backup from another network / contract set is rejected
+  // before the expensive PBKDF2 derivation, and per-credential references
+  // are checked after decryption in case the envelope field is absent.
+  const envelopeMismatch = deploymentMismatchMessage(
+    "deployment" in backup ? backup.deployment : undefined,
+  );
+  if (envelopeMismatch) throw new Error(envelopeMismatch);
+
+  // v1 backups don't store iterations — use the legacy count.
+  // v2 backups store the exact count used during encryption.
+  const iterations =
+    backup.version === 2 && "iterations" in backup
+      ? backup.iterations
+      : PBKDF2_ITERATIONS_V1;
 
   const salt = fromBase64(backup.salt);
   const iv = fromBase64(backup.iv);
   const ciphertext = fromBase64(backup.ciphertext);
 
-  const key = await deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt, iterations);
 
   let decrypted: ArrayBuffer;
 
@@ -116,10 +158,10 @@ export async function decryptBackup(
     decrypted = await crypto.subtle.decrypt(
       {
         name: "AES-GCM",
-        iv,
+        iv: iv as BufferSource,
       },
       key,
-      ciphertext
+      ciphertext as BufferSource
     );
   } catch {
     throw new Error("Wrong passphrase or corrupted backup");
@@ -144,6 +186,10 @@ export async function decryptBackup(
     ) {
       throw new Error("Invalid backup contents: malformed credential entry");
     }
+    // Credentials restored via v1/legacy envelopes carry no envelope
+    // deployment, so enforce the same-origin rule per credential too (#545).
+    const mismatch = deploymentMismatchMessage(item.deployment);
+    if (mismatch) throw new Error(mismatch);
   }
 
   return parsed as Credential[];
@@ -153,6 +199,10 @@ export async function mergeCredentials(imported: Credential[]): Promise<Credenti
   let current = await loadCredentials();
 
   for (const cred of imported) {
+    // Defense in depth: callers other than decryptBackup must not be able to
+    // merge a foreign-deployment credential past the import-time guard (#545).
+    const mismatch = deploymentMismatchMessage(cred.deployment);
+    if (mismatch) throw new Error(mismatch);
     current = await saveCredential(cred);
   }
 
