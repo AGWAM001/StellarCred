@@ -30,18 +30,17 @@ const AGGREGATE_VK: &[u8] = include_bytes!("../../../fixtures/aggregate/vk");
 const AGGREGATE_PROOF: &[u8] = include_bytes!("../../../fixtures/aggregate/proof");
 const AGGREGATE_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/aggregate/public_inputs");
 
-// Negative test fixtures (Issue #537)
-const NEGATIVE_KYC_WRONG_ISSUER_VK: &[u8] = include_bytes!("../../../fixtures/negative/kyc_wrong_issuer_vk");
-const NEGATIVE_KYC_WRONG_ISSUER_PROOF: &[u8] = include_bytes!("../../../fixtures/negative/kyc_wrong_issuer_proof");
-const NEGATIVE_KYC_WRONG_ISSUER_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/negative/kyc_wrong_issuer_public_inputs");
+// Negative test fixtures (Issue #537) — same case directories as the
+// credential_verifier tests (fixtures/negative/<case>/{vk,proof,public_inputs}).
+const NEGATIVE_KYC_TRUNCATED_PROOF: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_truncated_inputs/proof");
+const NEGATIVE_KYC_TRUNCATED_PUBLIC_INPUTS: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_truncated_inputs/public_inputs");
 
-const NEGATIVE_KYC_TRUNCATED_VK: &[u8] = include_bytes!("../../../fixtures/negative/kyc_truncated_inputs_vk");
-const NEGATIVE_KYC_TRUNCATED_PROOF: &[u8] = include_bytes!("../../../fixtures/negative/kyc_truncated_inputs_proof");
-const NEGATIVE_KYC_TRUNCATED_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/negative/kyc_truncated_inputs_public_inputs");
-
-const NEGATIVE_KYC_WRONG_CIRCUIT_VK: &[u8] = include_bytes!("../../../fixtures/negative/kyc_wrong_circuit_vk");
-const NEGATIVE_KYC_WRONG_CIRCUIT_PROOF: &[u8] = include_bytes!("../../../fixtures/negative/kyc_wrong_circuit_proof");
-const NEGATIVE_KYC_WRONG_CIRCUIT_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/negative/kyc_wrong_circuit_public_inputs");
+const NEGATIVE_KYC_WRONG_CIRCUIT_PROOF: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_wrong_circuit/proof");
+const NEGATIVE_KYC_WRONG_CIRCUIT_PUBLIC_INPUTS: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_wrong_circuit/public_inputs");
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

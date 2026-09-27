@@ -47,8 +47,8 @@ If you need to regenerate these fixtures manually:
 1. **Wrong issuer pubkey**:
    ```bash
    # Copy valid KYC fixtures
-   cp fixtures/kyc/proof fixtures/negative/kyc_wrong_issuer_proof
-   cp fixtures/kyc/vk fixtures/negative/kyc_wrong_issuer_vk
+   cp fixtures/kyc/proof fixtures/negative/kyc_wrong_issuer/proof
+   cp fixtures/kyc/vk fixtures/negative/kyc_wrong_issuer/vk
    
    # Modify public_inputs to zero out issuer_x and issuer_y
    # (bytes 32-63 for issuer_x, bytes 64-95 for issuer_y)
@@ -57,18 +57,18 @@ If you need to regenerate these fixtures manually:
 2. **Truncated inputs**:
    ```bash
    # Copy valid KYC fixtures
-   cp fixtures/kyc/proof fixtures/negative/kyc_truncated_inputs_proof
-   cp fixtures/kyc/vk fixtures/negative/kyc_truncated_inputs_vk
+   cp fixtures/kyc/proof fixtures/negative/kyc_truncated_inputs/proof
+   cp fixtures/kyc/vk fixtures/negative/kyc_truncated_inputs/vk
    
    # Truncate public_inputs to 64 bytes (remove issuer_y)
-   dd if=fixtures/kyc/public_inputs of=fixtures/negative/kyc_truncated_inputs_public_inputs bs=1 count=64
+   dd if=fixtures/kyc/public_inputs of=fixtures/negative/kyc_truncated_inputs/public_inputs bs=1 count=64
    ```
 
 3. **Wrong circuit type**:
    ```bash
    # Copy age proof with kyc VK
-   cp fixtures/age/proof fixtures/negative/kyc_wrong_circuit_proof
-   cp fixtures/age/public_inputs fixtures/negative/kyc_wrong_circuit_public_inputs
+   cp fixtures/age/proof fixtures/negative/kyc_wrong_circuit/proof
+   cp fixtures/age/public_inputs fixtures/negative/kyc_wrong_circuit/public_inputs
    cp fixtures/kyc/vk fixtures/negative/kyc_wrong_circuit_vk
    ```
 
