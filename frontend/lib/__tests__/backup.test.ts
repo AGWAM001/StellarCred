@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DeploymentRef } from "../deployment";
 
 const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
 const MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
@@ -30,7 +31,7 @@ const { CREDENTIALS_STORAGE_KEY } = await import("../credential");
 
 const PASSPHRASE = "correct horse battery staple";
 
-function deploymentRef(networkPassphrase: string) {
+function deploymentRef(networkPassphrase: string): DeploymentRef {
   return {
     network: networkPassphrase === TESTNET_PASSPHRASE ? "testnet" : "mainnet",
     networkPassphrase,
