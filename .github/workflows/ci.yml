@@ -23,6 +23,70 @@ env:
   NODE_VERSION: "20"
 
 jobs:
+  # ── Dependency review: advisories, licenses, maintenance ──────────────────
+  # Runs early in the matrix to fail fast on dependency violations.
+  # Blocks PRs with new packages that have known advisories or denied licenses.
+  dependency-check:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Review npm dependency changes (GitHub Advisory DB)
+        uses: actions/dependency-review-action@v4
+        continue-on-error: true
+        with:
+          fail-on-severity: moderate
+          allow-licenses: |
+            MIT
+            Apache-2.0
+            Apache-2.0 WITH LLVM-exception
+            ISC
+            BSD-2-Clause
+            BSD-3-Clause
+            0BSD
+            Unlicense
+            MPL-2.0
+            CC0-1.0
+            WTFPL
+          deny-licenses: |
+            GPL
+            GPL-2.0
+            GPL-3.0
+            AGPL
+            AGPL-3.0
+            SSPL
+          fail-on-license-check: false
+
+      - name: Setup Node for custom checks
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Check for new frontend runtime dependencies
+        run: |
+          node .github/scripts/check-runtime-deps.mjs
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+
+      - name: Verify allowed licenses in npm tree
+        working-directory: frontend
+        run: |
+          node ../.github/scripts/verify-npm-licenses.mjs
+
   commitlint:
     name: Lint commit messages
     runs-on: ubuntu-latest
