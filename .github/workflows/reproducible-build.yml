@@ -54,13 +54,17 @@ jobs:
       - uses: actions/checkout@v7
 
       # ── Install Rust on the host ─────────────────────────────────────────
-      # rust-toolchain.toml pins the exact compiler version.  rustup reads it
-      # automatically; `rustup show` materialises the toolchain on disk.
+      # rust-toolchain.toml pins the exact compiler version.  We install it
+      # explicitly by channel name and make it the default so that `cargo build`
+      # below uses exactly the same version as the Docker base image regardless
+      # of what the ubuntu-latest runner image ships pre-installed.
       - name: Install pinned Rust toolchain (host)
         run: |
-          rustup show          # materialises the toolchain from rust-toolchain.toml
-          rustup target add wasm32v1-none
-          rustc --version
+          CHANNEL=$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
+          echo "Pinned channel: $CHANNEL"
+          rustup toolchain install "$CHANNEL" --target wasm32v1-none --no-self-update
+          rustup default "$CHANNEL"
+          rustc --version   # must print exactly the pinned version
           cargo --version
 
       # ── Host build ───────────────────────────────────────────────────────
@@ -171,6 +175,9 @@ jobs:
       - name: "Layer 2: compare host build vs container build"
         run: |
           echo "--- Layer 2: host vs container ---"
+          echo "Host compiler:      $(rustc --version)"
+          echo "Container compiler: $(docker run --rm stellarcred-build:ci rustc --version)"
+          echo ""
           echo "Host hashes:"
           cat build-host/sha256sums.txt
           echo "Container hashes:"
