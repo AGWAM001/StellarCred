@@ -535,6 +535,73 @@ See [`examples/svelte-gate/ClaimGate.svelte`](./examples/svelte-gate/ClaimGate.s
 {/each}{/if}
 ```
 
+---
+
+## Server-Side Wallet Challenge & Verification (`verifyWalletClaim`)
+
+> ⚠️ **CRITICAL SECURITY WARNING: The Wallet Spoofing Pitfall**
+>
+> **Do NOT use `hasClaim(wallet, ...)` alone to gate server-side resources or create authenticated sessions.**
+>
+> Anyone can look up a verified public key on-chain and pass it in a request body, query parameter, or header. Checking `hasClaim(untrustedAddress, "kyc")` only proves that *someone* owns credentials for that address, **not** that the current HTTP caller controls that address!
+>
+> To securely gate access, your server must issue a cryptographic challenge, have the client sign it with their Stellar wallet (Freighter, Albedo, etc.), and verify both the signature and on-chain credential claim.
+
+### 1. Issue a Challenge (Server)
+
+```ts
+import { createWalletChallenge } from "@stellarcred/sdk";
+
+// In your GET /api/auth/challenge endpoint:
+const challenge = createWalletChallenge({
+  domain: "yourapp.com",
+  statement: "Sign in to access accredited investor pool",
+  ttlMs: 5 * 60 * 1000, // 5 minutes validity
+});
+
+// Send `challenge` JSON to frontend
+res.json(challenge);
+```
+
+### 2. Sign Challenge (Client / Wallet)
+
+```ts
+// In your frontend with Freighter or wallet of choice:
+import { signMessage } from "@stellar/freighter-api";
+
+const signature = await signMessage(challenge.message);
+// Send { wallet, challenge, signature } to POST /api/auth/verify
+```
+
+### 3. Verify Wallet Control & On-Chain Claim in One Call (Server)
+
+```ts
+import { verifyWalletClaim } from "@stellarcred/sdk";
+
+// In your POST /api/auth/verify endpoint:
+const result = await verifyWalletClaim({
+  wallet: req.body.wallet,
+  challenge: req.body.challenge,
+  signature: req.body.signature,
+  claim: "kyc",
+  // Optional threshold or issuer requirements:
+  // claimOptions: { minThreshold: 50000, trustedIssuers: ["G..."] },
+});
+
+if (!result.ok) {
+  // Returns detailed diagnostics:
+  // result.signatureValid === false (spoofing attempt or altered challenge)
+  // result.claimValid === false (wallet doesn't hold the on-chain claim)
+  return res.status(403).json({ error: result.error });
+}
+
+// ✅ Proven wallet control AND valid on-chain KYC credential!
+// Proceed with issuing session cookie or JWT:
+createSession(req, result.wallet);
+```
+
+---
+
 ## Release Process
 
 The SDK follows [Semantic Versioning](https://semver.org/). Releases are fully automated through `.github/workflows/release.yml`.

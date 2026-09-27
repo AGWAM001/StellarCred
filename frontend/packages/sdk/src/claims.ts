@@ -758,3 +758,24 @@ export function watchClaim(
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Challenge generation & server-side wallet verification (#543)
+// ---------------------------------------------------------------------------
+
+export {
+  createWalletChallenge,
+  verifyWalletSignature,
+  verifyWalletClaim,
+  MemoryChallengeStore,
+  defaultChallengeStore,
+} from "./challenge";
+
+export type {
+  WalletChallenge,
+  CreateChallengeOptions,
+  ChallengeStore,
+  VerifyWalletClaimParams,
+  VerifyWalletClaimResult,
+} from "./challenge";
+

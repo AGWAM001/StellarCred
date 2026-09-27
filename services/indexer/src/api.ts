@@ -410,6 +410,57 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
     })
   );
 
+  // ── GET /issuers/:issuer/credentials ──────────────────────────────────────
+  // Returns all credentials issued by this issuer, for the revocation dashboard (#540).
+  app.get(
+    "/issuers/:issuer/credentials",
+    asyncHandler(async (req, res) => {
+      const issuer = req.params["issuer"];
+      if (typeof issuer !== "string" || issuer.trim() === "") {
+        res.status(400).json({ error: "issuer path parameter is required" });
+        return;
+      }
+      const rawClaims = await db.claimsByIssuer(issuer.trim());
+      res.json({
+        issuer: issuer.trim(),
+        credentials: rawClaims.map(serializeClaim),
+      });
+    })
+  );
+
+  // ── GET /issuers/:issuer/analytics ────────────────────────────────────────
+  // Verification volume over time, success rates, top verifiers, and exportable events (#542).
+  app.get(
+    "/issuers/:issuer/analytics",
+    asyncHandler(async (req, res) => {
+      const issuer = req.params["issuer"];
+      if (typeof issuer !== "string" || issuer.trim() === "") {
+        res.status(400).json({ error: "issuer path parameter is required" });
+        return;
+      }
+      const analytics = await db.issuerAnalytics(issuer.trim());
+      res.json(analytics);
+    })
+  );
+
+  // ── GET /credentials/:commitment/events ───────────────────────────────────
+  // Returns on-chain lifecycle events for a specific credential commitment (#541).
+  app.get(
+    "/credentials/:commitment/events",
+    asyncHandler(async (req, res) => {
+      const commitment = req.params["commitment"];
+      if (typeof commitment !== "string" || commitment.trim() === "") {
+        res.status(400).json({ error: "commitment path parameter is required" });
+        return;
+      }
+      const wallet = typeof req.query["wallet"] === "string" ? req.query["wallet"].trim() : undefined;
+      const type = typeof req.query["type"] === "string" ? req.query["type"].trim() : undefined;
+
+      const history = await db.credentialEvents(commitment.trim(), wallet, type);
+      res.json(history);
+    })
+  );
+
   // ── GET /apps ────────────────────────────────────────────────────────────
   // Returns all approved app submissions for the gallery.
   app.get(
