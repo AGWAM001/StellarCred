@@ -57,6 +57,10 @@ export function useIssuerStatus(
 
   useEffect(() => {
     if (!address) return;
+    // Capture the narrowed string so the async closure sees `string`, not
+    // `string | null | undefined`. TypeScript cannot narrow through async
+    // closures, so this explicit capture is required.
+    const account: string = address;
 
     async function run() {
       if (checkingRef.current) return;
@@ -81,7 +85,7 @@ export function useIssuerStatus(
               cred.type,
               cred.issuerPubX,
               cred.issuerPubY,
-              address,
+              account,
             );
           } catch {
             status = "unknown";
