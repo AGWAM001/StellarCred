@@ -2703,4 +2703,3 @@ fn successful_batch_preserves_issuer_and_threshold() {
         &Some(vec![&env, h.funds_issuer.clone()]), // wrong issuer
     ));
 }
-}
