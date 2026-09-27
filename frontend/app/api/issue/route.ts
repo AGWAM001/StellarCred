@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CREDENTIAL_TYPES, type ClaimParams } from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
-import { readJsonBody, bodyErrorResponse } from "@/lib/request-limits";
+import { currentDeploymentRef } from "@/lib/deployment";
+import { readJsonBody, bodyErrorResponse } from "../../../lib/request-limits";
 import {
   logger,
   stripSensitiveFields,
@@ -433,11 +434,8 @@ async function executeRequest(
     attributes.balance = String(plaid.balance ?? 0);
   }
 
-  // ---------------------------------------------------------------------------
-  // Signing & Issuance
-  // ---------------------------------------------------------------------------
   try {
-    const credentials = await issueAndAuditCredentials({
+    const issuedCredentials = await issueAndAuditCredentials({
       credentialTypes,
       holder,
       issuerId,
@@ -447,6 +445,10 @@ async function executeRequest(
       claimParams,
       requestId,
     });
+    const credentials = issuedCredentials.map((credential) => ({
+      ...credential,
+      deployment: currentDeploymentRef(),
+    }));
 
     outcome = "success";
     return sendResponse(NextResponse.json({ credentials }));
