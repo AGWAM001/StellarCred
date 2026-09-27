@@ -96,6 +96,7 @@ pub struct EventAdminChanged {
     pub changed_at: u64,
 }
 
+// Admin rotation event - see issue #342 for implementation details
 /// Payload emitted when an issuer's signing key is rotated.
 /// Topics: ("iss_reg", "key_rot")
 #[contracttype]
