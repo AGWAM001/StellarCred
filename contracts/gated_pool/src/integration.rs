@@ -121,7 +121,7 @@ fn deploy_world(env: &Env) -> World {
     // Gated DeFi pool wired to the claim cache.
     let gate_type = symbol_short!("kyc");
     let min_threshold: Option<u64> = None;
-    let pool_id = env.register(GatedPool, (pr_id.clone(), gate_type, min_threshold));
+    let pool_id = env.register(GatedPool, (pr_id.clone(), gate_type, min_threshold, None::<Address>));
     let pool = GatedPoolClient::new(env, &pool_id);
 
     World {
