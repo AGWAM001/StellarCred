@@ -100,7 +100,7 @@ export const TYPE_META: Record<
     title: "Proof of Funds",
     claim: "balance > $10,000",
     issuable: true,
-    attribute: "Account balance (USD)",
+    attribute: "Aggregate balance across linked accounts (USD)",
   },
   accreditation: {
     title: "Accredited Investor",

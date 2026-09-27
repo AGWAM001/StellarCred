@@ -408,6 +408,10 @@ async function executeRequest(
     }
   }
 
+  // Gate funds issuance on the Plaid balance attestation. Plaid is the source
+  // of truth — we overwrite any user-supplied balance with the verified
+  // aggregate (summed across every linked Plaid item). Only the aggregate is
+  // committed and signed; per-source account data never leaves this server.
   // ---------------------------------------------------------------------------
   // Balance attestation via Plaid
   // ---------------------------------------------------------------------------
