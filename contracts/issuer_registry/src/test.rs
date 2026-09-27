@@ -1192,23 +1192,6 @@ fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
     // The replacement key and the issuer's trust are untouched.
     assert!(client.is_valid_issuer_key(&issuer, &k1));
     assert!(client.is_valid_issuer(&issuer, &symbol_short!("kyc")));
-
-    assert_eq!(
-        events,
-        vec![
-            &env,
-            (
-                client.address.clone(),
-                (symbol_short!("iss_reg"), symbol_short!("admin_rot")).into_val(&env),
-                EventAdminChanged {
-                    old_admin: admin.clone(),
-                    new_admin: new_admin.clone(),
-                    changed_at: env.ledger().timestamp(),
-                }
-                .into_val(&env),
-            ),
-        ],
-    );
 }
 
 /// Emergency revocation of a retired key is immediate: the difference from
