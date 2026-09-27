@@ -208,13 +208,19 @@ async function main() {
     const depName = dep.includes(' (version changed:') ? dep.split(' (version changed:')[0] : dep;
     const version = currentDeps[depName];
 
+    // Skip workspace packages (e.g., @stellarcred/issuer@workspace:*)
+    if (version && version.startsWith('workspace:')) {
+      console.log(`  📍 ${depName}@${version} (workspace package - skipped)\n`);
+      continue;
+    }
+
     console.log(`  📍 ${depName}@${version}`);
 
     // Fetch metadata
     const metadata = await getPackageMetadata(depName, version);
 
     // Display metadata
-    if (metadata.description !== 'N/A') {
+    if (metadata.description && metadata.description !== 'N/A') {
       console.log(`     Description: ${metadata.description.substring(0, 60)}`);
     }
 
