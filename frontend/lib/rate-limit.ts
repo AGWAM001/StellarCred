@@ -60,6 +60,7 @@
 import { createHash } from "crypto";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { getSharedStore, checkMultiInstanceStoreWarning } from "./shared-store";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -205,11 +206,43 @@ export function checkLimit(
   limit: number,
   windowMs: number,
 ): RateLimitResult {
+  checkMultiInstanceStoreWarning();
   const result = increment(key, limit, windowMs);
   if (!result.allowed) {
     return { throttled: true, retryAfterMs: result.retryAfterMs };
   }
   return { throttled: false, remaining: result.remaining, windowEnd: result.windowEnd };
+}
+
+/**
+ * Asynchronously check (and record) one request against the pluggable shared store.
+ * If configured with Upstash Redis / Vercel KV, this operates atomically across
+ * multiple instances or serverless workers. If using MemoryStore, delegates to
+ * {@link checkLimit}.
+ */
+export async function checkLimitAsync(
+  key: string,
+  limit: number,
+  windowMs: number,
+): Promise<RateLimitResult> {
+  const sharedStore = getSharedStore();
+  if (sharedStore.name === "memory") {
+    return checkLimit(key, limit, windowMs);
+  }
+
+  const ttlSeconds = Math.ceil(windowMs / 1000);
+  const { count, ttlRemainingMs } = await sharedStore.incr(`rl:${key}`, ttlSeconds);
+  const effectiveTtlMs = ttlRemainingMs > 0 ? ttlRemainingMs : windowMs;
+
+  if (count > limit) {
+    return { throttled: true, retryAfterMs: effectiveTtlMs };
+  }
+
+  return {
+    throttled: false,
+    remaining: Math.max(0, limit - count),
+    windowEnd: Date.now() + effectiveTtlMs,
+  };
 }
 
 // ---------------------------------------------------------------------------
