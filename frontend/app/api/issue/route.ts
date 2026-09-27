@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CREDENTIAL_TYPES, type ClaimParams } from "@stellarcred/issuer";
+import { CREDENTIAL_TYPES, type ClaimParams, type CredentialType } from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
 import { currentDeploymentRef } from "@/lib/deployment";
 import { readJsonBody, bodyErrorResponse } from "../../../lib/request-limits";
@@ -32,6 +32,7 @@ import {
   createPersonaInquiry,
   resolvePersonaKYC,
 } from "@/lib/persona";
+import { registerPendingInquiry } from "@/lib/persona-webhook";
 import {
   issueAndAuditCredentials,
   localIssuerPubkeyBytes,
@@ -356,6 +357,16 @@ async function executeRequest(
           ? `${baseUrl}/verify?return_url=${encodeURIComponent(returnUrl)}`
           : `${baseUrl}/verify`;
         const { url, id } = await createPersonaInquiry(templateId, redirectUrl, holder);
+        // Keep only the non-PII issuance context server-side so a webhook can
+        // complete an approval even when the holder never returns to the tab.
+        registerPendingInquiry(id, {
+          holder,
+          issuerId: issuerId ?? SIM_ACCOUNT,
+          issuerName,
+          expiry,
+          credentialTypes: credentialTypes as CredentialType[],
+          claimParams,
+        });
         return sendResponse(
           NextResponse.json(
             { needsPersona: true, personaUrl: url, inquiryId: id },

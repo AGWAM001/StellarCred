@@ -79,6 +79,8 @@ export function alpha2ToNumeric(code: string): string {
 // In-memory caches with short TTL
 const pendingInquiries = new Map<string, PendingInquiry>();
 const inquiryResults = new Map<string, InquiryResult>();
+const processingInquiries = new Set<string>();
+const processedEventIds = new Set<string>();
 
 function evictExpired(): void {
   const now = Date.now();
@@ -139,6 +141,20 @@ export function deleteInquiryResult(inquiryId: string): void {
 export function clearPersonaCaches(): void {
   pendingInquiries.clear();
   inquiryResults.clear();
+  processingInquiries.clear();
+  processedEventIds.clear();
+}
+
+export function beginInquiryProcessing(inquiryId: string, eventId?: string): boolean {
+  if (eventId && processedEventIds.has(eventId)) return false;
+  if (processingInquiries.has(inquiryId)) return false;
+  processingInquiries.add(inquiryId);
+  if (eventId) processedEventIds.add(eventId);
+  return true;
+}
+
+export function finishInquiryProcessing(inquiryId: string): void {
+  processingInquiries.delete(inquiryId);
 }
 
 /**
