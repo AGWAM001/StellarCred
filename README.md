@@ -179,6 +179,11 @@ full reference.
 | `jurisdiction` | Country not restricted       | Country code              |
 | `funds`        | Balance ≥ threshold          | Exact balance (from Plaid)|
 
+**Issuing credentials?** The issuer is the trust anchor of the system and has
+the most responsibility of the three roles — registration, key custody, what a
+signature actually attests to, rotation and revocation. Start here:
+**[Issuer onboarding guide](docs/ISSUER_ONBOARDING.md)**.
+
 ---
 
 ## Security model
@@ -202,6 +207,10 @@ full reference.
 4. **Proof expiry.** `ProofRegistry` uses persistent storage with an explicit
    `expiry` (checked against ledger time) plus TTL extension.
 5. **Contract upgradeability.** `ProofRegistry` supports an admin-controlled upgrade path using Soroban's native `update_current_contract_wasm` capability. The administrative key is initialized at deployment time and can be subsequently transferred to a multisig wallet or DAO.
+
+Points 1–3 are **obligations on every issuer**, not background reading. The
+[issuer onboarding guide](docs/ISSUER_ONBOARDING.md) states each of them as a
+requirement, with the custody, rotation and revocation duties that go with them.
 
 ---
 
