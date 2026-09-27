@@ -70,13 +70,17 @@ jobs:
           cargo --version
 
       # ── Host build ───────────────────────────────────────────────────────
-      # Runs directly on the ubuntu-latest runner — different environment from
-      # the container (different libc path, different $HOME, different shell
-      # environment).  SOURCE_DATE_EPOCH=0 removes the only timestamp source
-      # that Cargo injects into the binary.
+      # RUSTFLAGS path remapping normalises host-specific paths that Cargo can
+      # embed in WASM metadata (via proc-macros, build scripts, or debug info):
+      #   - Source tree: $GITHUB_WORKSPACE  → /workspace  (matches container)
+      #   - Cargo registry: $HOME/.cargo    → /usr/local/cargo (matches container)
+      # SOURCE_DATE_EPOCH=0 removes any timestamp the compiler injects.
       - name: Build WASM on host
         run: |
           mkdir -p build-host
+          export RUSTFLAGS="\
+            --remap-path-prefix=${GITHUB_WORKSPACE}=/workspace \
+            --remap-path-prefix=${HOME}/.cargo=/usr/local/cargo"
           SOURCE_DATE_EPOCH=0 cargo build \
             --release \
             --target wasm32v1-none \
