@@ -207,6 +207,11 @@ the most responsibility of the three roles — registration, key custody, what a
 signature actually attests to, rotation and revocation. Start here:
 **[Issuer onboarding guide](docs/ISSUER_ONBOARDING.md)**.
 
+**Issuing credentials?** The issuer is the trust anchor of the system and has
+the most responsibility of the three roles — registration, key custody, what a
+signature actually attests to, rotation and revocation. Start here:
+**[Issuer onboarding guide](docs/ISSUER_ONBOARDING.md)**.
+
 ---
 
 ## Security model
@@ -232,6 +237,10 @@ signature actually attests to, rotation and revocation. Start here:
 4. **Proof expiry.** `ProofRegistry` uses persistent storage with an explicit
    `expiry` (checked against ledger time) plus TTL extension.
 5. **Contract governance is role-based.** Privileged actions on `CredentialVerifier`, `IssuerRegistry`, and `ProofRegistry` are gated by a role map (`Map<Symbol, Address>`) rather than a single admin key. The deployer is seeded the `admin` role (plus `upgrader` and `pauser` on `ProofRegistry`) at construction, and the root admin can delegate or rotate holders with `grant_role` / `revoke_role` (`has_role` is a public view). Each privileged function is guarded by its specific role: `set_vk` / `deprecate_version` / `refresh_latest_version_ttl` → `admin`, issuer registration / revocation / metadata → `admin`, `ProofRegistry.upgrade` → `upgrader`, `pause` / `unpause` → `pauser`, `migrate_record` → `admin`. Upgrade and pause power can therefore live on separate keys (multisig, release engineer, security/ops key, DAO) from day-to-day administration, and each key can be rotated independently. `set_admin` transfers the root key together with every role the old root held, so the existing deploy/upgrade flow is unchanged.
+
+Points 1–3 are **obligations on every issuer**, not background reading. The
+[issuer onboarding guide](docs/ISSUER_ONBOARDING.md) states each of them as a
+requirement, with the custody, rotation and revocation duties that go with them.
 
 Points 1–3 are **obligations on every issuer**, not background reading. The
 [issuer onboarding guide](docs/ISSUER_ONBOARDING.md) states each of them as a
