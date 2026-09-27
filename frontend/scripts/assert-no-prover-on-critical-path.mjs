@@ -14,9 +14,9 @@
  * Runs under CI after `pnpm build` + `pnpm start --port 4319` in the same
  * job. Uses the already-installed Playwright (no new deps).
  */
-import { chromium } from 'playwright';
+import { chromium } from '@playwright/test';
 
-const PORT = process.env.FIRST_LOAD_PORT || '4319';
+const PORT = '4319';
 const BASE = `http://localhost:${PORT}`;
 const ROUTES = ['/', '/apps', '/holder', '/issuer', '/verify', '/docs'];
 
