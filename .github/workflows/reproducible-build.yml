@@ -54,16 +54,18 @@ jobs:
       - uses: actions/checkout@v7
 
       # ── Install Rust on the host ─────────────────────────────────────────
-      # rust-toolchain.toml pins the exact compiler version.  We install it
-      # explicitly by channel name and make it the default so that `cargo build`
-      # below uses exactly the same version as the Docker base image regardless
-      # of what the ubuntu-latest runner image ships pre-installed.
+      # ubuntu-latest ships a pre-installed Rust in /usr/bin that can shadow
+      # rustup's shims even after `rustup default`.  We prepend rustup's bin
+      # directory to PATH so every subsequent step in this job uses the pinned
+      # toolchain and nothing from the system install can interfere.
       - name: Install pinned Rust toolchain (host)
         run: |
           CHANNEL=$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
           echo "Pinned channel: $CHANNEL"
           rustup toolchain install "$CHANNEL" --target wasm32v1-none --no-self-update
           rustup default "$CHANNEL"
+          # Prepend rustup's bin to PATH for this and all subsequent steps.
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustc --version   # must print exactly the pinned version
           cargo --version
 
