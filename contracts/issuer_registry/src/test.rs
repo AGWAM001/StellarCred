@@ -2,7 +2,7 @@ use super::*;
 use proptest::prelude::*;
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events as _, MockAuth, MockAuthInvoke},
+    testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
     vec, Address, Bytes, BytesN, Env, IntoVal, Symbol,
 };
 
@@ -931,6 +931,254 @@ fn set_admin_emits_expected_event() {
 
     assert_eq!(
         env.events().all().filter_by_contract(&client.address),
+// ── Issuer key sets: rotation and revocation ────────────────────────────────
+//
+// `T0` is an arbitrary non-zero ledger timestamp so windows are not measured
+// from the genesis timestamp; `WINDOW` is the grace period a rotation grants the
+// key it retires.
+const T0: u64 = 1_700_000_000;
+const WINDOW: u64 = 90 * 24 * 60 * 60;
+/// Last ledger on which a key retired at `T0` with a `WINDOW`-long validity
+/// window still verifies.
+const T0_WINDOW_END: u64 = T0 + WINDOW;
+
+fn key(seed: u8) -> [u8; 64] {
+    [seed; 64]
+}
+
+fn register_k0(env: &Env, client: &IssuerRegistryClient<'_>, issuer: &Address) -> BytesN<64> {
+    let k0 = BytesN::from_array(env, &key(1));
+    client.register_issuer(issuer, &k0, &vec![env, symbol_short!("kyc")]);
+    k0
+}
+
+/// Rotation keeps a retired key valid for its whole window, which is what stops
+/// a key change from invalidating the credentials already issued under it.
+#[test]
+fn rotate_issuer_key_keeps_retired_key_valid_within_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+
+    client.rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+
+    // New issuance uses the new key.
+    assert_eq!(client.get_issuer_pubkey(&issuer), k1);
+    assert!(client.is_valid_issuer_key(&issuer, &k1));
+
+    // The retired key still verifies: outstanding credentials survive.
+    assert!(client.is_valid_issuer_key(&issuer, &k0));
+    // Including on the final ledger of its window.
+    env.ledger().set_timestamp(T0 + WINDOW);
+    assert!(client.is_valid_issuer_key(&issuer, &k0));
+
+    // The window is recorded with the retirement timestamp.
+    let keys = client.get_issuer_keys(&issuer);
+    assert_eq!(keys.len(), 2);
+    let retired = keys.get(1).unwrap();
+    assert_eq!(retired.pubkey, k0);
+    assert_eq!(retired.retired_at, T0);
+    assert_eq!(retired.valid_until, T0_WINDOW_END);
+    assert!(!retired.revoked);
+}
+
+/// One ledger past the window the retired key stops validating; the current
+/// key is unaffected.
+#[test]
+fn rotated_out_key_stops_validating_after_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+    client.rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+
+    env.ledger().set_timestamp(T0 + WINDOW + 1);
+    assert!(!client.is_valid_issuer_key(&issuer, &k0));
+    assert!(client.is_valid_issuer_key(&issuer, &k1));
+    // Trust for the credential type is untouched by rotation.
+    assert!(client.is_valid_issuer(&issuer, &symbol_short!("kyc")));
+}
+
+#[test]
+fn rotate_issuer_key_emits_expected_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+
+    // Drain the register event.
+    let _ = env.events().all();
+    client.rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        vec![
+            &env,
+            (
+                client.address.clone(),
+                (symbol_short!("iss_reg"), symbol_short!("key_rot")).into_val(&env),
+                EventIssuerKeyRotated {
+                    issuer,
+                    old_pubkey: k0,
+                    new_pubkey: k1,
+                    old_key_valid_until: T0 + WINDOW,
+                }
+                .into_val(&env),
+            ),
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Contract, #11")]
+fn rotate_issuer_key_rejects_the_current_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+
+    client.rotate_issuer_key(&issuer, &k0, &(T0 + WINDOW));
+}
+
+#[test]
+#[should_panic(expected = "Contract, #8")]
+fn rotate_issuer_key_rejects_reuse_of_a_retired_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    client.rotate_issuer_key(&issuer, &BytesN::from_array(&env, &key(2)), &(T0 + WINDOW));
+
+    // Re-installing k0 would revive the credentials signed with it.
+    client.rotate_issuer_key(&issuer, &k0, &(T0 + 2 * WINDOW));
+}
+
+#[test]
+#[should_panic(expected = "Contract, #10")]
+fn rotate_issuer_key_rejects_a_window_that_already_closed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    register_k0(&env, &client, &issuer);
+
+    client.rotate_issuer_key(&issuer, &BytesN::from_array(&env, &key(2)), &T0);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #10")]
+fn rotate_issuer_key_rejects_a_window_beyond_the_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    register_k0(&env, &client, &issuer);
+
+    client.rotate_issuer_key(
+        &issuer,
+        &BytesN::from_array(&env, &key(2)),
+        &(T0 + MAX_KEY_RETENTION_SECS + 1),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Contract, #9")]
+fn rotate_issuer_key_fails_once_the_history_is_full() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    register_k0(&env, &client, &issuer);
+
+    // Every rotation retires a key that stays inside its window, so the history
+    // fills up to the cap and the next rotation has nowhere to go.
+    for i in 0..MAX_RETIRED_KEYS {
+        let next = BytesN::from_array(&env, &key(2 + i as u8));
+        client.rotate_issuer_key(&issuer, &next, &(T0 + WINDOW));
+    }
+    let full = BytesN::from_array(&env, &key(2 + MAX_RETIRED_KEYS as u8));
+    client.rotate_issuer_key(&issuer, &full, &(T0 + WINDOW));
+}
+
+/// Retired keys are pruned once their window closes, so an issuer with a long
+/// lifetime can keep rotating.
+#[test]
+fn expired_keys_are_pruned_and_do_not_block_future_rotations() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+    let k2 = BytesN::from_array(&env, &key(3));
+
+    // k0 is retired with a window that closes before the next rotation.
+    client.rotate_issuer_key(&issuer, &k1, &(T0 + 100));
+    env.ledger().set_timestamp(T0 + 200);
+    client.rotate_issuer_key(&issuer, &k2, &(T0 + 300));
+
+    let keys = client.get_issuer_keys(&issuer);
+    assert_eq!(keys.len(), 2);
+    assert_eq!(keys.get(0).unwrap().pubkey, k2);
+    assert_eq!(keys.get(1).unwrap().pubkey, k1);
+    assert!(!client.is_valid_issuer_key(&issuer, &k0));
+}
+
+/// Emergency revocation of a retired key is immediate: the difference from
+/// rotation is that the window is ignored.
+#[test]
+fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+    client.rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+
+    // Drain the rotation event.
+    let _ = env.events().all();
+    client.revoke_issuer_key(&issuer, &k0);
+    // Captured before the read-only checks below: a subsequent query starts a
+    // fresh invocation and discards the recorded events.
+    let events = env.events().all().filter_by_contract(&client.address);
+
+    assert!(!client.is_valid_issuer_key(&issuer, &k0));
+    // The replacement key and the issuer's trust are untouched.
+    assert!(client.is_valid_issuer_key(&issuer, &k1));
+    assert!(client.is_valid_issuer(&issuer, &symbol_short!("kyc")));
+
+    assert_eq!(
+        events,
         vec![
             &env,
             (
@@ -940,9 +1188,368 @@ fn set_admin_emits_expected_event() {
                     old_admin: admin.clone(),
                     new_admin: new_admin.clone(),
                     changed_at: env.ledger().timestamp(),
+                (symbol_short!("iss_reg"), symbol_short!("key_revk")).into_val(&env),
+                EventIssuerKeyRevoked {
+                    issuer,
+                    pubkey: k0,
+                    was_current: false,
+                    revoked_at: T0,
                 }
                 .into_val(&env),
             ),
         ],
     );
+}
+
+/// Revoking the *current* key stops issuance until an admin rotates to a new
+/// one; keys retired earlier and never revoked keep working.
+#[test]
+fn revoke_issuer_key_on_the_current_key_blocks_issuance_until_rotation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+    let k2 = BytesN::from_array(&env, &key(3));
+    client.rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+
+    // Drain the rotation event.
+    let _ = env.events().all();
+    client.revoke_issuer_key(&issuer, &k1);
+    // Captured before the read-only checks below: a subsequent query starts a
+    // fresh invocation and discards the recorded events.
+    let events = env.events().all().filter_by_contract(&client.address);
+
+    assert!(!client.is_valid_issuer_key(&issuer, &k1));
+    assert!(!client.is_valid_issuer(&issuer, &symbol_short!("kyc")));
+    // k0 was retired, not revoked: its credentials are unaffected.
+    assert!(client.is_valid_issuer_key(&issuer, &k0));
+
+    assert_eq!(
+        events,
+        vec![
+            &env,
+            (
+                client.address.clone(),
+                (symbol_short!("iss_reg"), symbol_short!("key_revk")).into_val(&env),
+                EventIssuerKeyRevoked {
+                    issuer: issuer.clone(),
+                    pubkey: k1.clone(),
+                    was_current: true,
+                    revoked_at: T0,
+                }
+                .into_val(&env),
+            ),
+        ],
+    );
+
+    // Rotating to a fresh key restores issuance; the revoked key stays dead.
+    client.rotate_issuer_key(&issuer, &k2, &(T0 + WINDOW));
+    assert!(client.is_valid_issuer_key(&issuer, &k2));
+    assert!(client.is_valid_issuer(&issuer, &symbol_short!("kyc")));
+    assert!(!client.is_valid_issuer_key(&issuer, &k1));
+
+    let keys = client.get_issuer_keys(&issuer);
+    assert_eq!(keys.len(), 3);
+    assert_eq!(keys.get(0).unwrap().pubkey, k2);
+    assert!(!keys.get(0).unwrap().revoked);
+    assert!(!keys.get(1).unwrap().revoked); // k0
+    assert!(keys.get(2).unwrap().revoked); // k1, revoked at retirement
+}
+
+#[test]
+#[should_panic(expected = "Contract, #6")]
+fn revoke_issuer_key_rejects_an_unknown_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    register_k0(&env, &client, &issuer);
+
+    client.revoke_issuer_key(&issuer, &BytesN::from_array(&env, &key(9)));
+}
+
+#[test]
+#[should_panic(expected = "Contract, #7")]
+fn revoke_issuer_key_rejects_a_second_revocation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    client.revoke_issuer_key(&issuer, &k0);
+    client.revoke_issuer_key(&issuer, &k0);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #6")]
+fn revoke_issuer_key_rejects_a_key_whose_window_closed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    client.rotate_issuer_key(&issuer, &BytesN::from_array(&env, &key(2)), &(T0 + WINDOW));
+
+    env.ledger().set_timestamp(T0 + WINDOW + 1);
+    // The key already validates nothing, so there is nothing to revoke.
+    client.revoke_issuer_key(&issuer, &k0);
+}
+
+/// Revoking the issuer kills every key it ever held.
+#[test]
+fn full_issuer_revocation_invalidates_the_whole_key_set() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+    client.rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+
+    client.revoke_issuer(&issuer);
+
+    assert!(!client.is_valid_issuer(&issuer, &symbol_short!("kyc")));
+    assert!(!client.is_valid_issuer_key(&issuer, &k0));
+    assert!(!client.is_valid_issuer_key(&issuer, &k1));
+    // The key set itself is still readable for audit purposes.
+    assert_eq!(client.get_issuer_keys(&issuer).len(), 2);
+}
+
+#[test]
+fn get_issuer_keys_reports_the_current_key_first() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    // An issuer that never rotated has exactly one key: the current one.
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let keys = client.get_issuer_keys(&issuer);
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys.get(0).unwrap().pubkey, k0);
+    assert_eq!(keys.get(0).unwrap().retired_at, 0);
+    assert_eq!(keys.get(0).unwrap().valid_until, 0);
+    assert!(!keys.get(0).unwrap().revoked);
+    assert!(client.is_valid_issuer_key(&issuer, &k0));
+
+    // Unknown issuers have no key set.
+    assert!(client.get_issuer_keys(&Address::generate(&env)).is_empty());
+}
+
+#[test]
+fn refresh_issuer_keys_ttl_keeps_the_key_history_readable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+    client.rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+
+    // Drain the rotation event: a refresh must not emit one.
+    let _ = env.events().all();
+    client.refresh_issuer_keys_ttl(&issuer);
+    assert!(env
+        .events()
+        .all()
+        .filter_by_contract(&client.address)
+        .events()
+        .is_empty());
+
+    assert_eq!(client.get_issuer_keys(&issuer).len(), 2);
+    assert!(client.is_valid_issuer_key(&issuer, &k0));
+    assert!(client.is_valid_issuer_key(&issuer, &k1));
+}
+
+#[test]
+#[should_panic(expected = "Contract, #2")]
+fn refresh_issuer_keys_ttl_rejects_an_unknown_issuer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = setup(&env);
+
+    client.refresh_issuer_keys_ttl(&Address::generate(&env));
+}
+
+#[test]
+fn refresh_issuer_keys_ttl_requires_admin_role() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    register_k0(&env, &client, &issuer);
+
+    let res = client
+        .mock_auths(&[])
+        .try_refresh_issuer_keys_ttl(&issuer);
+    assert!(res.is_err());
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn register_issuer_rejects_a_pubkey_change() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+
+    // This used to silently invalidate every credential signed with k0.
+    client.register_issuer(
+        &issuer,
+        &BytesN::from_array(&env, &key(2)),
+        &vec![&env, symbol_short!("kyc")],
+    );
+    assert_eq!(client.get_issuer_pubkey(&issuer), k0);
+}
+
+/// Re-registration is still the way to update credential types; only the pubkey
+/// is pinned.
+#[test]
+fn register_issuer_still_updates_credential_types_with_the_same_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    assert!(!client.is_valid_issuer(&issuer, &symbol_short!("age")));
+
+    client.register_issuer(
+        &issuer,
+        &k0,
+        &vec![&env, symbol_short!("kyc"), symbol_short!("age")],
+    );
+
+    assert!(client.is_valid_issuer(&issuer, &symbol_short!("age")));
+    assert_eq!(client.get_issuer_pubkey(&issuer), k0);
+}
+
+#[test]
+fn rotate_issuer_key_requires_admin_role() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+    let contract_id = client.address.clone();
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+    let k1 = BytesN::from_array(&env, &key(2));
+    let args = (issuer.clone(), k1.clone(), T0_WINDOW_END);
+
+    let delegate = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    client.grant_role(&symbol_short!("admin"), &delegate);
+
+    // The admin-role holder can rotate.
+    client
+        .mock_auths(&[MockAuth {
+            address: &delegate,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "rotate_issuer_key",
+                args: args.clone().into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+    assert_eq!(client.get_issuer_pubkey(&issuer), k1);
+
+    // A non-holder cannot.
+    let res = client
+        .mock_auths(&[MockAuth {
+            address: &stranger,
+            invoke: &MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "rotate_issuer_key",
+                args: args.into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_rotate_issuer_key(&issuer, &k1, &(T0 + WINDOW));
+    assert!(res.is_err());
+    assert_eq!(client.get_issuer_pubkey(&issuer), k1);
+    // k0 was still retired, so its window is open.
+    assert!(client.is_valid_issuer_key(&issuer, &k0));
+}
+
+#[test]
+fn revoke_issuer_key_requires_admin_role() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(T0);
+    let (_admin, client) = setup(&env);
+
+    let issuer = Address::generate(&env);
+    let k0 = register_k0(&env, &client, &issuer);
+
+    // No admin authorisation at all: the revocation must not go through.
+    let res = client.mock_auths(&[]).try_revoke_issuer_key(&issuer, &k0);
+    assert!(res.is_err());
+    assert!(client.is_valid_issuer_key(&issuer, &k0));
+
+    // The admin role holder can.
+    client.revoke_issuer_key(&issuer, &k0);
+    assert!(!client.is_valid_issuer_key(&issuer, &k0));
+}
+
+/// Property: a retired key is valid throughout its window and invalid on the
+/// very next ledger, for any window length the contract accepts.
+#[test]
+fn prop_retired_key_is_valid_only_within_its_window() {
+    let config = proptest::test_runner::Config {
+        cases: 10,
+        ..proptest::test_runner::Config::default()
+    };
+    let mut runner = proptest::test_runner::TestRunner::new(config);
+    runner
+        .run(&(1u64..MAX_KEY_RETENTION_SECS,), |(window,)| {
+            let env = Env::default();
+            env.mock_all_auths();
+            env.ledger().set_timestamp(T0);
+            let (_admin, client) = setup(&env);
+
+            let issuer = Address::generate(&env);
+            let k0 = register_k0(&env, &client, &issuer);
+            let k1 = BytesN::from_array(&env, &key(2));
+            client.rotate_issuer_key(&issuer, &k1, &(T0 + window));
+
+            env.ledger().set_timestamp(T0 + window);
+            prop_assert!(
+                client.is_valid_issuer_key(&issuer, &k0),
+                "Retired key must still verify on the last ledger of its window"
+            );
+
+            env.ledger().set_timestamp(T0 + window + 1);
+            prop_assert!(
+                !client.is_valid_issuer_key(&issuer, &k0),
+                "Retired key must stop verifying past its window"
+            );
+            prop_assert!(
+                client.is_valid_issuer_key(&issuer, &k1),
+                "Current key must stay valid after a rotation"
+            );
+            Ok(())
+        })
+        .unwrap();
 }

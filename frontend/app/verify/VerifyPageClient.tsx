@@ -228,6 +228,7 @@ function VerifyInner() {
   const [plaidAccounts, setPlaidAccounts] = useState<
     { name: string; available: number }[]
   >([]);
+  const [plaidSources, setPlaidSources] = useState<number | null>(null);
   const [plaidMock, setPlaidMock] = useState(false);
 
   const fundsSelected = selected === "funds";
@@ -239,6 +240,7 @@ function VerifyInner() {
       .then(
         (d: {
           balance?: number;
+          sources?: number;
           accounts?: { name: string; available: number }[];
           mock?: boolean;
           error?: string;
@@ -246,6 +248,7 @@ function VerifyInner() {
           if (d.balance !== undefined) {
             setPlaidBalance(d.balance);
             setPlaidAccounts(d.accounts ?? []);
+            setPlaidSources(d.sources ?? null);
             setPlaidMock(!!d.mock);
           }
         },
@@ -261,53 +264,122 @@ function VerifyInner() {
     clearStalePersonaPending(Boolean(personaInquiryId));
   }, [personaInquiryId]);
 
-  // When Persona redirects back to /verify?inquiry-id=XXX, resume the pending
-  // issue request that was stored in sessionStorage before the redirect.
+  // When Persona redirects back to /verify?inquiry-id=XXX, poll for async
+  // issuance completion via /api/persona/result, falling back to /api/issue.
   useEffect(() => {
     if (!personaInquiryId || !address) return;
     // Read-and-clear: the blob is removed before the resumed call is made,
     // so it's gone whether the issue succeeds or fails.
     const pending = loadPersonaPending();
-    if (!pending) return;
     setBusy(true);
     setError("");
     const requestId = getOrCreateRequestId();
-    fetch("/api/issue", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-request-id": requestId },
-      body: JSON.stringify({ ...pending, persona_inquiry_id: personaInquiryId }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const d = (await res.json().catch(() => null)) as {
+
+    let cancelled = false;
+    let pollTimeout: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+    const maxPollAttempts = 15; // up to 30 seconds of polling
+
+    const handleSuccess = async (
+      credentials: import("@/lib/credential").Credential[],
+    ) => {
+      await Promise.all(credentials.map((c) => saveCredential(c)));
+      justIssuedClaims.current = credentials
+        .map((c) => c.type)
+        .filter((t) => VALID_CLAIMS.includes(t as CredentialType));
+
+      setDone(true);
+      toast.success(
+        credentials.length > 1
+          ? "Credentials issued successfully"
+          : "Credential issued successfully",
+      );
+      setTimeout(redirectAfterIssue, 1500);
+    };
+
+    const pollResult = async () => {
+      if (cancelled) return;
+      attempts++;
+      try {
+        const res = await fetch(
+          `/api/persona/result?inquiry_id=${encodeURIComponent(personaInquiryId)}`,
+        );
+        if (res.ok) {
+          const data = (await res.json().catch(() => null)) as {
+            ready?: boolean;
+            status?: string;
+            credentials?: import("@/lib/credential").Credential[];
             error?: string;
           } | null;
-          throw new Error(
-            d?.error ?? "Issuing failed after identity verification",
-          );
-        }
-        return res.json() as Promise<{
-          credentials: import("@/lib/credential").Credential[];
-        }>;
-      })
-      .then(async ({ credentials }) => {
-        await Promise.all(credentials.map((c) => saveCredential(c)));
-        justIssuedClaims.current = credentials.map((c) => c.type).filter((t) => VALID_CLAIMS.includes(t as CredentialType));
 
-        setDone(true);
-        toast.success(
-          credentials.length > 1
-            ? "Credentials issued successfully"
-            : "Credential issued successfully",
-        );
-        setTimeout(redirectAfterIssue, 1500);
-      })
-      .catch((e) => {
+          if (
+            data?.ready &&
+            Array.isArray(data.credentials) &&
+            data.credentials.length > 0
+          ) {
+            await handleSuccess(data.credentials);
+            if (!cancelled) setBusy(false);
+            return;
+          }
+          if (data?.status === "failed") {
+            throw new Error(data.error ?? "Identity verification failed");
+          }
+        }
+      } catch (e) {
+        if (cancelled) return;
         const message = (e as Error).message;
         setError(`${message} (ref: ${requestId})`);
         toast.error(`Credential issuance failed: ${message}`);
-      })
-      .finally(() => setBusy(false));
+        setBusy(false);
+        return;
+      }
+
+      // If pending and still within attempts limit, schedule next poll
+      if (attempts < maxPollAttempts) {
+        pollTimeout = setTimeout(pollResult, 2000);
+      } else {
+        // Fallback to synchronous /api/issue if async webhook hasn't fulfilled
+        try {
+          const res = await fetch("/api/issue", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-request-id": requestId,
+            },
+            body: JSON.stringify({
+              ...pending,
+              persona_inquiry_id: personaInquiryId,
+            }),
+          });
+          if (!res.ok) {
+            const d = (await res.json().catch(() => null)) as {
+              error?: string;
+            } | null;
+            throw new Error(
+              d?.error ?? "Issuing failed after identity verification",
+            );
+          }
+          const { credentials } = (await res.json()) as {
+            credentials: import("@/lib/credential").Credential[];
+          };
+          await handleSuccess(credentials);
+        } catch (e) {
+          if (cancelled) return;
+          const message = (e as Error).message;
+          setError(`${message} (ref: ${requestId})`);
+          toast.error(`Credential issuance failed: ${message}`);
+        } finally {
+          if (!cancelled) setBusy(false);
+        }
+      }
+    };
+
+    pollResult();
+
+    return () => {
+      cancelled = true;
+      if (pollTimeout) clearTimeout(pollTimeout);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [personaInquiryId, address]);
 
@@ -774,7 +846,9 @@ function VerifyInner() {
                                   <IconBuildingBank size={12} stroke={1.6} />
                                   {plaidMock
                                     ? "Mock balance"
-                                    : "Verified balance (Plaid)"}
+                                    : plaidSources && plaidSources > 1
+                                      ? `Aggregate balance — ${plaidSources} linked sources`
+                                      : "Verified balance (Plaid)"}
                                 </span>
                                 <span
                                   style={{
@@ -791,9 +865,9 @@ function VerifyInner() {
                                   className="stack"
                                   style={{ gap: "0.2rem" }}
                                 >
-                                  {plaidAccounts.map((a) => (
+                                  {plaidAccounts.map((a, i) => (
                                     <div
-                                      key={a.name}
+                                      key={`${a.name}-${i}`}
                                       className="between"
                                       style={{ fontSize: "0.72rem" }}
                                     >
@@ -844,8 +918,10 @@ function VerifyInner() {
                                   margin: "0.35rem 0 0",
                                 }}
                               >
-                                Your exact balance is never stored or revealed
-                                on-chain — only this threshold is public.
+                                Balances from all linked accounts are summed
+                                before attestation. The aggregate — not any
+                                individual account — is committed, and only
+                                this threshold is ever public.
                               </p>
                             </div>
                           )}

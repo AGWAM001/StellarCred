@@ -87,6 +87,11 @@ const DAY_IN_LEDGERS: u32 = 17280;
 const VK_BUMP_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
 const VK_TTL: u32 = 180 * DAY_IN_LEDGERS;
 // ProofRegistry's bounded claim validity window, expressed in ledger seconds.
+// This constant is the on-chain enforcement of the VK support-window policy:
+// a VK version may not be pruned until at least this many seconds have elapsed
+// since it was deprecated. Changing this value changes the policy — update
+// SUPPORT_POLICY.md (section "VK Versions and the Pruning Rule") in the same
+// commit. See: SUPPORT_POLICY.md
 const MAX_PROOF_VALIDITY_SECONDS: u64 = 90 * 86_400;
 
 #[contracttype]
@@ -269,6 +274,11 @@ impl CredentialVerifier {
     /// Admin-only. Permanently removes the VK bytes for a deprecated version.
     /// The safety delay starts when deprecation occurred, not when pruning is
     /// requested. The deprecation marker is retained, preventing reuse.
+    ///
+    /// The minimum delay before pruning is `MAX_PROOF_VALIDITY_SECONDS`
+    /// (currently 90 days), which is the on-chain enforcement of the VK
+    /// support window defined in SUPPORT_POLICY.md. `prune_version` will
+    /// revert with `VkStillReferenceable` until that delay has elapsed.
     #[allow(deprecated)]
     pub fn prune_version(env: Env, credential_type: Symbol, version: u32) {
         let admin = Self::require_admin(&env);
