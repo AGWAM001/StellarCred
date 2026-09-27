@@ -931,6 +931,22 @@ fn set_admin_emits_expected_event() {
 
     assert_eq!(
         env.events().all().filter_by_contract(&client.address),
+        vec![
+            &env,
+            (
+                client.address.clone(),
+                (symbol_short!("iss_reg"), symbol_short!("admin_rot")).into_val(&env),
+                EventAdminChanged {
+                    old_admin: admin.clone(),
+                    new_admin: new_admin.clone(),
+                    changed_at: env.ledger().timestamp(),
+                }
+                .into_val(&env),
+            ),
+        ],
+    );
+}
+
 // ── Issuer key sets: rotation and revocation ────────────────────────────────
 //
 // `T0` is an arbitrary non-zero ledger timestamp so windows are not measured
