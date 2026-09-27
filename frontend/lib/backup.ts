@@ -41,7 +41,7 @@ function toBase64(buf: ArrayBuffer | Uint8Array): string {
   return btoa(binary);
 }
 
-function fromBase64(b64: string): ArrayBuffer {
+function fromBase64(b64: string): Uint8Array {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
 
@@ -49,12 +49,12 @@ function fromBase64(b64: string): ArrayBuffer {
     bytes[i] = binary.charCodeAt(i);
   }
 
-  return bytes.buffer.slice(0);
+  return bytes;
 }
 
 async function deriveKey(
   passphrase: string,
-  salt: ArrayBuffer,
+  salt: Uint8Array,
   iterations = PBKDF2_ITERATIONS,
 ): Promise<CryptoKey> {
   const enc = new TextEncoder();
@@ -70,7 +70,7 @@ async function deriveKey(
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
+      salt: salt as BufferSource,
       iterations,
       hash: "SHA-256",
     },
@@ -96,12 +96,12 @@ export async function createEncryptedBackup(
   const saltBytes = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
   const ivBytes = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
 
-  const key = await deriveKey(passphrase, saltBytes.buffer.slice(0));
+  const key = await deriveKey(passphrase, saltBytes);
 
   const ciphertext = await crypto.subtle.encrypt(
     {
       name: "AES-GCM",
-      iv: ivBytes.buffer.slice(0),
+      iv: ivBytes as BufferSource,
     },
     key,
     plaintext
@@ -158,10 +158,10 @@ export async function decryptBackup(
     decrypted = await crypto.subtle.decrypt(
       {
         name: "AES-GCM",
-        iv,
+        iv: iv as BufferSource,
       },
       key,
-      ciphertext
+      ciphertext as BufferSource
     );
   } catch {
     throw new Error("Wrong passphrase or corrupted backup");
