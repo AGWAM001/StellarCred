@@ -654,4 +654,62 @@ describe("claim response schema", () => {
     expect(recentRes.body.claims).toHaveLength(1);
     expect(Object.keys(recentRes.body.claims[0]).sort()).toEqual(expectedKeys);
   });
+
+  it("GET /issuers/:issuer/credentials returns credentials issued by the given issuer", async () => {
+    (db as ReturnType<typeof createSqliteDb>).upsertClaim({
+      wallet: "GALICE",
+      credential_type: "kyc",
+      issuer: "GISSUER_REVOKE",
+      verified_at: 1000,
+      expiry: 9999999,
+      ledger_sequence: 42,
+      threshold: null,
+      revoked: 0,
+    });
+
+    const res = await request(app).get("/issuers/GISSUER_REVOKE/credentials");
+    expect(res.status).toBe(200);
+    expect(res.body.issuer).toBe("GISSUER_REVOKE");
+    expect(res.body.credentials).toHaveLength(1);
+    expect(res.body.credentials[0].wallet).toBe("GALICE");
+  });
+
+  it("GET /issuers/:issuer/analytics returns aggregated analytics", async () => {
+    (db as ReturnType<typeof createSqliteDb>).upsertClaim({
+      wallet: "GBOB",
+      credential_type: "income",
+      issuer: "GISSUER_ANALYTICS",
+      verified_at: 1000,
+      expiry: 1999999999,
+      ledger_sequence: 50,
+      threshold: null,
+      revoked: 0,
+    });
+
+    const res = await request(app).get("/issuers/GISSUER_ANALYTICS/analytics");
+    expect(res.status).toBe(200);
+    expect(res.body.issuer).toBe("GISSUER_ANALYTICS");
+    expect(res.body.totalIssued).toBe(1);
+    expect(res.body.activeCount).toBe(1);
+    expect(res.body.verificationAttemptsOverTime.length).toBeGreaterThan(0);
+  });
+
+  it("GET /credentials/:commitment/events returns history for indexed credential", async () => {
+    (db as ReturnType<typeof createSqliteDb>).upsertClaim({
+      wallet: "GCHARLIE",
+      credential_type: "kyc",
+      issuer: "GISSUER_COMM",
+      verified_at: 1000,
+      expiry: 9999999,
+      ledger_sequence: 60,
+      threshold: null,
+      revoked: 0,
+    });
+
+    const res = await request(app).get("/credentials/0x123abc/events?wallet=GCHARLIE&type=kyc");
+    expect(res.status).toBe(200);
+    expect(res.body.indexed).toBe(true);
+    expect(res.body.wallet).toBe("GCHARLIE");
+    expect(res.body.events.length).toBeGreaterThanOrEqual(2);
+  });
 });

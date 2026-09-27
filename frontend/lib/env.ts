@@ -25,6 +25,7 @@ const STELLAR_G_ADDRESS = /^G[A-Z2-7]{55}$/;
 const SERVER_SECRET_KEYS = [
   "ISSUER_PRIVATE_KEY",
   "PERSONA_API_KEY",
+  "PERSONA_WEBHOOK_SECRET",
   "PLAID_CLIENT_ID",
   "PLAID_SECRET",
   "PLAID_ACCESS_TOKEN",
@@ -101,6 +102,7 @@ const envSchema = z
     // --- Persona identity verification (optional; unset = demo mode) ---------
     PERSONA_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
     PERSONA_KYC_TEMPLATE_ID: z.preprocess(emptyToUndefined, z.string().optional()),
+    PERSONA_WEBHOOK_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
 
     // --- Plaid balance attestation (optional; unset = mock mode) --------------
     // PLAID_ACCESS_TOKEN covers one linked item; PLAID_ACCESS_TOKENS is a

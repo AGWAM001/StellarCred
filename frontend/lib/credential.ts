@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { CREDENTIAL_TYPES, type CredentialType } from "./stellar";
+import { deploymentMismatchMessage, type DeploymentRef } from "./deployment";
 import { isStorageAvailable } from "./safe-storage";
 
 export interface ClaimParams {
@@ -39,6 +40,14 @@ export interface Credential {
   provedAt?: number;
   /** Transaction hash of the last submitted proof. */
   provedTxHash?: string;
+  /**
+   * The StellarCred deployment (network + contract IDs) that issued this
+   * credential, stamped by /api/issue at mint time. Import paths validate it
+   * against the current app config so a credential from another deployment
+   * fails at import instead of confusingly at proof submission (#545).
+   * Absent on credentials minted before this field existed.
+   */
+  deployment?: DeploymentRef;
 }
 
 export const TYPE_META: Record<
@@ -392,6 +401,14 @@ export async function exportCredentials(): Promise<string> {
   return JSON.stringify(await loadCredentials(), null, 2);
 }
 
+async function persistCredentials(next: Credential[]): Promise<void> {
+  if (_cachedKey && _unlockSalt) {
+    localStorage.setItem(STORE_KEY, await serializeEncrypted(JSON.stringify(next)));
+  } else {
+    localStorage.setItem(STORE_KEY, JSON.stringify(next));
+  }
+}
+
 /**
  * Save a credential, encrypting the full credential set with the
  * passphrase-derived key. The store must be unlocked first.
@@ -404,7 +421,7 @@ export async function saveCredential(cred: Credential): Promise<Credential[]> {
       (c) => !(c.type === cred.type && c.commitment === cred.commitment),
     ),
   ];
-  localStorage.setItem(STORE_KEY, await serializeEncrypted(JSON.stringify(next)));
+  await persistCredentials(next);
   return next;
 }
 
@@ -415,7 +432,7 @@ export async function markProved(commitment: string, txHash: string): Promise<Cr
       ? { ...c, provedAt: Math.floor(Date.now() / 1000), provedTxHash: txHash }
       : c,
   );
-  localStorage.setItem(STORE_KEY, await serializeEncrypted(JSON.stringify(next)));
+  await persistCredentials(next);
   return next;
 }
 
@@ -430,14 +447,14 @@ export async function markAllProved(
   const next = all.map((c) =>
     set.has(c.commitment) ? { ...c, provedAt: now, provedTxHash: txHash } : c,
   );
-  localStorage.setItem(STORE_KEY, await serializeEncrypted(JSON.stringify(next)));
+  await persistCredentials(next);
   return next;
 }
 
 export async function removeCredential(commitment: string): Promise<Credential[]> {
   const all = await loadCredentials();
   const next = all.filter((c) => c.commitment !== commitment);
-  localStorage.setItem(STORE_KEY, await serializeEncrypted(JSON.stringify(next)));
+  await persistCredentials(next);
   return next;
 }
 
@@ -509,6 +526,13 @@ export function parseCredential(json: string): Credential {
   if (typeof c.expiry !== "string" || !/\d/.test(c.expiry)) {
     throw new Error("Not a valid credential: expiry must be a parseable string (e.g. \"90 days\").");
   }
+  // Cross-deployment guard (#545): a credential minted against another
+  // network or another set of contract IDs can never be proven here (the
+  // issuer isn't registered in this registry), so reject it at import with a
+  // clear explanation instead of letting submission fail later. Credentials
+  // without a deployment reference predate this field and pass through.
+  const mismatch = deploymentMismatchMessage(c.deployment);
+  if (mismatch) throw new Error(mismatch);
 
   return c as unknown as Credential;
 }
