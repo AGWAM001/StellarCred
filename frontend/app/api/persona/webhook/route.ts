@@ -7,6 +7,10 @@ import {
   parsePersonaWebhook,
   getPendingInquiry,
   setInquiryResult,
+  getInquiryResult,
+  deletePendingInquiry,
+  beginInquiryProcessing,
+  finishInquiryProcessing,
   alpha2ToNumeric,
 } from "@/lib/persona-webhook";
 import type { CredentialType } from "@stellarcred/issuer";
@@ -90,6 +94,14 @@ export async function POST(req: NextRequest) {
 
   if (!isCompletedOrApproved) {
     return NextResponse.json({ status: "ignored", eventName: event.eventName }, { status: 200 });
+  }
+
+  const existing = getInquiryResult(event.inquiryId);
+  if (existing?.status === "completed") {
+    return NextResponse.json({ status: "already_processed", inquiryId: event.inquiryId }, { status: 200 });
+  }
+  if (!beginInquiryProcessing(event.inquiryId, event.eventId)) {
+    return NextResponse.json({ status: "already_processing", inquiryId: event.inquiryId }, { status: 200 });
   }
 
   // If status is failed or declined, record failed status in cache
@@ -192,6 +204,7 @@ export async function POST(req: NextRequest) {
       status: "completed",
       credentials,
     });
+    deletePendingInquiry(event.inquiryId);
 
     logger.info(
       stripSensitiveFields({
@@ -218,5 +231,7 @@ export async function POST(req: NextRequest) {
       { error: (error as Error).message },
       { status: 500 },
     );
+  } finally {
+    finishInquiryProcessing(event.inquiryId);
   }
 }

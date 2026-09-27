@@ -297,6 +297,7 @@ function VerifyInner() {
   const [plaidAccounts, setPlaidAccounts] = useState<
     { name: string; available: number }[]
   >([]);
+  const [plaidSources, setPlaidSources] = useState<number | null>(null);
   const [plaidMock, setPlaidMock] = useState(false);
 
   const fundsSelected = selected === "funds";
@@ -308,6 +309,7 @@ function VerifyInner() {
       .then(
         (d: {
           balance?: number;
+          sources?: number;
           accounts?: { name: string; available: number }[];
           mock?: boolean;
           error?: string;
@@ -315,6 +317,7 @@ function VerifyInner() {
           if (d.balance !== undefined) {
             setPlaidBalance(d.balance);
             setPlaidAccounts(d.accounts ?? []);
+            setPlaidSources(d.sources ?? null);
             setPlaidMock(!!d.mock);
           }
         },
@@ -916,7 +919,9 @@ function VerifyInner() {
                                   <IconBuildingBank size={12} stroke={1.6} />
                                   {plaidMock
                                     ? "Mock balance"
-                                    : "Verified balance (Plaid)"}
+                                    : plaidSources && plaidSources > 1
+                                      ? `Aggregate balance — ${plaidSources} linked sources`
+                                      : "Verified balance (Plaid)"}
                                 </span>
                                 <span
                                   style={{
@@ -933,9 +938,9 @@ function VerifyInner() {
                                   className="stack"
                                   style={{ gap: "0.2rem" }}
                                 >
-                                  {plaidAccounts.map((a) => (
+                                  {plaidAccounts.map((a, i) => (
                                     <div
-                                      key={a.name}
+                                      key={`${a.name}-${i}`}
                                       className="between"
                                       style={{ fontSize: "0.72rem" }}
                                     >
@@ -986,8 +991,10 @@ function VerifyInner() {
                                   margin: "0.35rem 0 0",
                                 }}
                               >
-                                Your exact balance is never stored or revealed
-                                on-chain — only this threshold is public.
+                                Balances from all linked accounts are summed
+                                before attestation. The aggregate — not any
+                                individual account — is committed, and only
+                                this threshold is ever public.
                               </p>
                             </div>
                           )}

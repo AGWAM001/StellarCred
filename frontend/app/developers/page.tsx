@@ -213,33 +213,38 @@ const verified = await StellarCred.hasClaim(wallet, "kyc");`}</Code>
           Nothing binds this redirect to your session &mdash; anyone can craft a
           URL shaped exactly like a real one and open it. Use{" "}
           <span className="mono">parseReturnParams</span> to read them, but
-          always re-verify with <span className="mono">hasClaim</span> against
-          the on-chain ProofRegistry (ideally server-side) before granting
-          access.
+          always re-verify with <span className="mono">hasClaim</span> or{" "}
+          <span className="mono">verifyWalletClaim</span> against the on-chain
+          ProofRegistry before granting access.
         </p>
-        <Code>{`import { StellarCred } from "@stellarcred/sdk";
+        <p className="muted" style={{ fontSize: "0.95rem", lineHeight: 1.7, marginTop: "0.75rem", borderLeft: "3px solid #f59e0b", paddingLeft: "0.75rem" }}>
+          <strong>⚠️ Wallet spoofing pitfall:</strong> Calling <span className="mono">hasClaim(wallet)</span> alone on your backend only proves that <em>someone</em> owns credentials for that address &mdash; not that the current caller actually controls that private key. For secure access gating, have the user sign a challenge and call <span className="mono">verifyWalletClaim</span>.
+        </p>
+        <Code>{`import { StellarCred, createWalletChallenge, verifyWalletClaim } from "@stellarcred/sdk";
 
-// On your return page:
-const hint = StellarCred.parseReturnParams(window.location.href);
-// hint: { verified, wallet, claims, state } — all untrusted
-
-if (hint.verified && hint.wallet) {
-  // Optimistic UI only. The real gate is this on-chain check:
-  const reallyVerified = await StellarCred.hasClaim(hint.wallet, "kyc");
-}
-
-// Optional: pass a per-session token to correlate the redirect back to a
-// session you started (still not a substitute for hasClaim):
-const url = StellarCred.buildVerifyUrl({
-  returnUrl: "https://yourapp.xyz/deposit",
-  claim: "kyc",
-  state: sessionNonce,
+// 1. Issue a replay-protected challenge from your backend:
+const challenge = createWalletChallenge({
+  domain: "yourapp.xyz",
+  statement: "Sign in to access gated features",
 });
-// ...later, on the return page:
-if (hint.state !== expectedSessionNonce) {
-  // redirect doesn't correlate to a session you started — treat as untrusted
-}`}</Code>
+
+// 2. Client signs challenge.message with their wallet (e.g. Freighter)
+
+// 3. Verify BOTH wallet ownership and on-chain credential in one call:
+const result = await verifyWalletClaim({
+  wallet: clientWallet,
+  challenge,
+  signature: clientSignature,
+  claim: "kyc",
+});
+
+if (!result.ok) {
+  // Rejected: invalid signature, expired/replayed challenge, or missing credential
+  throw new Error(result.error);
+}
+// Caller proved control of wallet AND holds valid on-chain KYC proof!`}</Code>
       </Section>
+
 
       <Section title="Available claim types">
         <table

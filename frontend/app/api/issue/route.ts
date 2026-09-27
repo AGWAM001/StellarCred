@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CREDENTIAL_TYPES, type ClaimParams } from "@stellarcred/issuer";
+import { CREDENTIAL_TYPES, type ClaimParams, type CredentialType } from "@stellarcred/issuer";
 import { fetchIssuerPubkey } from "@/lib/issuer-registry";
-import { readJsonBody, bodyErrorResponse } from "@/lib/request-limits";
+import { currentDeploymentRef } from "@/lib/deployment";
+import { readJsonBody, bodyErrorResponse } from "../../../lib/request-limits";
 import {
   logger,
   stripSensitiveFields,
@@ -31,6 +32,7 @@ import {
   createPersonaInquiry,
   resolvePersonaKYC,
 } from "@/lib/persona";
+import { registerPendingInquiry } from "@/lib/persona-webhook";
 import {
   issueAndAuditCredentials,
   localIssuerPubkeyBytes,
@@ -355,6 +357,16 @@ async function executeRequest(
           ? `${baseUrl}/verify?return_url=${encodeURIComponent(returnUrl)}`
           : `${baseUrl}/verify`;
         const { url, id } = await createPersonaInquiry(templateId, redirectUrl, holder);
+        // Keep only the non-PII issuance context server-side so a webhook can
+        // complete an approval even when the holder never returns to the tab.
+        registerPendingInquiry(id, {
+          holder,
+          issuerId: issuerId ?? SIM_ACCOUNT,
+          issuerName,
+          expiry,
+          credentialTypes: credentialTypes as CredentialType[],
+          claimParams,
+        });
         return sendResponse(
           NextResponse.json(
             { needsPersona: true, personaUrl: url, inquiryId: id },
@@ -396,6 +408,10 @@ async function executeRequest(
     }
   }
 
+  // Gate funds issuance on the Plaid balance attestation. Plaid is the source
+  // of truth — we overwrite any user-supplied balance with the verified
+  // aggregate (summed across every linked Plaid item). Only the aggregate is
+  // committed and signed; per-source account data never leaves this server.
   // ---------------------------------------------------------------------------
   // Balance attestation via Plaid
   // ---------------------------------------------------------------------------
@@ -433,11 +449,8 @@ async function executeRequest(
     attributes.balance = String(plaid.balance ?? 0);
   }
 
-  // ---------------------------------------------------------------------------
-  // Signing & Issuance
-  // ---------------------------------------------------------------------------
   try {
-    const credentials = await issueAndAuditCredentials({
+    const issuedCredentials = await issueAndAuditCredentials({
       credentialTypes,
       holder,
       issuerId,
@@ -447,6 +460,10 @@ async function executeRequest(
       claimParams,
       requestId,
     });
+    const credentials = issuedCredentials.map((credential) => ({
+      ...credential,
+      deployment: currentDeploymentRef(),
+    }));
 
     outcome = "success";
     return sendResponse(NextResponse.json({ credentials }));
