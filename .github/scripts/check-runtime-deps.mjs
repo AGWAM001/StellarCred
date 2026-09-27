@@ -17,8 +17,12 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 
-const FRONTEND_PKG_PATH = path.join(process.cwd(), 'frontend', 'package.json');
-const POLICY_PATH = path.join(process.cwd(), '.github', 'config', 'license-policy.json');
+const currentDir = process.cwd();
+const isInFrontend = currentDir.endsWith('frontend') || currentDir.endsWith('frontend/');
+const rootDir = isInFrontend ? path.dirname(currentDir) : currentDir;
+
+const FRONTEND_PKG_PATH = path.join(rootDir, 'frontend', 'package.json');
+const POLICY_PATH = path.join(rootDir, '.github', 'config', 'license-policy.json');
 
 /**
  * Parse package.json files

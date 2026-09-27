@@ -14,8 +14,13 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-const POLICY_PATH = path.join(process.cwd(), '.github', 'config', 'license-policy.json');
-const FRONTEND_DIR = path.join(process.cwd(), 'frontend');
+// Determine root directory: if we're in frontend, go up one level
+const currentDir = process.cwd();
+const isInFrontend = currentDir.endsWith('frontend') || currentDir.endsWith('frontend/');
+const rootDir = isInFrontend ? path.dirname(currentDir) : currentDir;
+
+const POLICY_PATH = path.join(rootDir, '.github', 'config', 'license-policy.json');
+const FRONTEND_DIR = isInFrontend ? currentDir : path.join(rootDir, 'frontend');
 
 /**
  * Load policy
