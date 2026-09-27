@@ -100,6 +100,57 @@ interface Bucket {
 const store = new Map<string, Bucket>();
 
 /**
+ * Hard cap on tracked buckets. When the map exceeds this, the oldest
+ * (earliest-inserted, and therefore soonest-to-expire) entries are evicted
+ * until it is back under the cap. Chosen so a flood of distinct keys cannot
+ * grow process memory without bound.
+ *
+ * Eviction fails *open* for the evicted key (it gets a fresh window on its
+ * next request). That is the safe direction for a limiter: the alternative,
+ * unbounded growth, is a denial-of-service vector.
+ *
+ * Tunable via RATE_LIMIT_MAX_BUCKETS for load-testing.
+ */
+function maxBuckets(): number {
+  return readInt("RATE_LIMIT_MAX_BUCKETS", 10_000);
+}
+
+/**
+ * Minimum interval between opportunistic evictions, so we do not walk the
+ * whole map on every request. Bounded work on the hot path matters more than
+ * perfect liveness of the sweep.
+ */
+const EVICTION_INTERVAL_MS = 5_000;
+
+let lastEvictionMs = 0;
+
+/**
+ * Opportunistic eviction from the hot path.
+ *
+ * 1. Amortise: skip unless EVICTION_INTERVAL_MS has elapsed.
+ * 2. Drop every expired bucket (the common case under steady traffic).
+ * 3. If still over the cap, delete oldest-first until under it.
+ */
+function evictIfNeeded(now: number): void {
+  if (now - lastEvictionMs < EVICTION_INTERVAL_MS) return;
+  lastEvictionMs = now;
+
+  for (const [key, bucket] of store) {
+    if (now >= bucket.windowEnd) {
+      store.delete(key);
+    }
+  }
+
+  const cap = maxBuckets();
+  if (store.size <= cap) return;
+  let removed = store.size - cap;
+  for (const key of store.keys()) {
+    store.delete(key);
+    if (--removed <= 0) break;
+  }
+}
+
+/**
  * Increment the counter for `storeKey` and return whether the request is
  * allowed.  Creates a new window when none exists or the current one has
  * expired.
@@ -115,6 +166,7 @@ function increment(
   windowMs: number,
 ): { allowed: true; remaining: number; windowEnd: number } | { allowed: false; retryAfterMs: number } {
   const now = Date.now();
+  evictIfNeeded(now);
   let bucket = store.get(storeKey);
 
   if (!bucket || now >= bucket.windowEnd) {
@@ -322,5 +374,15 @@ export function rateLimitCleanup(): void {
     if (now >= bucket.windowEnd) {
       store.delete(key);
     }
+  }
+  // A manual sweep must keep the same bounded-memory guarantee as the
+  // opportunistic path in evictIfNeeded: if a flood of distinct keys all
+  // arrived inside one window, none will have expired, so trim oldest-first.
+  const cap = maxBuckets();
+  if (store.size <= cap) return;
+  let removed = store.size - cap;
+  for (const key of store.keys()) {
+    store.delete(key);
+    if (--removed <= 0) break;
   }
 }

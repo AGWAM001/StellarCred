@@ -32,6 +32,18 @@ const AGGREGATE_VK: &[u8] = include_bytes!("../../../fixtures/aggregate/vk");
 const AGGREGATE_PROOF: &[u8] = include_bytes!("../../../fixtures/aggregate/proof");
 const AGGREGATE_PUBLIC_INPUTS: &[u8] = include_bytes!("../../../fixtures/aggregate/public_inputs");
 
+// Negative test fixtures (Issue #537) — same case directories as the
+// credential_verifier tests (fixtures/negative/<case>/{vk,proof,public_inputs}).
+const NEGATIVE_KYC_TRUNCATED_PROOF: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_truncated_inputs/proof");
+const NEGATIVE_KYC_TRUNCATED_PUBLIC_INPUTS: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_truncated_inputs/public_inputs");
+
+const NEGATIVE_KYC_WRONG_CIRCUIT_PROOF: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_wrong_circuit/proof");
+const NEGATIVE_KYC_WRONG_CIRCUIT_PUBLIC_INPUTS: &[u8] =
+    include_bytes!("../../../fixtures/negative/kyc_wrong_circuit/public_inputs");
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn pubkey_from_offset(env: &Env, public_inputs: &[u8], start_field: u32) -> BytesN<64> {
@@ -333,6 +345,50 @@ fn rejects_invalid_proof() {
         &symbol_short!("kyc"),
         &Bytes::from_slice(&env, &bad),
         &Bytes::from_slice(&env, PUBLIC_INPUTS),
+        &None,
+        &9999,
+    );
+    assert!(res.is_err());
+}
+
+/// Rejects a proof with truncated public_inputs (wrong count).
+/// The public_inputs are missing the last 32 bytes (issuer_y), so
+/// verification should fail due to malformed input.
+#[test]
+fn rejects_proof_with_truncated_public_inputs() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    let res = h.registry.try_submit_proof(
+        &holder,
+        &h.issuer,
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, NEGATIVE_KYC_TRUNCATED_PROOF),
+        &Bytes::from_slice(&env, NEGATIVE_KYC_TRUNCATED_PUBLIC_INPUTS),
+        &None,
+        &9999,
+    );
+    assert!(res.is_err());
+}
+
+/// Rejects a proof from a different circuit type verified against the wrong VK.
+/// An age_proof verified against a kyc VK should fail because the proof
+/// structure and public_inputs don't match the VK's expectations.
+#[test]
+fn rejects_proof_from_wrong_circuit_type() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    let res = h.registry.try_submit_proof(
+        &holder,
+        &h.issuer,
+        &symbol_short!("kyc"),
+        &Bytes::from_slice(&env, NEGATIVE_KYC_WRONG_CIRCUIT_PROOF),
+        &Bytes::from_slice(&env, NEGATIVE_KYC_WRONG_CIRCUIT_PUBLIC_INPUTS),
         &None,
         &9999,
     );
@@ -1585,29 +1641,125 @@ fn migrate_record_requires_admin_role() {
     assert!(res.is_err());
 }
 
+// ── Two-step admin transfer tests (#343) ────────────────────────────────────
+
 #[test]
-fn admin_transfer_moves_roles_to_new_admin() {
+fn propose_admin_by_non_admin_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let h = deploy(&env);
     let new_admin = Address::generate(&env);
 
-    // Delegate the upgrader role to a third party before the transfer.
-    let upgrader = Address::generate(&env);
-    h.registry.grant_role(&symbol_short!("upgrader"), &upgrader);
+    let res = h.registry.mock_auths(&[]).try_propose_admin(&new_admin);
+    assert!(res.is_err());
+}
 
-    h.registry.set_admin(&new_admin);
+#[test]
+fn accept_admin_without_pending_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
 
-    // Root admin + every role the old root held move to the new admin.
+    let res = h.registry.try_accept_admin();
+    assert!(res.is_err());
+    // Admin unchanged.
+    assert_eq!(h.registry.admin(), h.admin);
+}
+
+#[test]
+fn propose_then_accept_transfers_admin_and_roles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let new_admin = Address::generate(&env);
+
+    // No pending proposal initially.
+    assert_eq!(h.registry.pending_admin(), None);
+
+    h.registry.propose_admin(&new_admin);
+    assert_eq!(h.registry.pending_admin(), Some(new_admin.clone()));
+    // Still the old admin — nothing has moved yet.
+    assert_eq!(h.registry.admin(), h.admin);
+
+    h.registry.accept_admin();
+
+    // Now the transfer has taken effect.
     assert_eq!(h.registry.admin(), new_admin);
-    assert!(!h.registry.has_role(&symbol_short!("admin"), &h.admin));
+    assert_eq!(h.registry.pending_admin(), None);
+
+    // Every role the outgoing admin held moved to the new admin.
     assert!(h.registry.has_role(&symbol_short!("admin"), &new_admin));
-    assert!(!h.registry.has_role(&symbol_short!("pauser"), &h.admin));
+    assert!(h.registry.has_role(&symbol_short!("upgrader"), &new_admin));
     assert!(h.registry.has_role(&symbol_short!("pauser"), &new_admin));
 
-    // The delegated upgrader role is untouched by the transfer.
-    assert!(h.registry.has_role(&symbol_short!("upgrader"), &upgrader));
-    assert!(!h.registry.has_role(&symbol_short!("upgrader"), &new_admin));
+    // …and the old admin no longer holds them.
+    assert!(!h.registry.has_role(&symbol_short!("admin"), &h.admin));
+    assert!(!h.registry.has_role(&symbol_short!("upgrader"), &h.admin));
+    assert!(!h.registry.has_role(&symbol_short!("pauser"), &h.admin));
+}
+
+#[test]
+fn accept_by_wrong_address_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let new_admin = Address::generate(&env);
+    let wrong = Address::generate(&env);
+
+    h.registry.propose_admin(&new_admin);
+
+    let res = h
+        .registry
+        .mock_auths(&[MockAuth {
+            address: &wrong,
+            invoke: &MockAuthInvoke {
+                contract: &h.registry.address,
+                fn_name: "accept_admin",
+                args: ().into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .try_accept_admin();
+    assert!(res.is_err());
+    // Admin unchanged.
+    assert_eq!(h.registry.admin(), h.admin);
+}
+
+#[test]
+fn cancel_admin_proposal_clears_pending() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let new_admin = Address::generate(&env);
+
+    h.registry.propose_admin(&new_admin);
+    assert_eq!(h.registry.pending_admin(), Some(new_admin.clone()));
+
+    h.registry.cancel_admin_proposal();
+    assert_eq!(h.registry.pending_admin(), None);
+
+    // Accept after cancel must fail.
+    let res = h.registry.try_accept_admin();
+    assert!(res.is_err());
+}
+
+#[test]
+fn propose_admin_overwrites_pending() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let h = deploy(&env);
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+
+    h.registry.propose_admin(&first);
+    assert_eq!(h.registry.pending_admin(), Some(first.clone()));
+
+    // Second proposal overwrites the first — no cancel required.
+    h.registry.propose_admin(&second);
+    assert_eq!(h.registry.pending_admin(), Some(second.clone()));
+
+    h.registry.accept_admin();
+    assert_eq!(h.registry.admin(), second);
 }
 
 #[test]
@@ -1633,6 +1785,7 @@ fn has_role_is_a_public_view() {
     assert!(h
         .registry
         .has_role(&Symbol::new(&env, "issuer_manager"), &delegate));
+
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2549,4 +2702,5 @@ fn successful_batch_preserves_issuer_and_threshold() {
         &None,
         &Some(vec![&env, h.funds_issuer.clone()]), // wrong issuer
     ));
+}
 }
