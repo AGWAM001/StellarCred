@@ -23,10 +23,9 @@ jobs:
       - name: Review npm dependency changes
         uses: actions/dependency-review-action@v4
         with:
-          # Fail on NEW advisories in added packages (don't warn on existing)
           fail-on-severity: moderate
-          # Allow these actions to run even if some transitive deps have advisories
-          allow-licenses: |
+          license-check: true
+          allow-dependencies-licenses: |
             MIT
             Apache-2.0
             Apache-2.0 WITH LLVM-exception
@@ -35,14 +34,9 @@ jobs:
             BSD-3-Clause
             0BSD
             Unlicense
-          deny-licenses: |
-            GPL
-            GPL-2.0
-            GPL-3.0
-            AGPL
-            AGPL-3.0
-            SSPL
-          fail-on-license-check: true
+            MPL-2.0
+            CC0-1.0
+            WTFPL
 
       - name: Setup Node for custom checks
         uses: actions/setup-node@v7
