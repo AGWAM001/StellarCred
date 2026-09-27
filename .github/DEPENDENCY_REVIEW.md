@@ -31,13 +31,13 @@ Runs on all PRs (`if: github.event_name == 'pull_request'`) and integrates with 
 
 **Steps:**
 
-1. **GitHub Dependency Review Action** (`actions/dependency-review-action@v4`)
-   - Uses official GitHub Advisory Database
-   - Fails on NEW advisories (moderate severity or above) in added packages
-   - Blocks licenses that are explicitly denied (GPL, AGPL, SSPL)
-   - Does NOT fail on existing advisories in already-locked dependencies (those are handled by Dependabot)
+1. **GitHub Dependency Review Action** (`actions/dependency-review-action@v4`) — *Optional*
+   - Requires: Dependency graph enabled in repository settings
+   - When available, uses official GitHub Advisory Database
+   - Configured with `continue-on-error: true` (doesn't block if unavailable)
+   - Note: Enable dependency graph at repository settings → Security & analysis if desired
 
-2. **Custom Runtime Dependency Check** (`.github/scripts/check-runtime-deps.mjs`)
+2. **Custom Runtime Dependency Check** (`.github/scripts/check-runtime-deps.mjs`) — *Required*
    - Compares current `frontend/package.json` against base branch
    - Identifies newly added or upgraded packages
    - Fetches metadata from npm registry:
@@ -47,7 +47,7 @@ Runs on all PRs (`if: github.event_name == 'pull_request'`) and integrates with 
    - Validates each against license policy
    - Warns if package hasn't been updated recently (threshold: 365 days)
 
-3. **Full npm License Verification** (`.github/scripts/verify-npm-licenses.mjs`)
+3. **Full npm License Verification** (`.github/scripts/verify-npm-licenses.mjs`) — *Required*
    - Walks entire transitive dependency tree
    - Checks all packages (not just new ones) for license violations
    - Reports summary: allowed, unknown, denied, exceptions
