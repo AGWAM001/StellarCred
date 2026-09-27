@@ -306,6 +306,27 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Skeleton card (shown while credentials are loading from localStorage) ─────
+
+function SkeletonCard() {
+  return (
+    <div className="card" style={{ padding: "1rem 1.25rem" }} aria-hidden="true">
+      <div className="between" style={{ alignItems: "center", gap: "0.75rem" }}>
+        {/* left: title + meta lines */}
+        <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+          <div className="skeleton" style={{ height: "0.9rem", width: "45%", borderRadius: "var(--radius-xs)" }} />
+          <div className="skeleton" style={{ height: "0.75rem", width: "65%", borderRadius: "var(--radius-xs)" }} />
+        </div>
+        {/* right: badge + button placeholders */}
+        <div className="card-actions" style={{ gap: "0.4rem" }}>
+          <div className="skeleton" style={{ height: "1.375rem", width: "3.5rem", borderRadius: "999px" }} />
+          <div className="skeleton" style={{ height: "1.875rem", width: "6.5rem", borderRadius: "var(--radius-sm)" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Holder page ───────────────────────────────────────────────────────────────
 
 type PageView =
@@ -320,13 +341,14 @@ function HolderInner() {
   const searchParams = useSearchParams();
   const toast = useToast();
   const [creds, setCreds] = useState<Credential[]>([]);
+  const [loading, setLoading] = useState(true);
   const [view, setView] = useState<PageView>({ kind: "list" });
   const [importing, setImporting] = useState(false);
   const [detailCred, setDetailCred] = useState<Credential | null>(null);
   const [transferCred, setTransferCred] = useState<Credential | null>(null);
   const [importPayload, setImportPayload] = useState<string | null>(null);
 
-  useEffect(() => { loadCredentials().then(setCreds); }, []);
+  useEffect(() => { loadCredentials().then((c) => { setCreds(c); setLoading(false); }); }, []);
 
   // Cross-tab sync: listen for storage events from other tabs
   useEffect(() => {
@@ -533,7 +555,7 @@ function HolderInner() {
         <div className="stack reveal" style={{ gap: "1.5rem" }}>
 
           {/* ── Expiry Warning Banner ── */}
-          {(expiringSoon.length > 0 || expired.length > 0) && (
+          {!loading && (expiringSoon.length > 0 || expired.length > 0) && (
             <div
               role="status"
               aria-live="polite"
@@ -566,8 +588,17 @@ function HolderInner() {
             </div>
           )}
 
+          {/* ── Skeleton cards (while credentials are being read) ── */}
+          {loading && (
+            <div className="stack" style={{ gap: "0.6rem" }} aria-label="Loading credentials" aria-busy="true">
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </div>
+          )}
+
           {/* ── Empty state ── */}
-          {creds.length === 0 && !importing && (
+          {!loading && creds.length === 0 && !importing && (
             <div
               className="card"
               style={{ textAlign: "center", padding: "3.5rem 1.5rem", borderStyle: "dashed" }}
@@ -762,13 +793,13 @@ function HolderInner() {
             </div>
           )}
 
-          {!address && creds.length > 0 && (
+          {!loading && !address && creds.length > 0 && (
             <p className="faint" style={{ fontSize: "0.8125rem" }}>
               Connect a wallet to generate and submit proofs.
             </p>
           )}
 
-          {importing ? (
+          {!loading && (importing ? (
             <ImportPanel
               onImport={async (c) => {
                 setCreds(await saveCredential(c));
@@ -808,7 +839,7 @@ function HolderInner() {
                 </Link>
               </p>
             </div>
-          )}
+          ))}
         </div>
       )}
 
