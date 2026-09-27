@@ -1,7 +1,8 @@
 extern crate std;
 
 use super::*;
-use issuer_registry::IssuerRegistryClient;
+use credential_verifier::{CredentialVerifier, CredentialVerifierClient};
+use issuer_registry::{IssuerRegistry, IssuerRegistryClient};
 use proptest::prelude::*;
 use proptest::test_runner::RngSeed;
 use soroban_sdk::{
