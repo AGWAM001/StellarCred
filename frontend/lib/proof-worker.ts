@@ -53,7 +53,6 @@ import {
 import type {
   ProofJobRequest,
   ProofStage,
-  ProofStageProgress,
   ProofWorkerCommand,
   ProofWorkerEvent,
 } from "./proof-protocol";
