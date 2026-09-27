@@ -36,6 +36,8 @@ All event data payloads are typed `#[contracttype]` structs serialized using Sor
 | `ProofRegistry` | `unpaused` | `("proof_reg", "unpaused")` | `EventUnpaused` | `unpause` | Admin |
 | `IssuerRegistry` | `register` | `("iss_reg", "register")` | `EventIssuerRegistered` | `register_issuer` | Admin |
 | `IssuerRegistry` | `revoked` | `("iss_reg", "revoked")` | `EventIssuerRevoked` | `revoke_issuer` | Admin |
+| `IssuerRegistry` | `key_rot` | `("iss_reg", "key_rot")` | `EventIssuerKeyRotated` | `rotate_issuer_key` | Admin |
+| `IssuerRegistry` | `key_revk` | `("iss_reg", "key_revk")` | `EventIssuerKeyRevoked` | `revoke_issuer_key` | Admin |
 | `CredentialVerifier` | `vk_set` | `("cred_ver", "vk_set", <credential_type>)` | `EventVkSet` | `set_vk` | Admin |
 | `CredentialVerifier` | `vk_pruned` | `("cred_ver", "vk_pruned", <credential_type>)` | `EventVkPruned` | `prune_version` | Admin |
 | `GatedPool` | `deposit` | `("gate_pool", "deposit")` | `EventDeposit` | `deposit` | Caller |
@@ -207,11 +209,75 @@ Emitted when an issuer is revoked by administration.
 
 ---
 
+#### `iss_reg.key_rot` — Issuer Signing Key Rotated
+
+Emitted when an admin rotates an issuer's signing key. The previous key is
+retired with a validity window so credentials it already signed keep verifying;
+new issuance uses the new key.
+
+- **Topics:** `("iss_reg", "key_rot")`
+  - `topics[0]`: `symbol_short!("iss_reg")` (`Symbol("iss_reg")`)
+  - `topics[1]`: `symbol_short!("key_rot")` (`Symbol("key_rot")`)
+- **Payload (`EventIssuerKeyRotated`):**
+  ```rust
+  pub struct EventIssuerKeyRotated {
+      pub issuer: Address,
+      pub old_pubkey: BytesN<64>,
+      pub new_pubkey: BytesN<64>,
+      pub old_key_valid_until: u64,
+  }
+  ```
+  | Field | Type | Description |
+  |---|---|---|
+  | `issuer` | `Address` | Issuer whose key set changed. |
+  | `old_pubkey` | `BytesN<64>` | Key that stopped being the current signing key. |
+  | `new_pubkey` | `BytesN<64>` | Key that is current from now on. |
+  | `old_key_valid_until` | `u64` | Ledger timestamp after which `old_pubkey` stops validating submissions (inclusive). |
+- **When it fires:**
+  - `rotate_issuer_key(issuer_id, new_pubkey, old_key_valid_until)`: Admin rotates the key, retiring the old one with a validity window.
+- **Monitoring:** ticket for review — confirm the window covers the issuer's outstanding credential expiries and that the signing environment was cut over to `new_pubkey`. An unscheduled rotation should be treated as an incident.
+
+---
+
+#### `iss_reg.key_revk` — Issuer Signing Key Revoked
+
+Emitted when an admin emergency-revokes one of an issuer's signing keys. Unlike
+a rotation, the key stops validating immediately, regardless of its validity
+window.
+
+- **Topics:** `("iss_reg", "key_revk")`
+  - `topics[0]`: `symbol_short!("iss_reg")` (`Symbol("iss_reg")`)
+  - `topics[1]`: `symbol_short!("key_revk")` (`Symbol("key_revk")`)
+- **Payload (`EventIssuerKeyRevoked`):**
+  ```rust
+  pub struct EventIssuerKeyRevoked {
+      pub issuer: Address,
+      pub pubkey: BytesN<64>,
+      pub was_current: bool,
+      pub revoked_at: u64,
+  }
+  ```
+  | Field | Type | Description |
+  |---|---|---|
+  | `issuer` | `Address` | Issuer whose key set changed. |
+  | `pubkey` | `BytesN<64>` | The key that was killed. |
+  | `was_current` | `bool` | `true` when it was the current signing key — the issuer cannot issue until an admin rotates to a new key. `false` when it was a retired key still inside its window. |
+  | `revoked_at` | `u64` | Ledger timestamp at which the revocation took effect. |
+- **When it fires:**
+  - `revoke_issuer_key(issuer_id, pubkey)`: Admin emergency-revokes a key, e.g. on suspected compromise.
+- **Monitoring:** page immediately — either a compromise or a broken rotation.
+
+---
+
 #### Non-Event Operations in IssuerRegistry
 
 | Function | Description | Reason No Event Emitted |
 |---|---|---|
 | `set_issuer_metadata` | Optional name, URL, logo metadata | Stored directly in persistent entry `DataKey::IssuerMetadata(issuer)` for read-only lookups. |
+| `refresh_issuer_keys_ttl` | Extends the lifetime of an issuer's record and key history | Lifetime maintenance only; it changes no issuer state that the events above report. |
+
+Key rotation and revocation are covered above; see
+[ISSUER_KEY_ROTATION.md](ISSUER_KEY_ROTATION.md) for the operational procedure.
 
 ---
 
