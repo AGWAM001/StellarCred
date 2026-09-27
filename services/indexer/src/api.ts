@@ -79,6 +79,7 @@ import { parseCorsOrigins } from "./config";
 import { createCorsMiddleware } from "./cors";
 import { RateLimiter } from "./rate-limit";
 import type { RecentCursor } from "./db";
+import { requireAuth } from "./auth";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 20;
@@ -214,6 +215,15 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
   app.locals["rateLimiter"] = rateLimiter;
   app.use(rateLimiter.middleware());
 
+  // ── Auth guard ───────────────────────────────────────────────────────────
+  // requireAuth(undefined) → no-op; public mode, all endpoints open (default).
+  // requireAuth("secret")  → enforces Bearer / X-API-Key on guarded routes.
+  // Resolved from config first so tests can inject the key directly without
+  // touching the environment.
+  const envApiKey = process.env["API_KEY"]?.trim();
+  const apiKey = config?.apiKey ?? (envApiKey || undefined);
+  const guard = requireAuth(apiKey);
+
   // ── GET /health ──────────────────────────────────────────────────────────
   // Exposes ingester lag so operators can alert when the indexer falls behind.
   //
@@ -319,8 +329,11 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
   );
 
   // ── GET /claims?wallet=G… ────────────────────────────────────────────────
+  // Gated when API_KEY is set: per-wallet claim history makes per-holder
+  // correlation much easier than per-ledger chain queries.
   app.get(
     "/claims",
+    guard,
     asyncHandler(async (req, res) => {
       const wallet = req.query["wallet"];
       if (typeof wallet !== "string" || wallet.trim() === "") {
@@ -336,8 +349,10 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
   );
 
   // ── GET /stats ───────────────────────────────────────────────────────────
+  // Gated when API_KEY is set: reveals total verified-holder counts per type.
   app.get(
     "/stats",
+    guard,
     asyncHandler(async (_req, res) => {
       const stats = await db.stats();
       res.json({ stats });
@@ -347,6 +362,7 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
   // ── GET /recent?limit=20&cursor=<opaque> ──────────────────────────────────
   app.get(
     "/recent",
+    guard,
     asyncHandler(async (req, res) => {
       const rawLimit = parseInt(String(req.query["limit"] ?? DEFAULT_LIMIT), 10);
       const limit = isNaN(rawLimit) || rawLimit < 1
@@ -391,6 +407,57 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
       }
       const stats = await db.issuerStats(issuer.trim());
       res.json(stats);
+    })
+  );
+
+  // ── GET /issuers/:issuer/credentials ──────────────────────────────────────
+  // Returns all credentials issued by this issuer, for the revocation dashboard (#540).
+  app.get(
+    "/issuers/:issuer/credentials",
+    asyncHandler(async (req, res) => {
+      const issuer = req.params["issuer"];
+      if (typeof issuer !== "string" || issuer.trim() === "") {
+        res.status(400).json({ error: "issuer path parameter is required" });
+        return;
+      }
+      const rawClaims = await db.claimsByIssuer(issuer.trim());
+      res.json({
+        issuer: issuer.trim(),
+        credentials: rawClaims.map(serializeClaim),
+      });
+    })
+  );
+
+  // ── GET /issuers/:issuer/analytics ────────────────────────────────────────
+  // Verification volume over time, success rates, top verifiers, and exportable events (#542).
+  app.get(
+    "/issuers/:issuer/analytics",
+    asyncHandler(async (req, res) => {
+      const issuer = req.params["issuer"];
+      if (typeof issuer !== "string" || issuer.trim() === "") {
+        res.status(400).json({ error: "issuer path parameter is required" });
+        return;
+      }
+      const analytics = await db.issuerAnalytics(issuer.trim());
+      res.json(analytics);
+    })
+  );
+
+  // ── GET /credentials/:commitment/events ───────────────────────────────────
+  // Returns on-chain lifecycle events for a specific credential commitment (#541).
+  app.get(
+    "/credentials/:commitment/events",
+    asyncHandler(async (req, res) => {
+      const commitment = req.params["commitment"];
+      if (typeof commitment !== "string" || commitment.trim() === "") {
+        res.status(400).json({ error: "commitment path parameter is required" });
+        return;
+      }
+      const wallet = typeof req.query["wallet"] === "string" ? req.query["wallet"].trim() : undefined;
+      const type = typeof req.query["type"] === "string" ? req.query["type"].trim() : undefined;
+
+      const history = await db.credentialEvents(commitment.trim(), wallet, type);
+      res.json(history);
     })
   );
 

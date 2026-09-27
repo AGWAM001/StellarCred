@@ -197,6 +197,10 @@ pub trait VerifierInterface {
 pub trait IssuerRegistryInterface {
     fn is_valid_issuer(env: Env, issuer_id: Address, credential_type: Symbol) -> bool;
     fn get_issuer_pubkey(env: Env, issuer_id: Address) -> BytesN<64>;
+    /// Accepts the issuer's current key and any retired key that is still
+    /// inside its validity window and has not been emergency-revoked, so
+    /// credentials issued before a rotation keep verifying.
+    fn is_valid_issuer_key(env: Env, issuer_id: Address, pubkey: BytesN<64>) -> bool;
 }
 
 const PUBKEY_START_FIELD: u32 = 1;
@@ -521,8 +525,8 @@ impl ProofRegistry {
             panic_with_error!(&env, Error::IssuerNotTrusted);
         }
 
-        let expected = registry.get_issuer_pubkey(&issuer_id);
-        if !Self::public_inputs_match_pubkey(&public_inputs, &expected) {
+        let presented = Self::pubkey_from_public_inputs(&env, &public_inputs, PUBKEY_START_FIELD);
+        if !registry.is_valid_issuer_key(&issuer_id, &presented) {
             panic_with_error!(&env, Error::IssuerKeyMismatch);
         }
 
@@ -601,8 +605,9 @@ impl ProofRegistry {
                 panic_with_error!(&env, Error::IssuerNotTrusted);
             }
 
-            let expected = registry.get_issuer_pubkey(&sub.issuer_id);
-            if !Self::public_inputs_match_pubkey(&public_inputs_bytes, &expected) {
+            let presented =
+                Self::pubkey_from_public_inputs(&env, &public_inputs_bytes, PUBKEY_START_FIELD);
+            if !registry.is_valid_issuer_key(&sub.issuer_id, &presented) {
                 panic_with_error!(&env, Error::IssuerKeyMismatch);
             }
 
@@ -699,8 +704,12 @@ impl ProofRegistry {
                 panic_with_error!(&env, Error::IssuerNotTrusted);
             }
 
-            let expected = registry.get_issuer_pubkey(&issuer);
-            if !Self::aggregate_pubkey_match(&public_inputs, field_offset + 1, &expected) {
+            let presented = Self::pubkey_from_public_inputs(
+                &env,
+                &public_inputs,
+                field_offset + PUBKEY_START_FIELD,
+            );
+            if !registry.is_valid_issuer_key(&issuer, &presented) {
                 panic_with_error!(&env, Error::IssuerKeyMismatch);
             }
 
@@ -1116,26 +1125,20 @@ impl ProofRegistry {
         u64::from_be_bytes(b)
     }
 
-    /// True iff the secp256k1 public key embedded in `public_inputs` (fields
-    /// 1..65, one byte per field in the low byte) equals `expected` (x || y).
-    fn public_inputs_match_pubkey(public_inputs: &Bytes, expected: &BytesN<64>) -> bool {
-        Self::aggregate_pubkey_match(public_inputs, PUBKEY_START_FIELD, expected)
-    }
-
-    fn aggregate_pubkey_match(
-        public_inputs: &Bytes,
-        start_field: u32,
-        expected: &BytesN<64>,
-    ) -> bool {
-        let exp = expected.to_array();
+    /// The secp256k1 public key embedded in `public_inputs` (fields
+    /// `start_field..start_field + 64`, one byte per field in the low byte).
+    ///
+    /// The key is returned as x || y so it can be handed straight to
+    /// `is_valid_issuer_key`. Truncated input yields the all-zero key, which
+    /// no registered issuer holds, so the caller's key check fails — the same
+    /// outcome as the previous byte-by-byte comparison.
+    fn pubkey_from_public_inputs(env: &Env, public_inputs: &Bytes, start_field: u32) -> BytesN<64> {
+        let mut key = [0u8; 64];
         for i in 0..64u32 {
             let offset = (start_field + i) * FIELD_BYTES + (FIELD_BYTES - 1);
-            match public_inputs.get(offset) {
-                Some(b) if b == exp[i as usize] => {}
-                _ => return false,
-            }
+            key[i as usize] = public_inputs.get(offset).unwrap_or(0);
         }
-        true
+        BytesN::from_array(env, &key)
     }
 
     fn store_claim(
