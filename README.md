@@ -179,7 +179,26 @@ full reference.
 | `age`          | Age ≥ threshold              | Date of birth             |
 | `income`       | Income ≥ threshold           | Actual income             |
 | `jurisdiction` | Country not restricted       | Country code              |
-| `funds`        | Balance ≥ threshold          | Exact balance (from Plaid)|
+| `funds`        | Balance ≥ threshold          | Exact balances (aggregate of linked Plaid accounts) |
+
+### Aggregate proof-of-funds
+
+Real proof-of-funds spans multiple accounts — checking here, a high-yield
+savings there. `funds` credentials attest to the **aggregate** balance summed
+across every linked Plaid item:
+
+- Configure one item via `PLAID_ACCESS_TOKEN`, or several (up to 25) via
+  `PLAID_ACCESS_TOKENS` (comma-separated); both may be set together.
+- The issuance server fetches each linked item, sums the available depository
+  balances, and the issuer signs a single commitment to the **sum**.
+- The `funds_proof` circuit then proves `sum ≥ threshold` without revealing
+  any component balance.
+- Per-source data (account names, per-item balances, access tokens) stays
+  server-side: it is never committed, logged (only source/account counts
+  reach the logs), stored in the browser credential, or written on-chain.
+- Aggregation **fails closed** — if any linked item errors or times out, no
+  balance is attested at all, because a partial sum is not the sum the
+  issuer would be attesting to.
 
 ---
 
