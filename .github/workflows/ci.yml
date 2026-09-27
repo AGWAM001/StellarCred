@@ -15,6 +15,13 @@ on:
 permissions:
   contents: read
 
+# ── Shared tool versions (single source of truth) ──────────────────────────
+# Update these three values to upgrade the entire pipeline in one place.
+env:
+  NOIR_VERSION: "1.0.0-beta.9"
+  BB_VERSION: "0.87.0"
+  NODE_VERSION: "20"
+
 jobs:
   commitlint:
     name: Lint commit messages
@@ -26,7 +33,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -38,6 +45,8 @@ jobs:
             --to ${{ github.event.pull_request.head.sha }} \
             --verbose
 
+  # ── Contracts: Rust / WASM / Clippy ────────────────────────────────────────
+  # Runs in parallel with circuits, frontend, and indexer.
   contracts:
     name: Contract tests & build
     runs-on: ubuntu-latest
@@ -53,30 +62,45 @@ jobs:
           targets: wasm32v1-none
           components: clippy
 
-      - name: Cache cargo
-        uses: actions/cache@v6
+      - name: Cache cargo registry + build products
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
 
       - name: Install Noir
+        uses: actions/cache@v4
+        id: cache-noir
+        with:
+          path: ~/.nargo
+          key: nargo-${{ runner.os }}-${{ env.NOIR_VERSION }}
+      - if: steps.cache-noir.outputs.cache-hit != 'true'
+        name: Download Noir toolchain
         shell: bash
         run: |
-          curl -L https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
+          curl -sSfL https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash
           export PATH="$HOME/.nargo/bin:$PATH"
-          noirup -v 1.0.0-beta.9
+          noirup -v ${{ env.NOIR_VERSION }}
 
       - name: Install Barretenberg
+        uses: actions/cache@v4
+        id: cache-bb
+        with:
+          path: ~/.bb
+          key: bb-${{ runner.os }}-${{ env.BB_VERSION }}
+      - if: steps.cache-bb.outputs.cache-hit != 'true'
+        name: Download Barretenberg toolchain
         shell: bash
         run: |
-          curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
+          curl -sSfL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
           export PATH="$HOME/.bb:$PATH"
           source "$HOME/.bashrc" 2>/dev/null || true
-          bbup -v 0.87.0
+          bbup -v ${{ env.BB_VERSION }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -106,6 +130,8 @@ jobs:
         # a documented reason using #[allow(clippy::lint_name)] inline.
         run: cargo clippy --all-targets -- -D warnings
 
+  # ── Circuits: Noir compile + VK freshness check ────────────────────────────
+  # Runs in parallel with contracts, frontend, and indexer.
   circuits:
     name: Circuit compile
     runs-on: ubuntu-latest
@@ -115,11 +141,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Noir toolchain
+      - name: Restore / install Noir toolchain
+        uses: actions/cache@v4
+        id: cache-noir-circuits
+        with:
+          path: ~/.nargo
+          key: nargo-${{ runner.os }}-${{ env.NOIR_VERSION }}
+      - if: steps.cache-noir-circuits.outputs.cache-hit != 'true'
+        name: Download Noir toolchain
+        shell: bash
         run: |
-          curl -L https://raw.githubusercontent.com/noir-lang/noirup/324a51fca2c410d2477400316efc5ce0d743a5b3/install | bash
+          curl -sSfL https://raw.githubusercontent.com/noir-lang/noirup/324a51fca2c410d2477400316efc5ce0d743a5b3/install | bash
           export PATH="$HOME/.nargo/bin:$PATH"
-          noirup -v 1.0.0-beta.9
+          noirup -v ${{ env.NOIR_VERSION }}
+
+      - name: Restore / install Barretenberg toolchain
+        uses: actions/cache@v4
+        id: cache-bb-circuits
+        with:
+          path: ~/.bb
+          key: bb-${{ runner.os }}-${{ env.BB_VERSION }}
+      - if: steps.cache-bb-circuits.outputs.cache-hit != 'true'
+        name: Download Barretenberg toolchain
+        shell: bash
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
+          export PATH="$HOME/.bb:$PATH"
+          source "$HOME/.bashrc" 2>/dev/null || true
+          bbup -v ${{ env.BB_VERSION }}
 
       - name: Compile circuits
         run: |
@@ -129,13 +178,14 @@ jobs:
             (cd "$dir" && nargo compile)
           done
 
+      - name: Verify deterministic VK hashes
+        run: |
+          export PATH="$HOME/.nargo/bin:$HOME/.bb:$PATH"
+          bash ../scripts/verify-vks.sh check
+
       - name: Check staged artifacts are current
         run: |
           export PATH="$HOME/.nargo/bin:$HOME/.bb:$PATH"
-
-          # Install bb at pinned version
-          curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
-          bbup -v 0.87.0
 
           type_of() {
             case "$1" in
@@ -212,6 +262,70 @@ jobs:
       - name: Check benchmark.sh syntax
         run: bash -n ../scripts/benchmark.sh
 
+      - name: Run Noir unit tests (nargo test)
+        run: |
+          export PATH="$HOME/.nargo/bin:$PATH"
+          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof set_membership range_proof; do
+            echo "=== nargo test $dir ==="
+            (cd "$dir" && nargo test)
+          done
+
+  # ── Circuit fuzzing ─────────────────────────────────────────────────────────
+  # Intentionally runs after circuits so it can reuse the compiled artifacts
+  # if we ever share them via cache. Noir toolchain is restored from cache.
+  circuit-fuzz:
+    name: Property-based circuit fuzzing
+    runs-on: ubuntu-latest
+    needs: circuits
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Restore Noir toolchain (from circuits job cache)
+        uses: actions/cache@v4
+        id: cache-noir-fuzz
+        with:
+          path: ~/.nargo
+          key: nargo-${{ runner.os }}-${{ env.NOIR_VERSION }}
+      - if: steps.cache-noir-fuzz.outputs.cache-hit != 'true'
+        name: Download Noir toolchain (cache miss fallback)
+        shell: bash
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/noir-lang/noirup/324a51fca2c410d2477400316efc5ce0d743a5b3/install | bash
+          export PATH="$HOME/.nargo/bin:$PATH"
+          noirup -v ${{ env.NOIR_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Install frontend dependencies (for @noble/curves signing)
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Compile circuits
+        run: |
+          export PATH="$HOME/.nargo/bin:$PATH"
+          cd circuits
+          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof range_proof; do
+            echo "=== compile $dir ==="
+            (cd "$dir" && nargo compile)
+          done
+
+      - name: Run property-based fuzz tests
+        run: |
+          export PATH="$HOME/.nargo/bin:$PATH"
+          node circuits/scripts/fuzz_circuits.js --iterations 10
+
+  # ── Frontend: typecheck, lint, test, build (once) ──────────────────────────
+  # Runs in parallel with contracts, circuits, and indexer.
+  # Builds the frontend once and uploads the .next output as an artifact so
+  # the a11y job can download it directly instead of rebuilding from scratch.
   frontend:
     name: Frontend typecheck & build
     runs-on: ubuntu-latest
@@ -232,7 +346,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -242,10 +356,14 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Check i18n locale key parity
+        run: pnpm check:i18n
+
       - name: Typecheck
         run: pnpm exec tsc --noEmit
 
       - name: Build
+        id: build
         run: pnpm build
         env:
           # Dummy values so the build doesn't error on missing env vars
@@ -257,6 +375,18 @@ jobs:
           NEXT_PUBLIC_STELLAR_NETWORK: testnet
           NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
 
+      # Upload the compiled .next output so downstream jobs (a11y, size budget)
+      # can consume it without rebuilding. Retention is short — this is a
+      # transient CI artifact, not a release artifact.
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-${{ github.sha }}
+          path: |
+            frontend/.next
+            frontend/public
+          retention-days: 1
+
       - name: Test frontend SDK
         run: pnpm test
 
@@ -266,6 +396,59 @@ jobs:
       - name: Run issuer tests (incl. cross-boundary circuit test)
         run: pnpm --filter @stellarcred/issuer test
 
+  # ── Indexer: SQLite + Postgres test matrix ─────────────────────────────────
+  # Runs in parallel with contracts, circuits, and frontend.
+  indexer:
+    # The indexer's DB layer supports BOTH SQLite and Postgres, so the same
+    # test matrix must run against both backends or one silently rots. This job
+    # spins up a Postgres 16 service container so the parameterized DB suite
+    # (services/indexer/src/db.test.ts) exercises migrations, upserts, revokes,
+    # cursor updates, etc. on Postgres while also still running the SQLite leg.
+    name: Indexer tests (SQLite + Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/indexer
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: indexer
+          POSTGRES_PASSWORD: indexer
+          POSTGRES_DB: indexer
+        ports:
+          - 5432:5432
+        # Gate job steps until Postgres is accepting connections.
+        options: >-
+          --health-cmd "pg_isready -U indexer -d indexer"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/indexer/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run DB test matrix (SQLite + Postgres) and unit tests
+        run: npm test
+        env:
+          # Dummy contract ID / RPC so the ingester tests run headlessly.
+          PROOF_REGISTRY_CONTRACT_ID: C000000000000000000000000000000000000000000000000000000000000001
+          RPC_URL: https://soroban-testnet.stellar.org
+          # Point the Postgres leg of the DB matrix at the service container.
+          TEST_POSTGRES_URL: postgres://indexer:indexer@localhost:5432/indexer
+
+  # ── SDK integration tests ───────────────────────────────────────────────────
   sdk-integration:
     name: SDK integration tests (testnet)
     runs-on: ubuntu-latest
@@ -287,7 +470,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -310,10 +493,14 @@ jobs:
           STELLARCRED_REGISTRY_ID: ${{ vars.STELLARCRED_REGISTRY_ID }}
           STELLARCRED_RPC_URL: ${{ vars.STELLARCRED_RPC_URL || 'https://soroban-testnet.stellar.org' }}
 
+  # ── Accessibility (axe-core) ────────────────────────────────────────────────
+  # Downloads the pre-built frontend artifact from the `frontend` job instead
+  # of rebuilding — this is the key change for issue #548.
   a11y:
     name: Accessibility (axe-core)
     if: false # Skip a11y checks until pre-existing violations are fixed
     runs-on: ubuntu-latest
+    needs: frontend
     permissions:
       contents: read
       pull-requests: write
@@ -321,7 +508,7 @@ jobs:
       run:
         working-directory: frontend
     env:
-      # Dummy values so the build doesn't error on missing env vars
+      # Dummy values required by Next.js at runtime (not at build time here)
       NEXT_PUBLIC_PROOF_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000001
       NEXT_PUBLIC_ISSUER_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000002
       NEXT_PUBLIC_CREDENTIAL_VERIFIER_ID: C000000000000000000000000000000000000000000000000000000000000003
@@ -350,17 +537,14 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Build
-        run: pnpm build
-        env:
-          # Dummy values so the build doesn't error on missing env vars
-          NEXT_PUBLIC_PROOF_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000001
-          NEXT_PUBLIC_ISSUER_REGISTRY_ID: C000000000000000000000000000000000000000000000000000000000000002
-          NEXT_PUBLIC_CREDENTIAL_VERIFIER_ID: C000000000000000000000000000000000000000000000000000000000000003
-          NEXT_PUBLIC_GATED_POOL_ID: C000000000000000000000000000000000000000000000000000000000000004
-          NEXT_PUBLIC_ISSUER_ADDRESS: GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF
-          NEXT_PUBLIC_STELLAR_NETWORK: testnet
-          NEXT_PUBLIC_RPC_URL: https://soroban-testnet.stellar.org
+      # Download the build artifact produced by the `frontend` job instead of
+      # rebuilding. The artifact is scoped to the current SHA so it is always
+      # the exact output from the frontend job above.
+      - name: Download frontend build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build-${{ github.sha }}
+          path: frontend
 
       - name: Run axe-core accessibility checks
         run: pnpm test:e2e
@@ -372,7 +556,7 @@ jobs:
       - name: Report bundle size on PR
         if: always() && github.event_name == 'pull_request'
         continue-on-error: true
-        uses: andresz1/size-limit-action@e7493a72a44b113341c0cf6186ab49c17c4b65c1
+        uses: andresz1/size-limit-action@94bc357df29c36c8f8d50ea497c3e225c3c95d1d
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           script: pnpm size --json

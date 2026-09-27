@@ -23,6 +23,116 @@
 //   const ok = await StellarCred.hasClaim(walletAddress, "kyc");
 
 // ---------------------------------------------------------------------------
+// Runtime environment detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the SDK is running in a browser (or browser-like) context.
+ * Used only for development-mode boundary warnings — never throws.
+ */
+function isBrowser(): boolean {
+  return typeof window !== "undefined";
+}
+
+/**
+ * Returns true when the current process is running in development mode.
+ * Recognises the conventional NODE_ENV values used by Next.js, Vite, CRA,
+ * and bare Node.js scripts.  Always returns false when `process` is undefined
+ * (e.g. a plain browser bundle without an env shim).
+ *
+ * Only "production" is treated as non-dev — test and development environments
+ * should both see the warning.
+ */
+function isDev(): boolean {
+  if (typeof process === "undefined") return false;
+  const nodeEnv = (process.env as Record<string, string | undefined>).NODE_ENV;
+  return nodeEnv !== "production";
+}
+
+/**
+ * Fires a one-time `console.warn` when `configure()` is called from a browser
+ * context with values that look like they came from server-only environment
+ * variables (i.e. variables that are never injected into browser bundles by
+ * Next.js / Vite / CRA because they lack the `NEXT_PUBLIC_` / `VITE_` prefix).
+ *
+ * The heuristic is conservative:
+ *  • We only warn in a browser context (window is defined).
+ *  • We only warn in development mode (NODE_ENV !== "production").
+ *  • We only warn when at least one of the suspicious indicators is present:
+ *      - The `registryId` passed to `configure()` came from a bare
+ *        `STELLARCRED_REGISTRY_ID` env var (not the public Next.js alias).
+ *      - Any STELLARCRED_* env variable without a NEXT_PUBLIC_ prefix is
+ *        somehow visible in `process.env` in the browser, which is a strong
+ *        signal that the integrator's bundler is leaking server-side env vars.
+ *
+ * The warning is emitted at most once per page load regardless of how many
+ * times `configure()` is called.
+ */
+let _warnedBoundaryViolation = false;
+/**
+ * @internal — test-only hook to reset the one-shot boundary violation flag
+ * between test cases. Not part of the public API.
+ */
+export function __resetBoundaryWarningForTesting(): void {
+  _warnedBoundaryViolation = false;
+}
+function warnOnClientServerBoundaryViolation(opts: {
+  registryId?: string;
+  rpcUrl?: string;
+}): void {
+  if (!isBrowser()) return;
+  if (!isDev()) return;
+  if (_warnedBoundaryViolation) return;
+
+  const proc = typeof process !== "undefined"
+    ? (process.env as Record<string, string | undefined>)
+    : {};
+
+  // Indicator 1: a bare STELLARCRED_REGISTRY_ID is visible in process.env
+  // inside a browser.  Next.js only exposes NEXT_PUBLIC_* vars to the client
+  // bundle; if STELLARCRED_REGISTRY_ID has a value here it means the bundler
+  // is leaking server-side env vars into the client.
+  const leakedServerVar =
+    !!proc["STELLARCRED_REGISTRY_ID"] ||
+    !!proc["STELLARCRED_RPC_URL"] ||
+    !!proc["STELLARCRED_NETWORK_PASSPHRASE"] ||
+    !!proc["STELLARCRED_BASE_URL"] ||
+    !!proc["STELLARCRED_NETWORK"];
+
+  // Indicator 2: configure() was called with a registryId / rpcUrl value that
+  // is identical to what the bare (non-public) env var would return.  This
+  // catches the pattern:
+  //
+  //   StellarCred.configure({ registryId: process.env.PROOF_REGISTRY_ID })
+  //
+  // where the integrator accidentally used the server-only var name.
+  const serverEnvRegistryId = proc["STELLARCRED_REGISTRY_ID"] ?? proc["PROOF_REGISTRY_ID"];
+  const serverEnvRpcUrl = proc["STELLARCRED_RPC_URL"];
+  const configMatchesServerVar =
+    (opts.registryId !== undefined && opts.registryId !== "" && opts.registryId === serverEnvRegistryId) ||
+    (opts.rpcUrl !== undefined && opts.rpcUrl !== "" && opts.rpcUrl === serverEnvRpcUrl);
+
+  if (!leakedServerVar && !configMatchesServerVar) return;
+
+  _warnedBoundaryViolation = true;
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[StellarCred] configure() was called in a browser context with values that " +
+      "appear to come from server-only environment variables (e.g. STELLARCRED_REGISTRY_ID " +
+      "or PROOF_REGISTRY_ID without the NEXT_PUBLIC_ prefix).\n\n" +
+      "The ProofRegistry contract ID and RPC URL are read-only infrastructure config " +
+      "that is safe to expose to the client — but they must reach the browser through " +
+      "public env vars (NEXT_PUBLIC_PROOF_REGISTRY_ID / NEXT_PUBLIC_RPC_URL in Next.js, " +
+      "VITE_* in Vite) rather than server-only names.\n\n" +
+      "If you are verifying claims server-side (recommended for access control), " +
+      "import from '@stellarcred/sdk/server' instead — the intent is explicit at " +
+      "the import site and this warning will not fire.\n\n" +
+      "See the SDK README §Trust boundary for details. " +
+      "This warning only appears in development mode.",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Runtime configuration
 // ---------------------------------------------------------------------------
 
@@ -36,12 +146,43 @@ function env(key: string, nextPublicKey?: string): string {
   );
 }
 
+// ── Single network selector (Issue #408) ─────────────────────────────────────
+// STELLARCRED_NETWORK / NEXT_PUBLIC_STELLAR_NETWORK (testnet | mainnet |
+// futurenet) picks a coherent preset for RPC URL and network passphrase.
+// Explicit URL/passphrase env vars override the preset.
+
+type StellarNetwork = "testnet" | "mainnet" | "futurenet";
+
+const NETWORK_PRESETS: Record<StellarNetwork, { rpcUrl: string; networkPassphrase: string }> = {
+  testnet: {
+    rpcUrl: "https://soroban-testnet.stellar.org",
+    networkPassphrase: "Test SDF Network ; September 2015",
+  },
+  mainnet: {
+    rpcUrl: "https://soroban.stellar.org",
+    networkPassphrase: "Public Global Stellar Network ; September 2015",
+  },
+  futurenet: {
+    rpcUrl: "https://soroban-futurenet.stellar.org",
+    networkPassphrase: "Test SDF Future Network ; October 2022",
+  },
+};
+
+function parseNetwork(raw: string | undefined): StellarNetwork {
+  const key = (raw ?? "").trim().toLowerCase();
+  if (key === "public" || key === "main") return "mainnet";
+  if (key === "testnet" || key === "mainnet" || key === "futurenet") return key;
+  return "testnet";
+}
+
+const _preset = NETWORK_PRESETS[parseNetwork(env("STELLARCRED_NETWORK", "NEXT_PUBLIC_STELLAR_NETWORK"))];
+
 let _config = {
   registryId: env("STELLARCRED_REGISTRY_ID", "NEXT_PUBLIC_PROOF_REGISTRY_ID"),
-  rpcUrl: env("STELLARCRED_RPC_URL", "NEXT_PUBLIC_RPC_URL") || "https://soroban-testnet.stellar.org",
+  rpcUrl: env("STELLARCRED_RPC_URL", "NEXT_PUBLIC_RPC_URL") || _preset.rpcUrl,
   networkPassphrase:
     env("STELLARCRED_NETWORK_PASSPHRASE", "NEXT_PUBLIC_NETWORK_PASSPHRASE") ||
-    "Test SDF Network ; September 2015",
+    _preset.networkPassphrase,
   baseUrl: env("STELLARCRED_BASE_URL", "NEXT_PUBLIC_STELLARCRED_BASE_URL") || "https://stellarcred.xyz",
   requestTimeoutMs: 10_000,
   retries: 3,
@@ -66,6 +207,10 @@ export function configure(opts: {
   maxDelayMs?: number;
   jitter?: boolean;
 }): void {
+  // Warn in dev when configure() is called from a browser with values that
+  // look like they came from server-only (non-public) environment variables.
+  // This is a dev-only, one-shot warning — never fires in production.
+  warnOnClientServerBoundaryViolation({ registryId: opts.registryId, rpcUrl: opts.rpcUrl });
   _config = { ..._config, ...opts };
   const sharedOpts: Parameters<typeof configureSharedClaims>[0] = {};
   if (opts.registryId !== undefined) sharedOpts.registryId = opts.registryId;
@@ -718,6 +863,60 @@ export async function hasClaims(
   return results;
 }
 
+/** One claim type + optional minimum threshold within a selective-disclosure preset (#386). */
+export interface PresetClaim {
+  type: ClaimType;
+  /** Same semantics as {@link ClaimOptions.minThreshold} — omit for a binary claim. */
+  minThreshold?: number;
+}
+
+/** Result of {@link verifyPreset}. */
+export interface PresetVerificationResult {
+  /** Per-type pass/fail, same shape {@link hasClaims} returns. */
+  results: Partial<Record<ClaimType, boolean>>;
+  /** True only if every claim in the preset passed. */
+  allValid: boolean;
+}
+
+/**
+ * Verifies every claim in a selective-disclosure preset — a holder-defined,
+ * shareable bundle like "Investor onboarding" (kyc + accreditation +
+ * jurisdiction) — against one wallet in a single batched call.
+ *
+ * This is a thin wrapper over {@link hasClaims}: presets themselves are not
+ * an on-chain concept (there is no preset registry), they're just a named,
+ * shareable list of `(type, minThreshold)` pairs a holder defines and a
+ * protocol requests out-of-band (e.g. via the deep link/QR the holder page
+ * generates) — verification is still exactly the same trustless on-chain
+ * `ProofRegistry` read every other claim check in this SDK uses.
+ *
+ * @example
+ * const { allValid, results } = await verifyPreset("G1ABC…", [
+ *   { type: "kyc" },
+ *   { type: "accreditation", minThreshold: 1_000_000 },
+ * ]);
+ * if (allValid) grantAccess();
+ */
+export async function verifyPreset(
+  wallet: string,
+  claims: readonly PresetClaim[],
+  opts?: Pick<BatchClaimOptions, "trustedIssuers" | "requestTimeoutMs">,
+): Promise<PresetVerificationResult> {
+  const types = claims.map((c) => c.type);
+  const minThresholds: Partial<Record<ClaimType, number>> = {};
+  for (const c of claims) {
+    if (c.minThreshold !== undefined) minThresholds[c.type] = c.minThreshold;
+  }
+
+  const results = await hasClaims(wallet, types, {
+    minThresholds,
+    trustedIssuers: opts?.trustedIssuers,
+    requestTimeoutMs: opts?.requestTimeoutMs,
+  });
+  const allValid = types.length > 0 && types.every((t) => results[t] === true);
+  return { results, allValid };
+}
+
 /**
  * Returns every active claim a wallet has proven, across all known credential
  * types. Useful for profile pages and protocol dashboards.
@@ -1080,6 +1279,36 @@ export function watchClaim(
 }
 
 // ---------------------------------------------------------------------------
+
+// Challenge generation & server-side wallet verification (#543)
+// ---------------------------------------------------------------------------
+
+import {
+  createWalletChallenge,
+  verifyWalletSignature,
+  verifyWalletClaim,
+  MemoryChallengeStore,
+  defaultChallengeStore,
+} from "./challenge";
+
+export {
+  createWalletChallenge,
+  verifyWalletSignature,
+  verifyWalletClaim,
+  MemoryChallengeStore,
+  defaultChallengeStore,
+};
+
+export type {
+  WalletChallenge,
+  CreateChallengeOptions,
+  ChallengeStore,
+  VerifyWalletClaimParams,
+  VerifyWalletClaimResult,
+} from "./challenge";
+
+
+// ---------------------------------------------------------------------------
 // Namespace export (StellarCred.hasClaim / StellarCred.getClaims / etc.)
 // ---------------------------------------------------------------------------
 
@@ -1091,11 +1320,15 @@ export const StellarCred = {
   getClaim,
   hasClaims,
   getClaims,
+  verifyPreset,
   buildVerifyUrl,
   buildBadgeUrl,
   buildBadgeEmbedCode,
   parseReturnParams,
   watchClaim,
+  createWalletChallenge,
+  verifyWalletSignature,
+  verifyWalletClaim,
   CLAIM_TYPES,
   TimeoutError,
   ConfigError,

@@ -24,3 +24,29 @@ Complete reference for the `ProofRegistry` Error enum and its client-side mappin
 - Contract enum: `contracts/proof_registry/src/lib.rs`
 - Client map: `frontend/lib/contracts.ts`
 - Guard test: `frontend/lib/contracts.test.ts`
+
+---
+
+# IssuerRegistry Contract Error Codes
+
+## Error Mapping
+
+| Code | Variant | Client Message |
+|------|---------|----------------|
+| 1 | NotInitialized | Contract not initialized — no admin has been set. |
+| 2 | IssuerNotFound | Issuer not found — this address is not registered. |
+| 3 | MetadataTooLong | Issuer metadata too long — a name, URL, or logo field exceeds its length cap. |
+| 4 | RoleNotHeld | Role not held — the required role has no holder, or the caller is not the holder. |
+| 5 | RoleHolderMismatch | Role holder mismatch — `revoke_role` named an address that is not the current holder. |
+| 6 | KeyNotFound | Key not found — the key is unknown to this issuer, or its validity window has already closed, so there is nothing to revoke. |
+| 7 | KeyAlreadyRevoked | Key already revoked — the emergency revocation has already been applied. |
+| 8 | KeyAlreadyRetired | Key already retired — the key is still in the issuer's key set; re-installing it would revive credentials signed with it. Rotate to a new key instead. |
+| 9 | KeyHistoryFull | Key history full — eight retired keys are still inside their validity windows. Wait for one to expire, or revoke keys that are no longer needed. |
+| 10 | InvalidKeyWindow | Invalid validity window — the window is already closed, or longer than the 366-day maximum. |
+| 11 | KeyAlreadyCurrent | Key already current — the key passed to `rotate_issuer_key` is already the issuer's signing key. |
+| 12 | KeyChangeRequiresRotation | Key change requires rotation — `register_issuer` cannot change an existing issuer's public key. Use `rotate_issuer_key` so outstanding credentials keep verifying. |
+
+## Source
+
+- Contract enum: `contracts/issuer_registry/src/lib.rs`
+- Operational procedure: [ISSUER_KEY_ROTATION.md](ISSUER_KEY_ROTATION.md)
