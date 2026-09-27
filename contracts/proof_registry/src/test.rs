@@ -1860,6 +1860,34 @@ fn credential_signed_with_a_retired_key_stops_submitting_after_the_window() {
     submit(&env, &h, &holder, ROT_T0 + ROT_WINDOW + 1000);
 }
 
+/// The window is inclusive: a credential signed by the retired key still
+/// submits on the final ledger of its validity window, and only stops one
+/// ledger later. ProofRegistry mirrors the `now <= valid_until` rule
+/// `IssuerRegistry::is_valid_issuer_key` documents.
+#[test]
+fn credential_signed_with_a_retired_key_submits_on_the_last_ledger_of_its_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(ROT_T0);
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    h.issuer_registry.rotate_issuer_key(
+        &h.issuer,
+        &replacement_key(&env, 9),
+        &(ROT_T0 + ROT_WINDOW),
+    );
+
+    // Boundary: exactly `old_key_valid_until`. The credential still verifies.
+    env.ledger().set_timestamp(ROT_T0 + ROT_WINDOW);
+    submit(&env, &h, &holder, ROT_T0 + ROT_WINDOW + 1000);
+    assert!(
+        h.registry
+            .is_verified(&holder, &symbol_short!("kyc"), &None)
+            .0
+    );
+}
+
 /// Emergency revocation ignores the validity window: a compromised key stops
 /// working on the spot, even mid-grace-period.
 #[test]
