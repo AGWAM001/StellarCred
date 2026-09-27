@@ -39,7 +39,7 @@ graph TD
     Browser -->|5. Generate Proof Locally| Prover
     Prover -->|6. Proof + Public Inputs| Wallet
     Wallet -->|7. submit_proof| ProofRegistry
-    ProofRegistry -->|8. is_valid_issuer| IssuerRegistry
+    ProofRegistry -->|8. is_valid_issuer + is_valid_issuer_key| IssuerRegistry
     ProofRegistry -->|9. verify_proof| CredentialVerifier
     ProofRegistry -->|10. is_verified State| ProtocolDapp
 ```
@@ -153,7 +153,9 @@ sequenceDiagram
     Wallet->>ProofRegistry: submit_proof(holder, issuer_id, credential_type, proof, public_inputs, expiry)
     ProofRegistry->>IssuerRegistry: is_valid_issuer(issuer_id, credential_type)
     IssuerRegistry-->>ProofRegistry: true/false
-    ProofRegistry->>ProofRegistry: Check Public Key in Public Inputs Matches Registered Key
+    ProofRegistry->>IssuerRegistry: is_valid_issuer_key(issuer_id, key from public inputs)
+    IssuerRegistry-->>ProofRegistry: true if current, or retired and still in window
+    ProofRegistry->>ProofRegistry: Reject on IssuerKeyMismatch if the key is not live
     ProofRegistry->>Verifier: verify_proof(credential_type, proof, public_inputs)
     Verifier-->>ProofRegistry: true/false
     ProofRegistry->>ProofRegistry: Cache Proof Record (is_verified = true)

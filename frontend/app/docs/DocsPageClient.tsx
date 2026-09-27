@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
@@ -709,7 +709,7 @@ export default function DocsPageClient() {
             <div style={{ marginBottom: "0.25rem" }}>
               <ContractRow
                 name="IssuerRegistry"
-                role="Stores trusted issuer addresses, their secp256k1 public keys, and which credential types each is authorised to issue. Admins call register_issuer; anyone can read is_valid_issuer and get_issuer_pubkey."
+                role="Stores trusted issuer addresses, their secp256k1 public keys, and which credential types each is authorised to issue. Admins call register_issuer, rotate_issuer_key (keeps credentials signed with the old key valid until their expiry) and revoke_issuer_key (kills a key immediately); anyone can read is_valid_issuer, is_valid_issuer_key and get_issuer_keys."
               />
               <ContractRow
                 name="CredentialVerifier"
@@ -717,7 +717,7 @@ export default function DocsPageClient() {
               />
               <ContractRow
                 name="ProofRegistry"
-                role="The public API for downstream protocols. Calls IssuerRegistry to check trust, verifies the public key in the proof's public inputs matches the registered key, calls CredentialVerifier, and writes (holder, type) → (verified_at, expiry) to persistent storage."
+                role="The public API for downstream protocols. Calls IssuerRegistry to check trust, verifies the public key in the proof's public inputs is one of the issuer's live keys, calls CredentialVerifier, and writes (holder, type) → (verified_at, expiry) to persistent storage."
               />
               <ContractRow
                 name="GatedPool"

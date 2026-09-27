@@ -82,7 +82,7 @@ For the authoritative specification of contract events, topic schemas, and index
 
 ```
 contracts/              Soroban workspace (Rust, soroban-sdk 26)
-  issuer_registry/        trust root; submit_proof checks is_valid_issuer
+  issuer_registry/        trust root; submit_proof checks is_valid_issuer_key
   credential_verifier/    real UltraHonk verify via host-native BN254 (VK per type)
   proof_registry/         caches verifications w/ expiry + TTL; gated on issuer key
   gated_pool/             demo DeFi pool gated on a KYC proof
@@ -197,7 +197,9 @@ full reference.
    [`/api/issue`](frontend/app/api/issue/route.ts) route handler and signs with
    `ISSUER_PRIVATE_KEY` (never prefixed `NEXT_PUBLIC_`, never shipped to the
    browser). A production issuer would hold this key in an HSM or secrets
-   manager. With no key set, the route runs a clearly-logged demo fallback.
+   manager, and move it between HSMs with `IssuerRegistry.rotate_issuer_key`
+   (see [docs/ISSUER_KEY_ROTATION.md](docs/ISSUER_KEY_ROTATION.md)). With no key
+   set, the route runs a clearly-logged demo fallback.
 3. **Attestation relay.** Issuance can be gated on a real KYC provider — the
    route integrates Persona's sandbox and only signs credentials after a positive
    result. Identity fields are sent once to the provider and never stored.
@@ -368,7 +370,11 @@ are supported), switch it to **testnet**, and fund the account
   different claim type; watch *access denied → granted* as `is_verified` flips.
 
 **Rotating the issuer key** doesn't require a redeploy — generate a new key and
-call `register_issuer` on the existing IssuerRegistry with the new public key.
+call `rotate_issuer_key` on the existing IssuerRegistry. The previous key is
+retired with a validity window, so credentials it already signed keep verifying
+until they reach their natural expiry. If a key is compromised instead, call
+`revoke_issuer_key` to kill it immediately. See
+[docs/ISSUER_KEY_ROTATION.md](docs/ISSUER_KEY_ROTATION.md).
 
 > In-browser proving uses cross-origin isolation (COOP/COEP headers in
 > `next.config.mjs`) for multithreading, falling back to single-threaded.
@@ -415,8 +421,10 @@ Deploy and wire the contracts on the Stellar Mainnet:
   (~13.5% of the 100M per-transaction budget), confirming the protocol fits
   comfortably within Soroban's limits. Read-only functions (`is_verified`,
   `check_claim`) use <400K instructions (<0.4%). See [BENCHMARKS.md](BENCHMARKS.md).
-- **125 contract tests pass**, including real proof verification for all credential
+- **154 contract tests pass**, including real proof verification for all credential
   types, in-circuit ECDSA, untrusted-issuer and wrong-issuer-key rejections,
+  issuer key rotation (a credential signed before a rotation still verifies, and
+  stops verifying once its validity window closes or the key is revoked),
   proof-expiry tests that advance ledger time, and role-based access control
   (role holder can act, non-holder cannot, admin can grant/revoke).
 - **Toolchain is pinned**: Noir `1.0.0-beta.9`, Barretenberg `bb 0.87.0`, matching
