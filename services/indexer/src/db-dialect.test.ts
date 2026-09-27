@@ -373,7 +373,8 @@ describe("schema", () => {
         .map((line) => line.trim().replace(/,$/, ""))
         .filter((line) => /^\w+\s/.test(line))
         .filter((line) => !/^(UNIQUE|PRIMARY KEY|CHECK|FOREIGN KEY)\b/.test(line))
-        .map((line) => line.replace(/\s+(INTEGER|BIGINT|SERIAL)\b.*$/, ""));
+        // Keep only the column name; types differ by design.
+        .map((line) => line.replace(/\s+[A-Z][A-Z0-9_]*(\s.*)?$/, ""));
 
     expect(columns(buildClaimsTable(sqlite))).toEqual(
       columns(buildClaimsTable(postgres)),
@@ -397,6 +398,37 @@ describe("schema", () => {
     // SQLite's rowid alias is already unique; Postgres needs an index.
     expect(sqlite.extraClaimIndexes).toEqual([]);
     expect(postgres.extraClaimIndexes.join(" ")).toContain("UNIQUE INDEX");
+  });
+
+  it("gives every table at most one primary key", () => {
+    // Postgres rejects a table with two primary keys, and it is easy to
+    // reintroduce by declaring an inline PRIMARY KEY on the id column while
+    // the shared builder also emits the table's key clause.
+    for (const [driver, dialect] of [
+      ["sqlite", createSqliteDialect(fakeSqlite().db)],
+      ["postgres", createPostgresDialect(fakePostgres().conn)],
+    ] as const) {
+      for (const statement of buildSchema(dialect).tables.split(/;\n\n/)) {
+        const table = statement.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1];
+        if (!table) continue;
+        const keys = statement.match(/PRIMARY KEY/gi) ?? [];
+        expect({ driver, table, primaryKeys: keys.length }).toEqual({
+          driver,
+          table,
+          primaryKeys: 1,
+        });
+      }
+    }
+  });
+
+  it("keeps the claims id unique on Postgres via an index, not a second key", () => {
+    const postgres = createPostgresDialect(fakePostgres().conn);
+    const claims = buildClaimsTable(postgres);
+    expect(claims).toContain("id BIGSERIAL,");
+    expect(claims).toContain("PRIMARY KEY (wallet, credential_type)");
+    expect(buildSchema(postgres).indexes).toContain(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_id",
+    );
   });
 
   it("names every column it declares", () => {

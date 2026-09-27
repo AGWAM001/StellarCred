@@ -45,8 +45,16 @@ export interface SqlDialect {
 
   // ── Schema fragments (see db-schema.ts) ────────────────────────────────
 
-  /** Type + key clause for the auto-increment insertion cursor column. */
-  autoIdType: string;
+  /**
+   * Type + key clause for the `claims` insertion cursor.
+   *
+   * `claims` already takes its primary key from {@link claimsKeyClause}, so
+   * this must NOT declare one of its own (Postgres rejects two). Uniqueness of
+   * `id` comes from an index instead.
+   */
+  claimsIdType: string;
+  /** Type + key clause for the standalone `app_submissions` id. */
+  submissionIdType: string;
   /** Table-level key clause enforcing one row per (wallet, credential_type). */
   claimsKeyClause: string;
   /** Column type for the wide numeric columns (ledger numbers, timestamps). */

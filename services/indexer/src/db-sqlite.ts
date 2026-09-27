@@ -74,7 +74,8 @@ export function createSqliteDialect(raw: SqliteDatabase): SqlDialect {
       return SQLITE_PLACEHOLDERS.placeholder(index);
     },
 
-    autoIdType: "INTEGER PRIMARY KEY AUTOINCREMENT",
+    claimsIdType: "INTEGER PRIMARY KEY AUTOINCREMENT",
+    submissionIdType: "INTEGER PRIMARY KEY AUTOINCREMENT",
     claimsKeyClause: "UNIQUE (wallet, credential_type)",
     intType: "INTEGER",
     flagType: "INTEGER",

@@ -73,7 +73,12 @@ export function createPostgresDialect(conn: PostgresConnection): SqlDialect {
       return POSTGRES_PLACEHOLDERS.placeholder(index);
     },
 
-    autoIdType: "SERIAL PRIMARY KEY",
+    // No inline PRIMARY KEY on the claims cursor: that table takes its primary
+    // key from the shared `claimsKeyClause` (PRIMARY KEY (wallet, credential_type))
+    // and Postgres rejects a second one. `id` stays unique via idx_claims_id.
+    claimsIdType: "BIGSERIAL",
+    // app_submissions has no shared key clause, so its id is a plain primary key.
+    submissionIdType: "SERIAL PRIMARY KEY",
     claimsKeyClause: "PRIMARY KEY (wallet, credential_type)",
     intType: "BIGINT",
     flagType: "INTEGER",

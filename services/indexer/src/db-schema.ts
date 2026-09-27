@@ -51,7 +51,7 @@ export interface Schema {
 export function buildClaimsTable(dialect: SqlDialect): string {
   const int = dialect.intType;
   return `CREATE TABLE IF NOT EXISTS claims (
-  ${column("id", dialect.autoIdType)},
+  ${column("id", dialect.claimsIdType)},
   ${column("wallet", "TEXT", { notNull: true })},
   ${column("credential_type", "TEXT", { notNull: true })},
   ${column("issuer", "TEXT", { notNull: true, default: "''" })},
@@ -77,7 +77,7 @@ export function buildSchema(dialect: SqlDialect): Schema {
 )`;
 
   const appSubmissions = `CREATE TABLE IF NOT EXISTS app_submissions (
-  ${column("id", dialect.autoIdType)},
+  ${column("id", dialect.submissionIdType)},
   ${column("app_name", "TEXT", { notNull: true })},
   ${column("description", "TEXT", { notNull: true })},
   ${column("required_claims", "TEXT", { notNull: true, default: "'[]'" })},
