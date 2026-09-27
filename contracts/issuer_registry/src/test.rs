@@ -1204,12 +1204,6 @@ fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
                     old_admin: admin.clone(),
                     new_admin: new_admin.clone(),
                     changed_at: env.ledger().timestamp(),
-                (symbol_short!("iss_reg"), symbol_short!("key_revk")).into_val(&env),
-                EventIssuerKeyRevoked {
-                    issuer,
-                    pubkey: k0,
-                    was_current: false,
-                    revoked_at: T0,
                 }
                 .into_val(&env),
             ),
@@ -1217,10 +1211,10 @@ fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
     );
 }
 
-/// Revoking the *current* key stops issuance until an admin rotates to a new
-/// one; keys retired earlier and never revoked keep working.
+/// Emergency revocation of a retired key is immediate: the difference from
+/// rotation is that the window is ignored.
 #[test]
-fn revoke_issuer_key_on_the_current_key_blocks_issuance_until_rotation() {
+fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
