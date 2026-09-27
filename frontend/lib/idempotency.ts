@@ -72,6 +72,30 @@ export function isValidIdempotencyKey(key: string): boolean {
 const store = new Map<string, CachedResponse>();
 
 /**
+ * Hard cap on stored responses. The lazy every-100-sets cleanup only drops
+ * entries whose TTL has already elapsed; a flood of distinct in-TTL keys
+ * would therefore grow the map without bound. This cap closes that gap.
+ */
+function maxEntries(): number {
+  const env = process.env.IDEMPOTENCY_MAX_ENTRIES;
+  if (env) {
+    const parsed = parseInt(env, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 10_000;
+}
+
+function enforceCap(): void {
+  const cap = maxEntries();
+  if (store.size <= cap) return;
+  let removed = store.size - cap;
+  for (const key of store.keys()) {
+    store.delete(key);
+    if (--removed <= 0) break;
+  }
+}
+
+/**
  * Retrieve a cached response by idempotency key.
  * Returns `null` if the key is not found, invalid, or the entry has expired.
  */
@@ -103,6 +127,7 @@ export function idempotencySet(key: string, response: CachedResponse): void {
   if (store.size >= 100 && store.size % 100 === 0) {
     idempotencyCleanup();
   }
+  enforceCap();
 }
 
 /**
