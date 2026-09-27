@@ -1727,7 +1727,6 @@ fn has_role_is_a_public_view() {
     assert!(h
         .registry
         .has_role(&Symbol::new(&env, "issuer_manager"), &delegate));
-=======
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1952,4 +1951,3 @@ fn aggregate_accepts_a_credential_signed_with_a_retired_key() {
         .is_verified(&holder, &symbol_short!("age"), &None)
         .0);
 }
->>>>>>> upstream/main
