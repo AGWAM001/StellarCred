@@ -56,7 +56,7 @@ pub struct EventIssuerRevoked {
 }
 
 /// Payload emitted when the admin is changed.
-/// Topics: ("iss_reg", "admin_changed")
+/// Topics: ("iss_reg", "admin_rot")
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EventAdminChanged {

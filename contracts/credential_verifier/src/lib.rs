@@ -63,7 +63,7 @@ pub struct EventContractUpgraded {
 }
 
 /// Payload emitted when the admin is changed.
-/// Topics: ("cred_ver", "admin_changed")
+/// Topics: ("cred_ver", "admin_rot")
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EventAdminChanged {
