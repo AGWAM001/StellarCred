@@ -121,6 +121,7 @@ fn submit(env: &Env, h: &Harness, holder: &Address, expiry: u64) {
 
 struct MultiHarness {
     registry: ProofRegistryClient<'static>,
+    issuer_registry: IssuerRegistryClient<'static>,
     kyc_issuer: Address,
     funds_issuer: Address,
     age_issuer: Address,
@@ -169,6 +170,7 @@ fn deploy_multi(env: &Env) -> MultiHarness {
     let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
     MultiHarness {
         registry: ProofRegistryClient::new(env, &pr_id),
+        issuer_registry: ir,
         kyc_issuer,
         funds_issuer,
         age_issuer,
@@ -500,9 +502,7 @@ fn batch_all_pass() {
             expiry: 9999,
             vk_version: None,
         },
-    ];
-
-    h.registry.submit_proofs(&holder, &submissions);
+    ];    h.registry.submit_proofs(&holder, &submissions);
     assert!(
         h.registry
             .is_verified(&holder, &symbol_short!("kyc"), &None)
@@ -637,9 +637,7 @@ fn aggregate_submits_real_proof_and_stores_claims() {
         &Bytes::from_slice(&env, AGGREGATE_PROOF),
         &Bytes::from_slice(&env, AGGREGATE_PUBLIC_INPUTS),
         &vec![&env, 9999u64, 9999u64],
-    );
-
-    assert!(
+    );    assert!(
         registry
             .is_verified(&holder, &symbol_short!("kyc"), &None)
             .0
@@ -1729,4 +1727,228 @@ fn has_role_is_a_public_view() {
     assert!(h
         .registry
         .has_role(&Symbol::new(&env, "issuer_manager"), &delegate));
+
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Issuer key rotation
+//
+// A credential is bound to the key that signed it. These tests pin the
+// behaviour an issuer relies on when it rotates: credentials issued before the
+// rotation keep verifying until their natural expiry, and a revoked key stops
+// verifying immediately.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Ledger timestamp the rotation tests start from, so validity windows are
+/// measured against a realistic clock rather than the genesis timestamp.
+const ROT_T0: u64 = 1_700_000_000;
+/// 90-day grace window granted to the key a rotation retires.
+const ROT_WINDOW: u64 = 90 * 86_400;
+
+/// A replacement signing key, deliberately different from the fixture keys.
+fn replacement_key(env: &Env, seed: u8) -> BytesN<64> {
+    BytesN::from_array(env, &[seed; 64])
+}
+
+/// The headline case: rotating an issuer's key must not invalidate the
+/// credentials it already issued.
+#[test]
+fn credential_signed_with_a_retired_key_still_submits() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(ROT_T0);
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    // The issuer rotates away from the key that signed the fixture proof.
+    h.issuer_registry.rotate_issuer_key(
+        &h.issuer,
+        &replacement_key(&env, 9),
+        &(ROT_T0 + ROT_WINDOW),
+    );
+
+    // New issuance uses the new key…
+    assert_eq!(
+        h.issuer_registry.get_issuer_pubkey(&h.issuer),
+        replacement_key(&env, 9)
+    );
+    // …but a credential signed before the rotation still verifies.
+    submit(&env, &h, &holder, ROT_T0 + 1000);
+    assert!(
+        h.registry
+            .is_verified(&holder, &symbol_short!("kyc"), &None)
+            .0
+    );
+}
+
+/// Once the validity window closes, the retired key no longer backs a
+/// submission — the credential has outlived its grace period.
+#[test]
+#[should_panic(expected = "Contract, #5")]
+fn credential_signed_with_a_retired_key_stops_submitting_after_the_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(ROT_T0);
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    h.issuer_registry.rotate_issuer_key(
+        &h.issuer,
+        &replacement_key(&env, 9),
+        &(ROT_T0 + ROT_WINDOW),
+    );
+
+    env.ledger().set_timestamp(ROT_T0 + ROT_WINDOW + 1);
+    submit(&env, &h, &holder, ROT_T0 + ROT_WINDOW + 1000);
+}
+
+/// Emergency revocation ignores the validity window: a compromised key stops
+/// working on the spot, even mid-grace-period.
+#[test]
+#[should_panic(expected = "Contract, #5")]
+fn revoked_issuer_key_rejects_submissions_immediately() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(ROT_T0);
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    let old_key = h.issuer_registry.get_issuer_pubkey(&h.issuer);
+    h.issuer_registry.rotate_issuer_key(
+        &h.issuer,
+        &replacement_key(&env, 9),
+        &(ROT_T0 + ROT_WINDOW),
+    );
+    // Still inside its window — this submission would succeed…
+    submit(&env, &h, &holder, ROT_T0 + 1000);
+    // …until the old key is revoked as compromised.
+    h.issuer_registry.revoke_issuer_key(&h.issuer, &old_key);
+
+    let other_holder = Address::generate(&env);
+    submit(&env, &h, &other_holder, ROT_T0 + 2000);
+}
+
+/// Revoking the issuer's *current* key leaves it with no usable signing key, so
+/// the issuer is no longer trusted at all until an admin rotates it forward.
+#[test]
+#[should_panic(expected = "Contract, #4")]
+fn emergency_revocation_of_the_current_key_rejects_submissions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(ROT_T0);
+    let h = deploy(&env);
+    let holder = Address::generate(&env);
+
+    let new_key = replacement_key(&env, 9);
+    h.issuer_registry
+        .rotate_issuer_key(&h.issuer, &new_key, &(ROT_T0 + ROT_WINDOW));
+    h.issuer_registry.revoke_issuer_key(&h.issuer, &new_key);
+
+    submit(&env, &h, &holder, ROT_T0 + 1000);
+}
+
+/// The batch submission path reads the key from the same layout, so a batch
+/// mixing rotated and unrotated issuers behaves identically.
+#[test]
+fn batch_accepts_credentials_signed_with_retired_keys() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    env.ledger().set_timestamp(ROT_T0);
+    let h = deploy_multi(&env);
+    let holder = Address::generate(&env);
+
+    h.issuer_registry.rotate_issuer_key(
+        &h.kyc_issuer,
+        &replacement_key(&env, 9),
+        &(ROT_T0 + ROT_WINDOW),
+    );
+    h.issuer_registry.rotate_issuer_key(
+        &h.age_issuer,
+        &replacement_key(&env, 10),
+        &(ROT_T0 + ROT_WINDOW),
+    );
+
+    let submissions = vec![
+        &env,
+        kyc_submission(&env, &h.kyc_issuer, ROT_T0 + 1000),
+        ProofSubmission {
+            credential_type: symbol_short!("funds"),
+            proof: Bytes::from_slice(&env, FUNDS_PROOF),
+            public_inputs: u8_slice_to_vec_u32(&env, FUNDS_PUBLIC_INPUTS),
+            issuer_id: h.funds_issuer.clone(),
+            expiry: ROT_T0 + 1000,
+            vk_version: None,
+        },
+        ProofSubmission {
+            credential_type: symbol_short!("age"),
+            proof: Bytes::from_slice(&env, AGE_PROOF),
+            public_inputs: u8_slice_to_vec_u32(&env, AGE_PUBLIC_INPUTS),
+            issuer_id: h.age_issuer.clone(),
+            expiry: ROT_T0 + 1000,
+            vk_version: None,
+        },
+    ];
+
+    h.registry.submit_proofs(&holder, &submissions);
+    assert!(h
+        .registry
+        .is_verified(&holder, &symbol_short!("kyc"), &None)
+        .0);
+    assert!(h
+        .registry
+        .is_verified(&holder, &symbol_short!("funds"), &None)
+        .0);
+    assert!(h
+        .registry
+        .is_verified(&holder, &symbol_short!("age"), &None)
+        .0);
+}
+
+/// Same guarantee for the aggregate layout, where each credential's key sits
+/// at its own field offset.
+#[test]
+fn aggregate_accepts_a_credential_signed_with_a_retired_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    env.ledger().set_timestamp(ROT_T0);
+    let admin = Address::generate(&env);
+
+    let ir_id = env.register(IssuerRegistry, (admin.clone(),));
+    let ir = IssuerRegistryClient::new(&env, &ir_id);
+    let issuer = Address::generate(&env);
+    ir.register_issuer(
+        &issuer,
+        &demo_pubkey(&env),
+        &vec![&env, symbol_short!("kyc"), symbol_short!("age")],
+    );
+    ir.rotate_issuer_key(&issuer, &replacement_key(&env, 9), &(ROT_T0 + ROT_WINDOW));
+
+    let v_id = env.register(CredentialVerifier, (admin.clone(),));
+    CredentialVerifierClient::new(&env, &v_id).set_vk(
+        &symbol_short!("aggregate"),
+        &1u32,
+        &Bytes::from_slice(&env, AGGREGATE_VK),
+    );
+
+    let pr_id = env.register(ProofRegistry, (admin, v_id, ir_id));
+    let registry = ProofRegistryClient::new(&env, &pr_id);
+    let holder = Address::generate(&env);
+
+    registry.submit_aggregate_proof(
+        &holder,
+        &vec![&env, issuer.clone(), issuer.clone()],
+        &vec![&env, symbol_short!("kyc"), symbol_short!("age")],
+        &Bytes::from_slice(&env, AGGREGATE_PROOF),
+        &Bytes::from_slice(&env, AGGREGATE_PUBLIC_INPUTS),
+        &vec![&env, ROT_T0 + 1000u64, ROT_T0 + 1000u64],
+    );
+
+    assert!(registry
+        .is_verified(&holder, &symbol_short!("kyc"), &None)
+        .0);
+    assert!(registry
+        .is_verified(&holder, &symbol_short!("age"), &None)
+        .0);
 }
