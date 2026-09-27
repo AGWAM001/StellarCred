@@ -94,6 +94,8 @@ pub struct EventAdminChanged {
     pub new_admin: Address,
     /// Timestamp when the change occurred.
     pub changed_at: u64,
+}
+
 /// Payload emitted when an issuer's signing key is rotated.
 /// Topics: ("iss_reg", "key_rot")
 #[contracttype]
