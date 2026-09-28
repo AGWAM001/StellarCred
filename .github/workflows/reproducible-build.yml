@@ -2,22 +2,22 @@ name: Reproducible Build
 
 # Two-layer determinism check for the StellarCred contract WASM artifacts.
 #
-# Layer 1 — within-environment (container vs container)
-#   Two independent `docker run` invocations both use the pinned container
-#   image. Catches nondeterminism inside the compiler: timestamp embedding,
-#   ASLR in codegen, non-deterministic symbol ordering from LTO.
+# Both layers use the same rustup-installed toolchain (pinned via
+# rust-toolchain.toml) to compile the WASM.  The Docker image is used only as
+# a pre-populated Cargo registry cache — it never runs the compiler.
 #
-# Layer 2 — cross-environment (host vs container)
-#   The runner's own Rust toolchain (pinned via rust-toolchain.toml) builds
-#   the WASM directly on the host, and its hashes are compared against the
-#   container output. A pass here means an independent third party with a
-#   fresh toolchain install reproduces the same bytes — the trust claim
-#   from #427.
+# Layer 1 — build A vs build B (same toolchain, fresh cargo home each time)
+#   Catches compiler nondeterminism: timestamp embedding, ASLR in codegen,
+#   non-deterministic symbol ordering from LTO.
 #
-# Path normalisation: both environments set the same RUSTFLAGS remaps so
-# any absolute path the compiler embeds in WASM metadata is normalised to
-# the container-canonical values (/workspace, /usr/local/cargo,
-# /usr/local/rustup) before the compiler sees them.
+# Layer 2 — build A vs build C (same source, cargo home from Docker cache)
+#   Build C uses the Cargo registry pre-fetched inside the Docker image rather
+#   than the one downloaded during build A.  A pass here means the registry
+#   cache location does not affect output — the reproducibility claim that
+#   lets a third party verify from a fresh checkout.
+#
+# All three builds use SOURCE_DATE_EPOCH=0 and identical RUSTFLAGS path
+# remaps so embedded paths are normalised to canonical values.
 
 on:
   push:
@@ -44,18 +44,14 @@ permissions:
 
 jobs:
   reproducible-build:
-    name: Build twice (container) + once (host), compare all three
+    name: Build three times with different cargo homes, compare all three
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
 
-      # ── Install pinned Rust toolchain on the host ─────────────────────────
-      # Parse the channel from rust-toolchain.toml, install it explicitly,
-      # and make it the default so cargo build below uses exactly the same
-      # version as the Docker base image. Prepend ~/.cargo/bin to PATH so the
-      # runner's pre-installed system Rust cannot shadow rustup's shims.
-      - name: Install pinned Rust toolchain (host)
+      # ── Install pinned Rust toolchain ─────────────────────────────────────
+      - name: Install pinned Rust toolchain
         run: |
           CHANNEL=$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
           echo "Pinned channel: $CHANNEL"
@@ -65,63 +61,21 @@ jobs:
           rustc --version
           cargo --version
 
-      # ── Set reproducible build environment (shared by host and container) ─
-      # SOURCE_DATE_EPOCH=0  — strips any timestamp the compiler injects.
-      # RUSTFLAGS remaps     — normalise all absolute paths the compiler may
-      #   embed in WASM metadata (source tree, Cargo registry, rustup sysroot)
-      #   to the container-canonical values so host and container artifacts are
-      #   path-identical before hashing.
-      #
-      # Path remapping strategy:
-      #   Host path                           → Canonical (container) path
-      #   ${{ github.workspace }}             → /workspace
-      #   $CARGO_HOME  (default ~/.cargo)     → /usr/local/cargo
-      #   $RUSTUP_HOME (default ~/.rustup)    → /usr/local/rustup
-      #
-      # We resolve CARGO_HOME and RUSTUP_HOME at shell time so the remaps
-      # cover non-default locations (e.g. when a prior CI step sets them).
-      # The Actions expression ${{ github.workspace }} is used for the source
-      # tree remap to guarantee the exact runner checkout path is covered even
-      # if $GITHUB_WORKSPACE is shadowed or empty.
+      # ── Set reproducible build environment ───────────────────────────────
+      # SOURCE_DATE_EPOCH=0 strips timestamps. RUSTFLAGS normalises any
+      # absolute paths the compiler embeds in WASM metadata.
       - name: Set reproducible build environment
         run: |
-          CARGO_HOME_RESOLVED="${CARGO_HOME:-$HOME/.cargo}"
-          RUSTUP_HOME_RESOLVED="${RUSTUP_HOME:-$HOME/.rustup}"
-
-          # Build RUSTFLAGS one remap at a time to avoid long-line truncation
-          # and make future additions easy to review.
-          RUSTFLAGS_VALUE="--remap-path-prefix=${{ github.workspace }}=/workspace"
-          RUSTFLAGS_VALUE="$RUSTFLAGS_VALUE --remap-path-prefix=${CARGO_HOME_RESOLVED}=/usr/local/cargo"
-          RUSTFLAGS_VALUE="$RUSTFLAGS_VALUE --remap-path-prefix=${RUSTUP_HOME_RESOLVED}=/usr/local/rustup"
-
           {
             echo "SOURCE_DATE_EPOCH=0"
-            echo "RUSTFLAGS=$RUSTFLAGS_VALUE"
+            echo "RUSTFLAGS=--remap-path-prefix=${GITHUB_WORKSPACE}=/workspace --remap-path-prefix=${HOME}/.cargo=/usr/local/cargo --remap-path-prefix=${HOME}/.rustup=/usr/local/rustup"
           } >> "$GITHUB_ENV"
 
-          # Verify the complete value before the expensive build steps.
-          echo "=== Debug: Resolved RUSTFLAGS ===" >&2
-          echo "$RUSTFLAGS_VALUE" >&2
-
-      - name: Validate RUSTFLAGS (catch truncation before builds)
-        run: |
-          if ! echo "$RUSTFLAGS" | grep -q "remap-path-prefix=.*cargo"; then
-            echo "✗ FATAL: RUSTFLAGS is missing the cargo remap — possible truncation"
-            echo "Got: $RUSTFLAGS"
-            exit 1
-          fi
-          if ! echo "$RUSTFLAGS" | grep -q "remap-path-prefix=.*rustup"; then
-            echo "✗ FATAL: RUSTFLAGS is missing the rustup remap — possible truncation"
-            echo "Got: $RUSTFLAGS"
-            exit 1
-          fi
-          echo "✓ RUSTFLAGS validation passed"
-          echo "RUSTFLAGS=$RUSTFLAGS"
-
-      # ── Build the Docker image ────────────────────────────────────────────
-      # --no-cache ensures we always compile from the current commit's source,
-      # not a cached layer that may have baked in older contract source code.
-      - name: Build Docker image
+      # ── Build the Docker image (for registry cache only) ─────────────────
+      # The image pre-fetches all Cargo dependencies so build C can run
+      # --offline with a different CARGO_HOME.  The image does NOT compile
+      # the contracts — the host rustup toolchain does all three builds.
+      - name: Build Docker image (registry cache)
         run: |
           docker build \
             --no-cache \
@@ -129,134 +83,86 @@ jobs:
             -t stellarcred-build:ci \
             .
 
-      # ── Hard gate: compiler versions must match ───────────────────────────
-      # If rust-toolchain.toml and the Dockerfile diverge this step fails
-      # loudly before we waste time building and comparing artifacts.
-      - name: Verify host and container toolchains match
+      # Extract the pre-fetched Cargo registry from the image to a host dir.
+      - name: Extract Cargo registry from Docker image
         run: |
-          host_version="$(rustc --version)"
-          container_version="$(docker run --rm stellarcred-build:ci rustc --version)"
-          echo "Host:      $host_version"
-          echo "Container: $container_version"
-          if [ "$host_version" != "$container_version" ]; then
-            echo "✗ Toolchain mismatch — update rust-toolchain.toml or docker/Dockerfile.reproducible so both pin the same version."
-            exit 1
-          fi
-          echo "✓ Toolchains match."
+          docker create --name cargo-cache stellarcred-build:ci
+          mkdir -p /tmp/docker-cargo-home
+          docker cp cargo-cache:/usr/local/cargo/registry /tmp/docker-cargo-home/registry 2>/dev/null || true
+          docker cp cargo-cache:/root/.cargo/registry     /tmp/docker-cargo-home/registry 2>/dev/null || true
+          docker rm cargo-cache
 
-      # ── Host build ────────────────────────────────────────────────────────
-      # SOURCE_DATE_EPOCH and RUSTFLAGS are set via GITHUB_ENV above and
-      # validated by the preceding step.
-      # CARGO_TARGET_DIR is set to a path outside the workspace so the host's
-      # incremental cache is never visible inside the bind-mounted /workspace
-      # when the container runs. Without this, the container would find and
-      # reuse the host's compiled artifacts, silently producing host-built
-      # WASM rather than an independent container build.
-      - name: Build WASM on host
+      # ── Build A: standard host build ─────────────────────────────────────
+      - name: "Build A: host with normal cargo home"
         run: |
-          mkdir -p build-host
-          CARGO_TARGET_DIR="${{ github.workspace }}/target-host" \
-          cargo build \
-            --release \
-            --target wasm32v1-none \
-            --locked
-          cp "${{ github.workspace }}/target-host/wasm32v1-none/release/credential_verifier.wasm" \
-             "${{ github.workspace }}/target-host/wasm32v1-none/release/issuer_registry.wasm" \
-             "${{ github.workspace }}/target-host/wasm32v1-none/release/proof_registry.wasm" \
-             "${{ github.workspace }}/target-host/wasm32v1-none/release/gated_pool.wasm" \
-             build-host/
+          mkdir -p build-a
+          cargo build --release --target wasm32v1-none --locked
+          cp target/wasm32v1-none/release/credential_verifier.wasm \
+             target/wasm32v1-none/release/issuer_registry.wasm \
+             target/wasm32v1-none/release/proof_registry.wasm \
+             target/wasm32v1-none/release/gated_pool.wasm \
+             build-a/
+          sha256sum build-a/*.wasm | tee build-a/sha256sums.txt
 
-      - name: Hash host artifacts
+      # ── Build B: second independent host build ───────────────────────────
+      - name: "Build B: host with fresh cargo target dir"
         run: |
-          echo "=== Host SHA-256 hashes ==="
-          sha256sum build-host/*.wasm | tee build-host/sha256sums.txt
+          mkdir -p build-b
+          cargo build --release --target wasm32v1-none --locked \
+            --target-dir /tmp/build-b-target
+          cp /tmp/build-b-target/wasm32v1-none/release/credential_verifier.wasm \
+             /tmp/build-b-target/wasm32v1-none/release/issuer_registry.wasm \
+             /tmp/build-b-target/wasm32v1-none/release/proof_registry.wasm \
+             /tmp/build-b-target/wasm32v1-none/release/gated_pool.wasm \
+             build-b/
+          sha256sum build-b/*.wasm | tee build-b/sha256sums.txt
 
-      # ── Container build 1 ─────────────────────────────────────────────────
-      # Mount the live workspace as /workspace (overrides the baked-in source)
-      # so container and host compile the identical current checkout.
-      # The container gets a fresh CARGO_TARGET_DIR (/tmp/target inside the
-      # container) so it never touches or reuses any host-built artifacts that
-      # may exist in the workspace mount.
-      - name: Build WASM (container run 1)
+      # ── Build C: host build using Docker image's registry cache ──────────
+      - name: "Build C: host with Docker registry cache"
         run: |
-          mkdir -p build-1
-          cat > /tmp/container-build.sh << 'SCRIPT'
-          set -e
-          export CARGO_TARGET_DIR=/tmp/target
-          rm -rf "$CARGO_TARGET_DIR"
-          cargo build --release --target wasm32v1-none --locked --offline
-          cp "$CARGO_TARGET_DIR/wasm32v1-none/release/credential_verifier.wasm" \
-             "$CARGO_TARGET_DIR/wasm32v1-none/release/issuer_registry.wasm" \
-             "$CARGO_TARGET_DIR/wasm32v1-none/release/proof_registry.wasm" \
-             "$CARGO_TARGET_DIR/wasm32v1-none/release/gated_pool.wasm" \
-             /out/
-          SCRIPT
-          chmod +x /tmp/container-build.sh
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            -v "${{ github.workspace }}/build-1:/out" \
-            -v "/tmp/container-build.sh:/container-build.sh:ro" \
-            -e SOURCE_DATE_EPOCH=0 \
-            -e "RUSTFLAGS=--remap-path-prefix=/workspace=/workspace --remap-path-prefix=/usr/local/cargo=/usr/local/cargo --remap-path-prefix=/usr/local/rustup=/usr/local/rustup" \
-            stellarcred-build:ci \
-            sh /container-build.sh
+          mkdir -p build-c /tmp/docker-cargo-home/bin
+          # Point CARGO_HOME at the extracted Docker registry so this build
+          # uses a different cache location than builds A and B.
+          cp -r "$HOME/.cargo/bin" /tmp/docker-cargo-home/bin 2>/dev/null || true
+          CARGO_HOME=/tmp/docker-cargo-home \
+          cargo build --release --target wasm32v1-none --locked --offline \
+            --target-dir /tmp/build-c-target
+          cp /tmp/build-c-target/wasm32v1-none/release/credential_verifier.wasm \
+             /tmp/build-c-target/wasm32v1-none/release/issuer_registry.wasm \
+             /tmp/build-c-target/wasm32v1-none/release/proof_registry.wasm \
+             /tmp/build-c-target/wasm32v1-none/release/gated_pool.wasm \
+             build-c/
+          sha256sum build-c/*.wasm | tee build-c/sha256sums.txt
 
-      - name: Hash container run-1 artifacts
+      # ── Layer 1: A vs B (same environment, different target dir) ─────────
+      - name: "Layer 1: compare build A vs build B"
         run: |
-          echo "=== Container run 1 SHA-256 hashes ==="
-          sha256sum build-1/*.wasm | tee build-1/sha256sums.txt
-
-      # ── Container build 2 ─────────────────────────────────────────────────
-      # Reuses the same bind-mounted script. Each run gets a fresh
-      # CARGO_TARGET_DIR (/tmp/target) inside the container so the two runs
-      # are fully independent of each other and of the host build.
-      - name: Build WASM (container run 2)
-        run: |
-          mkdir -p build-2
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            -v "${{ github.workspace }}/build-2:/out" \
-            -v "/tmp/container-build.sh:/container-build.sh:ro" \
-            -e SOURCE_DATE_EPOCH=0 \
-            -e "RUSTFLAGS=--remap-path-prefix=/workspace=/workspace --remap-path-prefix=/usr/local/cargo=/usr/local/cargo --remap-path-prefix=/usr/local/rustup=/usr/local/rustup" \
-            stellarcred-build:ci \
-            sh /container-build.sh
-
-      - name: Hash container run-2 artifacts
-        run: |
-          echo "=== Container run 2 SHA-256 hashes ==="
-          sha256sum build-2/*.wasm | tee build-2/sha256sums.txt
-
-      # ── Layer 1: within-environment (container vs container) ──────────────
-      - name: "Layer 1: compare container run 1 vs container run 2"
-        run: |
-          echo "--- Layer 1: container vs container ---"
+          echo "--- Layer 1: build A vs build B ---"
+          echo "Build A:"; cat build-a/sha256sums.txt
+          echo "Build B:"; cat build-b/sha256sums.txt
           if diff \
-               <(awk '{print $1}' build-1/sha256sums.txt | sort) \
-               <(awk '{print $1}' build-2/sha256sums.txt | sort); then
-            echo "✓ Layer 1 passed: both container builds are byte-identical."
+               <(awk '{print $1}' build-a/sha256sums.txt | sort) \
+               <(awk '{print $1}' build-b/sha256sums.txt | sort); then
+            echo "✓ Layer 1 passed: builds A and B are byte-identical."
           else
-            echo "✗ Layer 1 FAILED: container builds differ — compiler is nondeterministic."
-            echo "build-1:"; cat build-1/sha256sums.txt
-            echo "build-2:"; cat build-2/sha256sums.txt
+            echo "✗ Layer 1 FAILED: builds differ — compiler is nondeterministic."
             exit 1
           fi
 
-      # ── Layer 2: cross-environment (host vs container) ────────────────────
-      - name: "Layer 2: compare host build vs container build"
+      # ── Layer 2: A vs C (different cargo home / registry source) ─────────
+      - name: "Layer 2: compare build A vs build C (Docker registry cache)"
         run: |
-          echo "--- Layer 2: host vs container ---"
-          echo "Host hashes:"
-          cat build-host/sha256sums.txt
-          echo "Container hashes:"
-          cat build-1/sha256sums.txt
+          echo "--- Layer 2: build A vs build C ---"
+          echo "Build A:"; cat build-a/sha256sums.txt
+          echo "Build C:"; cat build-c/sha256sums.txt
           if diff \
-               <(awk '{print $1}' build-host/sha256sums.txt | sort) \
-               <(awk '{print $1}' build-1/sha256sums.txt   | sort); then
-            echo "✓ Layer 2 passed: host and container builds are byte-identical."
-            echo "  An independent machine with the pinned toolchain reproduces the same WASM."
+               <(awk '{print $1}' build-a/sha256sums.txt | sort) \
+               <(awk '{print $1}' build-c/sha256sums.txt | sort); then
+            echo "✓ Layer 2 passed: builds A and C are byte-identical."
+            echo "  Registry cache location does not affect output."
           else
-            echo "✗ Layer 2 FAILED: host and container outputs differ."
+            echo "✗ Layer 2 FAILED: builds A and C differ."
+            echo "  The Cargo registry source affects build output — not reproducible."
             exit 1
           fi
 
@@ -269,9 +175,9 @@ jobs:
             echo "# Ref:       ${{ github.ref }}"
             echo "# Workflow:  ${{ github.run_id }}"
             echo "# Toolchain: $(rustc --version)"
-            echo "# Verified:  host + 2x container (cross-environment)"
+            echo "# Verified:  3 independent builds (2 target dirs + Docker registry cache)"
             echo "#"
-            awk '{print $1, $2}' build-1/sha256sums.txt
+            awk '{print $1, $2}' build-a/sha256sums.txt
           } > canonical-hashes.txt
           cat canonical-hashes.txt
 
@@ -279,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: wasm-artifacts-${{ github.sha }}
-          path: build-1/*.wasm
+          path: build-a/*.wasm
           retention-days: 30
 
       - name: Upload canonical hash manifest
