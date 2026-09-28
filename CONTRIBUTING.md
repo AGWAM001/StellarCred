@@ -117,6 +117,13 @@ npm run dev
 5. For frontend changes: run `pnpm tsc --noEmit` (zero errors required) and `pnpm build`.
 6. Open a pull request against `main` with a clear description of what changed and why.
 
+## Branch Cleanup
+
+- **After merging:** Delete your feature branch once its pull request has been merged, unless it is still needed for ongoing work.
+- **Automatic deletion:** Repository maintainers should enable GitHub's automatic deletion of head branches after pull requests are merged.
+- **Stale branches:** Periodically review remote branches and remove those confirmed to be merged, reverted, or abandoned. Check for open pull requests or ongoing work before deleting any branch.
+- **Branch naming:** Use descriptive names for feature, fix, and documentation branches so their purpose is clear.
+
 ## Preview Deployments
 
 Every Pull Request automatically triggers a live preview deployment via GitHub Actions.
