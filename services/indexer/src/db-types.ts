@@ -37,6 +37,40 @@ export interface ClaimRow extends ClaimInput {
   id: number;
 }
 
+export type ClaimLifecycleEventType = "revoked" | "expired";
+
+export interface WebhookSubscriptionInput {
+  url: string;
+  wallet: string;
+  credential_type: string;
+}
+
+export interface WebhookSubscription extends WebhookSubscriptionInput {
+  id: number;
+  created_at: string;
+}
+
+export interface ClaimLifecycleEvent {
+  event_id: string;
+  type: ClaimLifecycleEventType;
+  wallet: string;
+  credential_type: string;
+  expiry: number;
+  ledger_sequence: number;
+  occurred_at: number;
+  reason_code: string;
+}
+
+export interface WebhookDelivery extends ClaimLifecycleEvent {
+  id: number;
+  subscription_id: number;
+  target_url: string;
+  attempts: number;
+  next_attempt_at: number;
+  delivered_at: number | null;
+  last_error: string | null;
+}
+
 // ── Adapter interface ──────────────────────────────────────────────────────
 
 export interface Db {
@@ -71,6 +105,8 @@ export interface Db {
     wallet: string,
     credentialType: string
   ): void | Promise<void>;
+  /** Read a specific claim before applying a revocation event. */
+  claimByWalletAndType(wallet: string, credentialType: string): ClaimRow | undefined | Promise<ClaimRow | undefined>;
 
   /** Return all claims for a wallet (active and revoked). */
   claimsByWallet(wallet: string): ClaimRow[] | Promise<ClaimRow[]>;
@@ -125,6 +161,26 @@ export interface Db {
 
   /** Update the status of an app submission. */
   updateSubmissionStatus(id: number, status: SubmissionStatus): void | Promise<void>;
+
+  /** Create a wallet/claim-specific lifecycle webhook subscription. */
+  createWebhookSubscription(input: WebhookSubscriptionInput): number | Promise<number>;
+  /** Return webhook subscriptions, optionally filtered by wallet. */
+  listWebhookSubscriptions(wallet?: string): WebhookSubscription[] | Promise<WebhookSubscription[]>;
+  /** Remove one subscription; already queued deliveries remain retryable. */
+  deleteWebhookSubscription(id: number): boolean | Promise<boolean>;
+  /** Queue a lifecycle event for every matching subscription, idempotently. */
+  enqueueWebhookEvent(event: ClaimLifecycleEvent): void | Promise<void>;
+  /** Return active claims whose expiry has passed. */
+  expiredActiveClaims(now: number): ClaimRow[] | Promise<ClaimRow[]>;
+  /** Return due, undelivered webhook attempts. */
+  pendingWebhookDeliveries(now: number, limit: number, maxAttempts: number): WebhookDelivery[] | Promise<WebhookDelivery[]>;
+  /** Persist one webhook attempt and its retry/delivery state. */
+  updateWebhookDelivery(
+    id: number,
+    update: { attempts: number; nextAttemptAt: number; deliveredAt: number | null; lastError: string | null },
+  ): void | Promise<void>;
+  /** Return a subscription's recent delivery history. */
+  webhookDeliveries(subscriptionId: number, limit: number): WebhookDelivery[] | Promise<WebhookDelivery[]>;
 
   /** Close the underlying connection / pool. */
   close(): void | Promise<void>;
