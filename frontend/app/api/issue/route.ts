@@ -19,14 +19,16 @@ import {
   LIMITS,
 } from "@/lib/rate-limit";
 import {
-  idempotencyGet,
-  idempotencySet,
+  completedIdempotencyRecord,
+  idempotencyGetAsync,
+  idempotencySetAsync,
   idempotencyInFlightBegin,
   idempotencyInFlightSettle,
   idempotencyInFlightFail,
   isValidIdempotencyKey,
   MAX_KEY_LENGTH_BYTES,
-  type CachedResponse,
+  personaPendingIdempotencyRecord,
+  type IdempotencyRecord,
 } from "@/lib/idempotency";
 import {
   createPersonaInquiry,
@@ -66,23 +68,24 @@ export async function POST(req: NextRequest) {
   }
 
   if (idempotencyKey) {
-    // Cache hit — replay the original response
-    const cached = idempotencyGet(idempotencyKey);
-    if (cached) {
-      logger.info(stripSensitiveFields({ event: "idempotency_hit", requestId }));
-      return replayCached(cached, requestId);
-    }
+    while (true) {
+      const record = await idempotencyGetAsync(idempotencyKey);
+      if (record) {
+        logger.info(stripSensitiveFields({ event: "idempotency_hit", requestId }));
+        return replayIdempotencyRecord(record, requestId);
+      }
 
-    // Concurrent duplicate — await leader
-    const inFlight = idempotencyInFlightBegin(idempotencyKey);
-    if (inFlight) {
+      const inFlight = idempotencyInFlightBegin(idempotencyKey);
+      if (!inFlight) break;
+
       logger.info(
         stripSensitiveFields({ event: "idempotency_inflight_hit", requestId }),
       );
       try {
-        return replayCached(await inFlight, requestId);
+        return replayIdempotencyRecord(await inFlight, requestId);
       } catch {
-        idempotencyInFlightBegin(idempotencyKey);
+        // A failed leader releases the slot. Rejoining prevents simultaneous
+        // retries from all becoming leaders.
       }
     }
   }
@@ -101,6 +104,9 @@ export async function POST(req: NextRequest) {
         requestId,
       }),
     );
+    if (idempotencyKey) {
+      idempotencyInFlightFail(idempotencyKey, new Error("rate limited"));
+    }
     return tooManyRequestsResponse(ipResult.retryAfterMs);
   }
 
@@ -112,12 +118,35 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** Reconstruct a NextResponse from a cached entry, tagging it as replayed. */
-function replayCached(cached: CachedResponse, requestId: string): NextResponse {
-  const headers = new Headers(cached.headers as Record<string, string>);
-  headers.set("x-request-id", requestId);
-  headers.set("X-Idempotent", "true");
-  return new NextResponse(cached.body, { status: cached.status, headers });
+function replayIdempotencyRecord(
+  record: IdempotencyRecord,
+  requestId: string,
+): NextResponse {
+  const headers = new Headers({
+    "x-request-id": requestId,
+    "X-Idempotent": "true",
+  });
+
+  if (record.kind === "persona_pending") {
+    return NextResponse.json(
+      {
+        needsPersona: true,
+        personaUrl: record.personaUrl,
+        inquiryId: record.inquiryId,
+      },
+      { status: 202, headers },
+    );
+  }
+
+  headers.set("X-Idempotency-Replay", "redacted");
+  return NextResponse.json(
+    {
+      code: "IDEMPOTENCY_RESPONSE_REDACTED",
+      error:
+        "This Idempotency-Key already completed; credential data is not retained for replay.",
+    },
+    { status: 409, headers },
+  );
 }
 
 async function executeRequest(
@@ -145,6 +174,9 @@ async function executeRequest(
 
   const parsed = await readJsonBody<BodyType>(req);
   if (!parsed.ok) {
+    if (idempotencyKey) {
+      idempotencyInFlightFail(idempotencyKey, new Error("invalid request body"));
+    }
     const res = bodyErrorResponse(parsed.error);
     res.headers.set("x-request-id", requestId);
     return res;
@@ -162,22 +194,32 @@ async function executeRequest(
   } = body;
   const walletAddress = holder;
 
-  const sendResponse = async (response: NextResponse) => {
+  const sendResponse = async (
+    response: NextResponse,
+    record?: IdempotencyRecord,
+  ) => {
     const durationMs = Date.now() - startTime;
     response.headers.set("x-request-id", requestId);
 
     if (idempotencyKey) {
       try {
-        const cloned = response.clone();
-        const bodyText = await cloned.text();
-        const entry: CachedResponse = {
-          status: response.status,
-          body: bodyText,
-          headers: Object.fromEntries(response.headers.entries()),
-          createdAt: Date.now(),
-        };
-        idempotencySet(idempotencyKey, entry);
-        idempotencyInFlightSettle(idempotencyKey, entry);
+        const completedRecord =
+          record ??
+          (response.status === 200
+            ? completedIdempotencyRecord(
+                response.status,
+                await response.clone().text(),
+              )
+            : undefined);
+        if (completedRecord) {
+          await idempotencySetAsync(idempotencyKey, completedRecord);
+          idempotencyInFlightSettle(idempotencyKey, completedRecord);
+        } else {
+          idempotencyInFlightFail(
+            idempotencyKey,
+            new Error("request did not complete an idempotent operation"),
+          );
+        }
       } catch (e) {
         idempotencyInFlightFail(idempotencyKey, e);
       }
@@ -379,6 +421,7 @@ async function executeRequest(
               { needsPersona: true, personaUrl: url, inquiryId: id },
               { status: 202 },
             ),
+            personaPendingIdempotencyRecord(id, url),
           );
         }
         const kyc = await resolvePersonaKYC(personaInquiryId);
