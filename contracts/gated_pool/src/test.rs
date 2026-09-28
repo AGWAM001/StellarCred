@@ -5,7 +5,7 @@ use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
     vec, Address, Env, IntoVal,
 };
-use test_support::{Contracts, FUNDS, KYC};
+use test_support::{Contracts, GatedPoolClient, FUNDS, KYC};
 
 // Deploy-and-wire, register-issuer, set-vk, and build-valid-submission all
 // live in `test_support`. The artifacts are still the real checked-in

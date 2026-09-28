@@ -5,7 +5,7 @@ use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
     vec, Address, Bytes, BytesN, Env, IntoVal, Symbol,
 };
-use test_support::deploy_issuer_registry;
+use test_support::{deploy_issuer_registry, IssuerRegistryClient};
 
 // Deployment lives in the shared `test_support` harness; this suite is about
 // issuer records and roles, so the rest of each test is the scenario itself.

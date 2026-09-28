@@ -41,11 +41,21 @@
 //! assert!(c.verify(&env, &holder, &KYC));
 //! ```
 
-use credential_verifier::{CredentialVerifier, CredentialVerifierClient};
-use gated_pool::{GatedPool, GatedPoolClient};
-use issuer_registry::{IssuerRegistry, IssuerRegistryClient};
-use proof_registry::{ProofRegistry, ProofRegistryClient, ProofSubmission};
+use credential_verifier::CredentialVerifier;
+use gated_pool::GatedPool;
+use issuer_registry::IssuerRegistry;
+use proof_registry::{ProofRegistry, ProofSubmission};
 use soroban_sdk::{testutils::Address as _, Address, Bytes, BytesN, Env, Symbol, Vec};
+
+// A contract crate's own test target compiles that crate twice: once as the
+// lib under test and once as `test_support`'s dependency. The two copies are
+// distinct types, so a harness-returned client would not unify with the same
+// client named from the crate under test. Re-exporting the exact types the
+// harness hands back lets every suite speak one client vocabulary.
+pub use credential_verifier::CredentialVerifierClient;
+pub use gated_pool::GatedPoolClient;
+pub use issuer_registry::IssuerRegistryClient;
+pub use proof_registry::ProofRegistryClient;
 
 /// Include a raw artifact from `fixtures/<circuit>/<part>`.
 ///

@@ -21,7 +21,7 @@ fn verifies_kyc() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup_verifier(&env, &KYC, 1);
-    assert!(verify_with(&c, &env, &KYC, &None));
+    assert!(verify_with(&c, &env, &KYC, None));
 }
 
 #[test]
@@ -29,7 +29,7 @@ fn verifies_age() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup_verifier(&env, &AGE, 1);
-    assert!(verify_with(&c, &env, &AGE, &None));
+    assert!(verify_with(&c, &env, &AGE, None));
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn verifies_income() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup_verifier(&env, &INCOME, 1);
-    assert!(verify_with(&c, &env, &INCOME, &None));
+    assert!(verify_with(&c, &env, &INCOME, None));
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn verifies_range() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup_verifier(&env, &RANGE, 1);
-    assert!(verify_with(&c, &env, &RANGE, &None));
+    assert!(verify_with(&c, &env, &RANGE, None));
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn verifies_jurisdiction() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup_verifier(&env, &JURISDICTION, 1);
-    assert!(verify_with(&c, &env, &JURISDICTION, &None));
+    assert!(verify_with(&c, &env, &JURISDICTION, None));
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn verifies_employment() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup_verifier(&env, &EMPLOYMENT, 1);
-    assert!(verify_with(&c, &env, &EMPLOYMENT, &None));
+    assert!(verify_with(&c, &env, &EMPLOYMENT, None));
 }
 
 // set_membership: proves a private attribute is a leaf in a Poseidon2 Merkle
@@ -106,7 +106,7 @@ fn verifies_set_membership() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup_verifier(&env, &SET_MEMBERSHIP, 1);
-    assert!(verify_with(&c, &env, &SET_MEMBERSHIP, &None));
+    assert!(verify_with(&c, &env, &SET_MEMBERSHIP, None));
 }
 
 // A single flipped bit anywhere in the set_membership proof must cause
@@ -117,11 +117,9 @@ fn rejects_tampered_set_membership_proof() {
     let env = Env::default();
     env.mock_all_auths();
     let c = setup_verifier(&env, &SET_MEMBERSHIP, 1);
-    let mut bad = SET_MEMBERSHIP.proof_bytes(&env).to_vec();
-    bad[5000] ^= 0xff;
     assert!(!c.verify_proof(
         &Symbol::new(&env, "set_membership"),
-        &Bytes::from_slice(&env, &bad),
+        &SET_MEMBERSHIP.tampered_proof(&env),
         &SET_MEMBERSHIP.public_inputs_bytes(&env),
         &None,
     ));
@@ -134,11 +132,9 @@ fn rejects_tampered_proof() {
     env.mock_all_auths();
     let c = setup_verifier(&env, &KYC, 1);
 
-    let mut bad = KYC.proof_bytes(&env).to_vec();
-    bad[5000] ^= 0xff;
     assert!(!c.verify_proof(
         &symbol_short!("kyc"),
-        &Bytes::from_slice(&env, &bad),
+        &KYC.tampered_proof(&env),
         &KYC.public_inputs_bytes(&env),
         &None,
     ));
@@ -330,7 +326,7 @@ fn old_proof_still_verifies_after_upgrade() {
         &1u32,
         &KYC.vk_bytes(&env),
     );
-    assert!(verify_with(&c, &env, &KYC, &Some(1)));
+    assert!(verify_with(&c, &env, &KYC, Some(1)));
 
     // Upgrade to v2 — the old v1 proof must still verify (VK at (kyc,1) intact).
     c.set_vk(
@@ -338,9 +334,9 @@ fn old_proof_still_verifies_after_upgrade() {
         &2u32,
         &KYC.vk_bytes(&env),
     );
-    assert!(verify_with(&c, &env, &KYC, &Some(1)));
+    assert!(verify_with(&c, &env, &KYC, Some(1)));
     // And `None` now resolves to v2 (latest).
-    assert!(verify_with(&c, &env, &KYC, &None));
+    assert!(verify_with(&c, &env, &KYC, None));
 }
 
 /// `deprecate_version` blocks new submissions against the deprecated version.
@@ -464,7 +460,7 @@ fn set_vk_rejects_overwrite_of_existing_version() {
     );
 
     // The original v1 VK is untouched and still verifies old proofs.
-    assert!(verify_with(&c, &env, &KYC, &Some(1)));
+    assert!(verify_with(&c, &env, &KYC, Some(1)));
 }
 
 #[test]
@@ -709,12 +705,11 @@ fn set_vk_requires_admin_role() {
         address: &delegate,
         invoke: &MockAuthInvoke {
             contract: &id,
-            fn_name: "set_vk",
-            args: (
-                &symbol_short!("kyc"),
-                &1u32,
-                Bytes::from_slice(&env, KYC.vk_bytes(&env)),
-            )
+            fn_name: "set_vk",                args: (
+                    &symbol_short!("kyc"),
+                    &1u32,
+                    KYC.vk_bytes(&env),
+                )
                 .into_val(&env),
             sub_invokes: &[],
         },
@@ -731,7 +726,7 @@ fn set_vk_requires_admin_role() {
                 args: (
                     &symbol_short!("kyc"),
                     &2u32,
-                    Bytes::from_slice(&env, KYC.vk_bytes(&env)),
+                    KYC.vk_bytes(&env),
                 )
                     .into_val(&env),
                 sub_invokes: &[],
@@ -752,7 +747,7 @@ fn set_vk_requires_admin_role() {
                 args: (
                     &symbol_short!("kyc"),
                     &2u32,
-                    Bytes::from_slice(&env, KYC.vk_bytes(&env)),
+                    KYC.vk_bytes(&env),
                 )
                     .into_val(&env),
                 sub_invokes: &[],
@@ -772,7 +767,7 @@ fn set_vk_requires_admin_role() {
             args: (
                 &symbol_short!("kyc"),
                 &2u32,
-                Bytes::from_slice(&env, KYC.vk_bytes(&env)),
+                KYC.vk_bytes(&env),
             )
                 .into_val(&env),
             sub_invokes: &[],

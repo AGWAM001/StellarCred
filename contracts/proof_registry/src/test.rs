@@ -595,8 +595,15 @@ fn aggregate_submits_real_proof_and_stores_claims() {
     let h = deploy_aggregate(&env);
     let holder = Address::generate(&env);
 
-    h.c.aggregate_call(&env, &h.issuer, &[9999, 9999]).submit(&h.c, &holder);;    assert!(h.c.verify(&env, &holder, &KYC));
-    assert!(h.c.verify(&env, &holder, &AGE));
+    h.c
+        .aggregate_call(&env, &h.issuer, &[9999, 9999])
+        .submit(&h.c, &holder);
+    assert!(h.c.registry
+        .is_verified(&holder, &symbol_short!("kyc"), &None)
+        .0);
+    assert!(h.c.registry
+        .is_verified(&holder, &symbol_short!("age"), &None)
+        .0);
     assert!(h.c.registry.check_claim(&holder, &symbol_short!("age"), &Some(18), &None));
     assert!(!h.c.registry.check_claim(&holder, &symbol_short!("age"), &Some(19), &None));
 }
@@ -1814,8 +1821,12 @@ fn aggregate_accepts_a_credential_signed_with_a_retired_key() {
         &vec![&env, ROT_T0 + 1000u64, ROT_T0 + 1000u64],
     );
 
-    assert!(h.c.verify(&env, &holder, &KYC));
-    assert!(h.c.verify(&env, &holder, &AGE));
+    assert!(registry
+        .is_verified(&holder, &symbol_short!("kyc"), &None)
+        .0);
+    assert!(registry
+        .is_verified(&holder, &symbol_short!("age"), &None)
+        .0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
