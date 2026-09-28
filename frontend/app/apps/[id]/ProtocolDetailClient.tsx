@@ -13,6 +13,7 @@ import {
   IconAlertCircle,
   IconRefresh,
   IconQrcode,
+  IconFlask,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet, usePreviewMode } from "@/lib/wallet-context";
@@ -63,6 +64,30 @@ function ProtocolDetailBody({
           <div className="row" style={{ gap: "0.6rem", alignItems: "center" }}>
             <span style={{ color: "var(--accent)" }}>{protocol.icon}</span>
             <h1 style={{ fontSize: "2rem", margin: 0 }}>{protocol.name}</h1>
+            {protocol.isDemo && (
+              <span
+                title="This is an illustrative demo — not a live integration"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.3rem",
+                  padding: "0.2rem 0.6rem",
+                  borderRadius: "999px",
+                  fontSize: "0.65rem",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  background: "rgba(250,180,50,0.12)",
+                  color: "#f5b942",
+                  border: "1px solid rgba(250,180,50,0.3)",
+                  alignSelf: "center",
+                  marginTop: "0.25rem",
+                }}
+              >
+                <IconFlask size={11} stroke={2.2} />
+                Demo
+              </span>
+            )}
           </div>
           <p className="mono faint" style={{ fontSize: "0.875rem", marginTop: "0.5rem" }}>
             {protocol.tagline}
@@ -96,6 +121,37 @@ function ProtocolDetailBody({
       )}
 
       <ConfigBanner />
+
+      {protocol.isDemo && (
+        <div
+          style={{
+            marginBottom: "1.5rem",
+            padding: "0.75rem 1rem",
+            borderRadius: "var(--radius)",
+            background: "rgba(250,180,50,0.07)",
+            border: "1px solid rgba(250,180,50,0.25)",
+            fontSize: "0.8125rem",
+            color: "var(--muted)",
+            lineHeight: 1.6,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "0.6rem",
+          }}
+        >
+          <IconFlask
+            size={15}
+            stroke={2}
+            color="#f5b942"
+            style={{ flexShrink: 0, marginTop: "0.1rem" }}
+          />
+          <span>
+            <strong style={{ color: "#f5b942" }}>Illustrative demo.</strong>{" "}
+            {protocol.name} is not a real deployed protocol. It exists to show how
+            StellarCred credential gating works end-to-end — the access check and
+            the ZK proofs are real, the app behind the gate is not.
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-2" style={{ alignItems: "start", gap: "1.5rem" }}>
         <div className="card">
