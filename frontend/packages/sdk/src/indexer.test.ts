@@ -62,15 +62,30 @@ function row(overrides: Partial<IndexerClaimRow> = {}): IndexerClaimRow {
   };
 }
 
-/** Installs a fetch mock that serves `claims` for any wallet. */
+type RecordedRequest = { url: string; headers: Record<string, string> };
+
+/**
+ * Installs a fetch mock that serves `claims` for any wallet.
+ *
+ * The impl declares fetch's real parameter list and records requests itself
+ * rather than relying on `mock.calls` tuple inference, which resolves to `[]`
+ * when the mock is parameterless.
+ */
 function mockIndexer(claims: IndexerClaimRow[], status = 200) {
-  const fetchMock = vi.fn(async () => ({
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => ({ wallet: WALLET, claims }),
-  }));
+  const requests: RecordedRequest[] = [];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({
+      url: String(input),
+      headers: (init?.headers ?? {}) as unknown as Record<string, string>,
+    });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => ({ wallet: WALLET, claims }),
+    };
+  });
   vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
-  return fetchMock;
+  return Object.assign(fetchMock, { requests });
 }
 
 /** Chain mock returning `(valid, verified_at, expiry)` like the contract. */
@@ -318,8 +333,7 @@ describe('source: "indexer"', () => {
 
     await hasClaim(WALLET, "kyc", { source: "indexer", retryOptions: { retries: 0 } });
 
-    const [, init] = fetchMock.mock.calls[0];
-    expect(init.headers.Authorization).toBe("Bearer secret-key");
+    expect(fetchMock.requests[0].headers.Authorization).toBe("Bearer secret-key");
   });
 
   it("sends no Authorization header when no key is configured", async () => {
@@ -327,8 +341,7 @@ describe('source: "indexer"', () => {
 
     await hasClaim(WALLET, "kyc", { source: "indexer", retryOptions: { retries: 0 } });
 
-    const [, init] = fetchMock.mock.calls[0];
-    expect(init.headers.Authorization).toBeUndefined();
+    expect(fetchMock.requests[0].headers.Authorization).toBeUndefined();
   });
 
   it("passes the wallet as a query parameter", async () => {
@@ -336,8 +349,7 @@ describe('source: "indexer"', () => {
 
     await hasClaim(WALLET, "kyc", { source: "indexer", retryOptions: { retries: 0 } });
 
-    const [url] = fetchMock.mock.calls[0];
-    expect(url).toBe(`${INDEXER_URL}/claims?wallet=${WALLET}`);
+    expect(fetchMock.requests[0].url).toBe(`${INDEXER_URL}/claims?wallet=${WALLET}`);
   });
 });
 
@@ -487,14 +499,14 @@ describe("indexer misconfiguration and failure", () => {
   });
 
   it("does not cache a failed response", async () => {
-    const fetchMock = vi
-      .fn<[RequestInfo | URL, RequestInit?], Promise<Response>>()
-      .mockRejectedValueOnce(new Error("network down") as never)
-      .mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ wallet: WALLET, claims: [row()] }),
-      } as unknown as Response);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ wallet: WALLET, claims: [row()] }),
+    }));
+    fetchMock.mockImplementationOnce(async () => {
+      throw new Error("network down");
+    });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
     await expect(
@@ -548,6 +560,6 @@ describe("indexer cache", () => {
     await hasClaim(WALLET, "kyc", { source: "indexer", retryOptions: { retries: 0 } });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][0]).toContain("https://other-indexer.test");
+    expect(fetchMock.requests[1].url).toContain("https://other-indexer.test");
   });
 });
