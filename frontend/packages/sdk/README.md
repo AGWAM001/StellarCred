@@ -141,6 +141,56 @@ const trustedClaim = await StellarCred.getClaim(wallet, "kyc", {
 });
 ```
 
+### `getClaimRecord(wallet, claimType, opts?)`
+
+Fetches the low-level on-chain `ProofRecord` containing `verifiedAt`, `expiry`, `threshold`, `revoked`, `issuer`, and `vkVersion`, or `null` if no record exists.
+
+```ts
+const record = await StellarCred.getClaimRecord(wallet, "age");
+if (record) {
+  console.log(record.revoked);   // false
+  console.log(record.expiry);    // 1780000000n
+  console.log(record.threshold); // 21n
+  console.log(record.issuer);    // "G..."
+}
+```
+
+### `checkClaimStatus(wallet, claimType, opts?)`
+
+Performs diagnostic analysis of a credential claim, returning the granular failure or success state. Useful for presenting actionable feedback to users.
+
+Possible statuses:
+- `"valid"`: Active, unrevoked, unexpired credential satisfying threshold and issuer requirements
+- `"not_verified"`: No on-chain proof record found for this wallet and claim type
+- `"expired"`: Record found, but its expiry timestamp is in the past
+- `"revoked"`: Record found, but the issuer or admin marked it revoked
+- `"unmet_threshold"`: Record found, but the proved threshold is below `minThreshold`
+- `"wrong_issuer"`: Record found, but issued by an entity outside `trustedIssuers`
+
+```ts
+const result = await StellarCred.checkClaimStatus(wallet, "age", { minThreshold: 21 });
+switch (result.status) {
+  case "valid":
+    console.log("Verified! Expires:", result.record?.expiry);
+    break;
+  case "expired":
+    console.warn("Credential has expired. Please re-prove at StellarCred.");
+    break;
+  case "revoked":
+    console.error("Credential was revoked.");
+    break;
+  case "unmet_threshold":
+    console.warn("Proved threshold below requirement:", result.record?.threshold);
+    break;
+  case "wrong_issuer":
+    console.warn("Issuer not in trusted list:", result.record?.issuer);
+    break;
+  case "not_verified":
+    console.info("No record found. Please verify at StellarCred.");
+    break;
+}
+```
+
 #### Typed errors (`throwOnError`)
 
 By default `hasClaim` / `getClaims` are **fail-soft**: a missing `registryId` or an RPC/simulation failure returns `false` / `[]`, which is indistinguishable from "not verified." Pass `{ throwOnError: true }` to surface a typed error instead:
@@ -599,6 +649,10 @@ if (!result.ok) {
 // Proceed with issuing session cookie or JWT:
 createSession(req, result.wallet);
 ```
+
+### Complete Runnable Reference Application
+
+A complete, runnable application implementing this entire pattern end-to-end (redirect, return handling, challenge generation, signature verification, on-chain re-verification, session route gating, and failure-state diagnosis) is available at [`examples/canonical-integration`](../../../examples/canonical-integration).
 
 ---
 

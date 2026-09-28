@@ -206,6 +206,20 @@ export default function IssuerPageClient() {
         In production this would be a separate authenticated app run by the
         institution — KYC provider, bank, employer — after verifying the holder
         off-chain. The holder would never see this interface.
+        <br />
+        <br />
+        <IconKey size={14} style={{ verticalAlign: "-2px", marginRight: "0.35rem" }} />
+        <span style={{ color: "var(--text)" }}>Becoming an issuer?</span>{" "}
+        <a
+          href="https://github.com/Psalmuel01/StellarCred/blob/main/docs/ISSUER_ONBOARDING.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: "var(--accent)", textDecoration: "underline" }}
+        >
+          Read the issuer onboarding guide
+        </a>{" "}
+        — registration, signing-key custody, what your signature attests to,
+        rotation and revocation.
       </div>
 
       <CredentialTemplateGallery

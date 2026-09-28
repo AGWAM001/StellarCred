@@ -7,10 +7,7 @@
  *   - Rate Limiting: Per-IP fixed-window rate limiting with 429 Too Many Requests
  *     and Retry-After header. Configurable via RATE_LIMIT_WINDOW_SECONDS and RATE_LIMIT_MAX.
  *   - Authentication / API Keys: Public read endpoints do NOT require API keys.
- *     The indexer only serves public, non-sensitive ledger state (claims, stats, recent events)
- *     and contains no write endpoints or identity data. Keeping read access keyless ensures
- *     frictionless composability for dApps, wallets, and community explorers.
- *     Scraping and DoS risks are mitigated via per-IP rate limiting and CORS enforcement.
+ *     App review writes and webhook subscription management are protected by API_KEY.
  *
  * Endpoints:
  *
@@ -40,13 +37,21 @@
  *     Body: { appName, description, requiredClaims, verifyUrl, contactEmail }
  *     → { id: number, status: "pending" }
  *
+ *   POST /webhooks/subscriptions
+ *     Body: { url, wallet, claimType } (requires API_KEY + WEBHOOK_SIGNING_SECRET)
+ *     → { id, wallet, claimType }
+ *
+ *   GET /webhooks/subscriptions[?wallet=G…]
+ *   DELETE /webhooks/subscriptions/:id
+ *   GET /webhooks/subscriptions/:id/deliveries
+ *
  * /recent uses keyset (cursor) pagination ordered by (ledger_sequence, id) —
  * the `nextCursor` returned with each page is an opaque token that must be
  * passed back as `?cursor=` to fetch the next page. Unlike OFFSET pagination
  * this stays stable (no duplicate/skipped rows) while new claims are ingested
  * between requests, and the indexed range scan never pays OFFSET's skip cost.
  *
- * All responses are JSON. No write endpoints exist.
+ * All responses are JSON. Webhook targets receive public chain lifecycle data only.
  * No identity fields are stored, so all data here is public chain data.
  *
  * SerializedClaim response schema (pinned by tests in api.test.ts, identical
@@ -80,6 +85,9 @@ import { createCorsMiddleware } from "./cors";
 import { RateLimiter } from "./rate-limit";
 import type { RecentCursor } from "./db";
 import { requireAuth } from "./auth";
+import { isIP } from "net";
+import { StrKey } from "@stellar/stellar-sdk";
+import { MAX_WEBHOOK_DELIVERY_ATTEMPTS } from "./webhooks";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 20;
@@ -223,6 +231,17 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
   const envApiKey = process.env["API_KEY"]?.trim();
   const apiKey = config?.apiKey ?? (envApiKey || undefined);
   const guard = requireAuth(apiKey);
+  const webhookSecret =
+    config?.webhookSigningSecret ?? process.env["WEBHOOK_SIGNING_SECRET"];
+  const webhookGuard: RequestHandler = (req, res, next) => {
+    if (!apiKey || !webhookSecret || webhookSecret.length < 32) {
+      res.status(503).json({
+        error: "webhook subscriptions require API_KEY and a 32-character WEBHOOK_SIGNING_SECRET",
+      });
+      return;
+    }
+    guard(req, res, next);
+  };
 
   // ── GET /health ──────────────────────────────────────────────────────────
   // Exposes ingester lag so operators can alert when the indexer falls behind.
@@ -598,6 +617,133 @@ export function buildApp(db: Db, ingester: Ingester, config?: Partial<Config>): 
       const updated = await db.getAppSubmission(id);
       res.json({ app: updated });
     })
+  );
+
+  // ── Webhook subscriptions (#635) ────────────────────────────────────────
+  app.use("/webhooks", express.json({ limit: "16kb" }));
+  app.post(
+    "/webhooks/subscriptions",
+    webhookGuard,
+    asyncHandler(async (req, res) => {
+      const { url, wallet, claimType } = req.body ?? {};
+      if (typeof url !== "string" || url.length > 2048) {
+        res.status(400).json({ error: "url must be a valid HTTPS URL" });
+        return;
+      }
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        res.status(400).json({ error: "url must be a valid HTTPS URL" });
+        return;
+      }
+      if (
+        parsedUrl.protocol !== "https:" ||
+        parsedUrl.username ||
+        parsedUrl.password ||
+        parsedUrl.hostname.length === 0 ||
+        isIP(parsedUrl.hostname) !== 0 ||
+        parsedUrl.hostname === "localhost" ||
+        parsedUrl.hostname.endsWith(".localhost") ||
+        parsedUrl.hostname.endsWith(".local")
+      ) {
+        res.status(400).json({
+          error: "url must be an HTTPS URL with a public DNS hostname and no credentials",
+        });
+        return;
+      }
+      if (
+        typeof wallet !== "string" ||
+        !StrKey.isValidEd25519PublicKey(wallet)
+      ) {
+        res.status(400).json({ error: "wallet must be a valid Stellar public key" });
+        return;
+      }
+      if (typeof claimType !== "string" || !VALID_CLAIM_TYPES.has(claimType)) {
+        res.status(400).json({
+          error: `claimType must be one of: ${[...VALID_CLAIM_TYPES].join(", ")}`,
+        });
+        return;
+      }
+
+      const id = await db.createWebhookSubscription({
+        url: parsedUrl.toString(),
+        wallet,
+        credential_type: claimType,
+      });
+      res.status(201).json({ id, wallet, claimType });
+    }),
+  );
+
+  app.get(
+    "/webhooks/subscriptions",
+    webhookGuard,
+    asyncHandler(async (req, res) => {
+      const wallet = req.query["wallet"];
+      if (wallet !== undefined && typeof wallet !== "string") {
+        res.status(400).json({ error: "wallet must be a single value" });
+        return;
+      }
+      res.json({
+        subscriptions: await db.listWebhookSubscriptions(wallet as string | undefined),
+      });
+    }),
+  );
+
+  app.delete(
+    "/webhooks/subscriptions/:id",
+    webhookGuard,
+    asyncHandler(async (req, res) => {
+      const id = Number(req.params["id"]);
+      if (!Number.isSafeInteger(id) || id < 1) {
+        res.status(400).json({ error: "id must be a positive integer" });
+        return;
+      }
+      if (!(await db.deleteWebhookSubscription(id))) {
+        res.status(404).json({ error: "subscription not found" });
+        return;
+      }
+      res.status(204).end();
+    }),
+  );
+
+  app.get(
+    "/webhooks/subscriptions/:id/deliveries",
+    webhookGuard,
+    asyncHandler(async (req, res) => {
+      const id = Number(req.params["id"]);
+      if (!Number.isSafeInteger(id) || id < 1) {
+        res.status(400).json({ error: "id must be a positive integer" });
+        return;
+      }
+      const subscriptions = await db.listWebhookSubscriptions();
+      if (!subscriptions.some((subscription) => subscription.id === id)) {
+        res.status(404).json({ error: "subscription not found" });
+        return;
+      }
+      const deliveries = await db.webhookDeliveries(id, 100);
+      res.json({
+        deliveries: deliveries.map((delivery) => ({
+          id: delivery.id,
+          eventId: delivery.event_id,
+          type: delivery.type,
+          wallet: delivery.wallet,
+          claimType: delivery.credential_type,
+          expiry: delivery.expiry,
+          ledgerSequence: delivery.ledger_sequence,
+          occurredAt: delivery.occurred_at,
+          reasonCode: delivery.reason_code,
+          attempts: delivery.attempts,
+          status: delivery.delivered_at !== null
+            ? "delivered"
+            : delivery.attempts >= MAX_WEBHOOK_DELIVERY_ATTEMPTS
+              ? "failed"
+              : "retrying",
+          deliveredAt: delivery.delivered_at,
+          lastError: delivery.last_error,
+        })),
+      });
+    }),
   );
 
   // ── 404 ──────────────────────────────────────────────────────────────────

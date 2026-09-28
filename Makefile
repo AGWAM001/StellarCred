@@ -8,10 +8,10 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help all build test lint fmt clean \
+.PHONY: help all build test lint fmt clean check-api-reference \
         build-contracts test-contracts lint-contracts \
         compile-circuits check-circuits \
-        build-frontend test-frontend lint-frontend test-sdk test-a11y \
+        build-frontend test-frontend lint-frontend test-sdk test-example test-a11y \
         build-indexer test-indexer run-indexer
 
 # ------------------------------------------------------------------------------
@@ -31,6 +31,7 @@ help:
 	@echo "  make lint            - Run clippy, commitlint, and frontend linters"
 	@echo "  make fmt             - Check or apply formatting across Rust and TS"
 	@echo "  make clean           - Remove build artifacts and caches"
+	@echo "  make check-api-reference - Check docs/PROOF_REGISTRY_API.md against the contract source (issue #525)"
 	@echo ""
 	@echo "Focused Workspace Targets:"
 	@echo "  make build-contracts - Compile Soroban contracts to wasm32v1-none"
@@ -41,6 +42,7 @@ help:
 	@echo "  make test-frontend   - Run frontend and SDK unit tests"
 	@echo "  make lint-frontend   - Run ESLint on frontend code"
 	@echo "  make test-sdk        - Run standalone @stellarcred/sdk integration tests"
+	@echo "  make test-example    - Run canonical integration example typecheck & tests"
 	@echo "  make test-a11y       - Run axe-core accessibility tests (requires Playwright)"
 	@echo "  make build-indexer   - Compile TypeScript indexer service"
 	@echo "  make test-indexer    - Run Jest test suite for indexer"
@@ -53,7 +55,7 @@ all: build test lint
 build: build-contracts build-frontend build-indexer
 
 ## test: Run all unit and integration test suites
-test: test-contracts test-frontend test-indexer
+test: test-contracts test-frontend test-indexer test-example
 
 ## lint: Run clippy and frontend linters
 lint: lint-contracts lint-frontend
@@ -61,6 +63,10 @@ lint: lint-contracts lint-frontend
 ## fmt: Check Rust formatting
 fmt:
 	cargo fmt --all --check
+
+## check-api-reference: Verify the ProofRegistry API reference matches the contract source
+check-api-reference:
+	node .github/scripts/check-api-reference.mjs
 
 ## clean: Remove all target outputs and build artifacts
 clean:
@@ -80,8 +86,10 @@ test-contracts:
 	cargo test --locked
 
 ## lint-contracts: Run clippy on contract crates with warnings as errors
+# --workspace so the host-only test harness crate is linted too: a bare build
+# skips it, since only the deployable contracts are default workspace members.
 lint-contracts:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --workspace --all-targets -- -D warnings
 
 # ------------------------------------------------------------------------------
 # Circuits (Noir / Aztec Barretenberg)
@@ -110,6 +118,10 @@ lint-frontend:
 ## test-sdk: Run SDK standalone integration tests
 test-sdk:
 	cd frontend/packages/sdk && pnpm typecheck && pnpm test:integration
+
+## test-example: Run canonical integration example typecheck and test suite
+test-example:
+	cd examples/canonical-integration && npm run typecheck && npm test
 
 ## test-a11y: Run axe-core accessibility tests
 test-a11y:

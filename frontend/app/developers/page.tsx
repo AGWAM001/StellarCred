@@ -245,6 +245,25 @@ if (!result.ok) {
 // Caller proved control of wallet AND holds valid on-chain KYC proof!`}</Code>
       </Section>
 
+      <Section title="Canonical Integration Example">
+        <p className="muted" style={{ fontSize: "0.95rem", lineHeight: 1.7 }}>
+          Looking for a complete, runnable reference application demonstrating the full integration pattern end to end?
+          See{" "}
+          <a
+            href="https://github.com/ToluLabs/StellarCred/tree/main/examples/canonical-integration"
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: "var(--accent)" }}
+          >
+            examples/canonical-integration
+          </a>{" "}
+          in the repository.
+        </p>
+        <p className="muted" style={{ fontSize: "0.95rem", lineHeight: 1.7, marginTop: "0.5rem" }}>
+          It includes interactive wallet challenge verification (eliminating the wallet-spoofing pitfall),
+          session token generation, server-side route gating, and granular failure-state handling (unverified, expired, revoked, wrong issuer, unmet threshold, replayed nonce).
+        </p>
+      </Section>
 
       <Section title="Available claim types">
         <table

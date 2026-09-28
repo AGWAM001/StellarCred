@@ -13,6 +13,45 @@ scripts/      deploy.sh — wires all contracts on testnet
 fixtures/     real vk / proof / public_inputs used by contract tests
 ```
 
+### Writing a contract test
+
+Contract suites share one harness, `contracts/test_support`, so a test body is
+the scenario rather than the wiring. It owns:
+
+- `Contracts::deploy` / `deploy_all_contracts` — deploy and wire IssuerRegistry,
+  CredentialVerifier, and ProofRegistry.
+- `Contracts::register_issuer` / `register_issuer_for` — register an issuer
+  under the pubkey the real fixtures were signed with.
+- `Contracts::set_vk` / `enable` — register a circuit's real verification key.
+- `Contracts::valid_submission` / `submit` — build a `ProofSubmission` that
+  verifies, or submit one directly.
+- `Contracts::deploy_pool` — add a GatedPool wired to the stack.
+- `test_support::{KYC, AGE, FUNDS, AGGREGATE, …}` — the checked-in real
+  UltraHonk artifacts, with `vk_bytes`/`proof_bytes`/`public_inputs_bytes` and
+  an `issuer_pubkey` read out of the public inputs.
+
+```rust
+let env = Env::default();
+env.mock_all_auths();
+let h = deploy(&env); // builds on Contracts::deploy + Contracts::enable
+
+let holder = Address::generate(&env);
+submit(&env, &h, &holder, 9_999);
+
+assert!(h.registry.is_verified(&holder, &symbol_short!("kyc"), &None).0);
+```
+
+Do not re-declare `include_bytes!` constants for a circuit in a suite, and do
+not stub the fixtures: the shared catalog still holds the real artifacts, so
+tests keep exercising genuine on-chain BN254 verification. A one-off artifact
+that has no catalog entry (e.g. `fixtures/negative/…`) can still be pulled in
+with the exported `test_support::fixture!` macro.
+
+The harness is host-only (it needs `soroban-sdk`'s `testutils`), so the four
+deployable contracts are the workspace's `default-members` and a bare
+`cargo build --release --target wasm32v1-none` never compiles it. It is still
+covered by `cargo test` and by `cargo clippy --workspace`.
+
 ## Docker quickstart
 
 Skip local toolchain installs — use the pinned dev image:
@@ -77,6 +116,18 @@ npm run dev
 4. For circuit changes: run `./circuits/scripts/build.sh` and update the relevant `fixtures/<type>/` artifacts, then regenerate the regression test vectors with `node circuits/scripts/testvectors.js update` (see `circuits/README.md` — "Test Vectors") and commit the result. CI runs `node circuits/scripts/testvectors.js check` and fails if a circuit or toolchain change silently altered proof output without the vectors being updated.
 5. For frontend changes: run `pnpm tsc --noEmit` (zero errors required) and `pnpm build`.
 6. Open a pull request against `main` with a clear description of what changed and why.
+
+## Branch Cleanup
+
+- **After merging:** Head branches are deleted automatically when a pull request
+  is merged, so you don't need to delete yours. If you need to keep working,
+  create a new branch from the latest `main`.
+- **Stale branches:** Maintainers periodically prune branches that are merged,
+  reverted, or abandoned (including superseded Dependabot branches). To keep a
+  branch, keep its PR open or ask a maintainer.
+- **Local cleanup:** Run `git fetch --prune` to drop references to deleted
+  remote branches.
+- **Branch naming:** Use descriptive names so a branch's purpose is clear.
 
 ## Preview Deployments
 

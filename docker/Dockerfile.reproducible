@@ -51,9 +51,10 @@ COPY contracts/credential_verifier/Cargo.toml  contracts/credential_verifier/
 COPY contracts/issuer_registry/Cargo.toml      contracts/issuer_registry/
 COPY contracts/proof_registry/Cargo.toml       contracts/proof_registry/
 COPY contracts/gated_pool/Cargo.toml           contracts/gated_pool/
+COPY contracts/test_support/Cargo.toml         contracts/test_support/
 
 # Stub lib.rs so `cargo fetch` can resolve the workspace without real sources.
-RUN for d in credential_verifier issuer_registry proof_registry gated_pool; do \
+RUN for d in credential_verifier issuer_registry proof_registry gated_pool test_support; do \
         mkdir -p "contracts/$d/src" && \
         printf '#![no_std]\n' > "contracts/$d/src/lib.rs"; \
     done
