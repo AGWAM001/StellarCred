@@ -48,7 +48,23 @@ export function ProofFlowView({
   const submitButtonRef = useRef<HTMLButtonElement>(null);
   const successRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
-  const { stage, proof, txHash, error, errorPhase, fee, elapsed, onSubmit, doSignAndSubmit, onRetrySubmit, cancel } = useProofFlow(cred, submitFn);
+  const {
+    stage,
+    proof,
+    txHash,
+    error,
+    errorPhase,
+    fee,
+    elapsed,
+    rpcIssue,
+    checkingNetwork,
+    proceedAnyway,
+    retryNetworkCheck,
+    onSubmit,
+    doSignAndSubmit,
+    onRetrySubmit,
+    cancel,
+  } = useProofFlow(cred, submitFn);
 
   // User-initiated cancel: aborts the proof inside the prover worker and
   // returns to the list.
@@ -68,6 +84,7 @@ export function ProofFlowView({
         successRef.current?.focus();
         break;
       case "error":
+      case "blocked":
         errorRef.current?.focus();
         break;
     }
@@ -90,6 +107,8 @@ export function ProofFlowView({
   };
 
   const isGenerating = stage === "witness" || stage === "circuit" || stage === "proof";
+  /** Degraded mode: the network is down, so proving has not been started. */
+  const isBlocked = stage === "blocked";
   const proofDone = stage === "generated" || stage === "preflight" || stage === "readyToSign" || stage === "submitting" || stage === "confirmed";
   const submitDone = stage === "confirmed";
 
@@ -117,11 +136,27 @@ export function ProofFlowView({
             title="Generate zero-knowledge proof"
             subtitle={`Estimated time: ${ESTIMATES.default.range}`}
             state={
-              isGenerating ? "active" :
+              checkingNetwork || isGenerating ? "active" :
               proofDone ? "done" : "idle"
             }
             detail={
-              isGenerating ? (
+              checkingNetwork ? (
+                <div style={{ marginTop: "0.4rem" }}>
+                  <AnimatedDots text="Checking the Stellar network before proving" />
+                  <span style={{ display: "block", marginTop: "0.4rem", fontSize: "0.72rem", color: "var(--faint)" }}>
+                    Proving takes ~15 s, so the app checks the RPC endpoint first —
+                    a proof generated during an outage can only fail at submission.
+                  </span>
+                </div>
+              ) : isBlocked ? (
+                <div style={{ marginTop: "0.4rem", fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.6 }}>
+                  <strong style={{ color: "var(--danger)" }}>Network unavailable — proving deferred.</strong>
+                  <div style={{ marginTop: "0.35rem" }}>
+                    {rpcIssue?.message ?? "The Stellar RPC endpoint is not responding."}{" "}
+                    Your credential is fine; the submission could not be made.
+                  </div>
+                </div>
+              ) : isGenerating ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.65rem" }}>
                   <ProvingBar progress={Math.min((elapsed / ESTIMATES.default.expected) * 80, 80)} />
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -297,7 +332,9 @@ export function ProofFlowView({
           >
             <div className="row" style={{ gap: "0.5rem", color: "var(--danger)", fontWeight: 600, fontSize: "0.875rem" }}>
               <IconAlertTriangle size={15} />
-              {errorPhase === "timeout"
+              {errorPhase === "network"
+                ? "Network unavailable — proving deferred"
+                : errorPhase === "timeout"
                 ? "Proof timed out"
                 : errorPhase === "proving"
                   ? "Proof generation failed"
@@ -336,6 +373,30 @@ export function ProofFlowView({
                     {error.raw}
                   </pre>
                 )}
+              </div>
+            )}
+            {/* Network down — let the holder retry the check, or override it.
+                Never silently burn the proving step into a guaranteed failure. */}
+            {errorPhase === "network" && (
+              <div style={{ marginTop: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <button
+                  className="btn btn-primary"
+                  style={{ width: "100%" }}
+                  onClick={() => void retryNetworkCheck()}
+                >
+                  Check the network again
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  style={{ width: "100%" }}
+                  onClick={proceedAnyway}
+                >
+                  Generate the proof anyway
+                </button>
+                <span className="faint" style={{ fontSize: "0.72rem", textAlign: "center" }}>
+                  Proving anyway costs you the ~15 s circuit run; the submission
+                  will most likely fail while the endpoint is unreachable.
+                </span>
               </div>
             )}
             {/* Preflight failed — offer override to sign & submit anyway */}
