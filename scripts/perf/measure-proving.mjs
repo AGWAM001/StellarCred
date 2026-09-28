@@ -203,11 +203,25 @@ if (!existsSync(bytecodePath)) {
 }
 
 const info = runTool("nargo", ["info"], CIRCUIT_DIR);
-const gateMatch = info.stdout.match(/(?:Total ACIR opcodes|Circuit size):\s*(\d+)/);
-if (!gateMatch) {
+// noir 1.0.0-beta.9 prints `nargo info` as an ASCII table with one row per
+// function; the entrypoint row is the one whose Function column is `main`
+// (e.g. `| kyc_proof | main | Bounded { width: 4 } | 582 | 34 |`), where the
+// ACIR Opcodes cell sits directly before the Brillig cell. Older versions
+// printed a `Total ACIR opcodes: N` line — accept both.
+let totalAcirOpcodes;
+const entrypointRow = info.stdout
+  .split("\n")
+  .find((l) => l.startsWith("|") && /\|\s*main\s*\|/.test(l));
+if (entrypointRow) {
+  const cells = [...entrypointRow.matchAll(/\|\s*(\d+)\s*\|/g)].map((m) => parseInt(m[1], 10));
+  totalAcirOpcodes = cells.at(-2) ?? cells.at(-1);
+} else {
+  const legacy = info.stdout.match(/(?:Total ACIR opcodes|Circuit size):\s*(\d+)/);
+  totalAcirOpcodes = legacy ? parseInt(legacy[1], 10) : undefined;
+}
+if (totalAcirOpcodes === undefined) {
   die(2, `could not parse gate count from \`nargo info\` output:\n${info.stdout}`);
 }
-const totalAcirOpcodes = parseInt(gateMatch[1], 10);
 log(`ACIR opcodes: ${totalAcirOpcodes}`);
 
 // Provenance: hash of the compiled bytecode, so a toolchain bump that changes
