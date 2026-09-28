@@ -448,6 +448,17 @@ jobs:
       - name: Run issuer tests (incl. cross-boundary circuit test)
         run: pnpm --filter @stellarcred/issuer test
 
+      - name: Typecheck SDK
+        working-directory: frontend/packages/sdk
+        run: pnpm typecheck
+
+      - name: Test canonical integration example
+        working-directory: examples/canonical-integration
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
   # ── Indexer: SQLite + Postgres test matrix ─────────────────────────────────
   # Runs in parallel with contracts, circuits, and frontend.
   indexer:

@@ -22,6 +22,8 @@ const CLAIMS_EXPORTS = [
   "isConfigured",
   "hasClaim",
   "getClaim",
+  "getClaimRecord",
+  "checkClaimStatus",
   "hasClaims",
   "verifyPreset",
   "getClaims",
@@ -89,6 +91,8 @@ describe("entry-point parity (issue #609 / #522)", () => {
     expect(ns.isConfigured).toBe(fromClaims.isConfigured);
     expect(ns.hasClaim).toBe(fromClaims.hasClaim);
     expect(ns.getClaim).toBe(fromClaims.getClaim);
+    expect(ns.getClaimRecord).toBe(fromClaims.getClaimRecord);
+    expect(ns.checkClaimStatus).toBe(fromClaims.checkClaimStatus);
     expect(ns.hasClaims).toBe(fromClaims.hasClaims);
     expect(ns.verifyPreset).toBe(fromClaims.verifyPreset);
     expect(ns.getClaims).toBe(fromClaims.getClaims);
