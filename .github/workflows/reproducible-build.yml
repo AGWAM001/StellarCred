@@ -3,23 +3,21 @@ name: Reproducible Build
 # Two-layer determinism check for the StellarCred contract WASM artifacts.
 #
 # Layer 1 — within-environment (container vs container)
-#   Two independent `docker run` invocations on the same runner both use the
-#   pinned container image. They share the same OS, Docker daemon, and
-#   filesystem layout. This layer catches nondeterminism inside the compiler:
-#   timestamp embedding, ASLR in codegen, non-deterministic symbol ordering,
-#   or map-iteration order in compiler passes.
+#   Two independent `docker run` invocations both use the pinned container
+#   image. Catches nondeterminism inside the compiler: timestamp embedding,
+#   ASLR in codegen, non-deterministic symbol ordering from LTO.
 #
 # Layer 2 — cross-environment (host vs container)
 #   The runner's own Rust toolchain (pinned via rust-toolchain.toml) builds
 #   the WASM directly on the host, and its hashes are compared against the
-#   container output. Host and container differ in: OS/libc minor version,
-#   filesystem paths, environment variables, and the route by which Rust was
-#   installed. A match here is the CI equivalent of the trust claim from #427:
-#   an independent machine with a fresh toolchain install reaches the same
-#   bytes, which is the guarantee that lets a third party reproduce the build.
+#   container output. A pass here means an independent third party with a
+#   fresh toolchain install reproduces the same bytes — the trust claim
+#   from #427.
 #
-# The commit-pinned hash manifest uploaded at the end of each run is the
-# machine-readable anchor for DEPLOYMENTS.md and for `verify-wasm.sh`.
+# Path normalisation: both environments set the same RUSTFLAGS remaps so
+# any absolute path the compiler embeds in WASM metadata is normalised to
+# the container-canonical values (/workspace, /usr/local/cargo,
+# /usr/local/rustup) before the compiler sees them.
 
 on:
   push:
@@ -41,7 +39,6 @@ on:
       - 'docker/Dockerfile.reproducible'
       - '.github/workflows/reproducible-build.yml'
 
-# contents:read — checkout only. No secrets used; no deployment.
 permissions:
   contents: read
 
@@ -53,37 +50,65 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # ── Install Rust on the host ─────────────────────────────────────────
-      # ubuntu-latest ships a pre-installed Rust in /usr/bin that can shadow
-      # rustup's shims even after `rustup default`.  We prepend rustup's bin
-      # directory to PATH so every subsequent step in this job uses the pinned
-      # toolchain and nothing from the system install can interfere.
+      # ── Install pinned Rust toolchain on the host ─────────────────────────
+      # Parse the channel from rust-toolchain.toml, install it explicitly,
+      # and make it the default so cargo build below uses exactly the same
+      # version as the Docker base image. Prepend ~/.cargo/bin to PATH so the
+      # runner's pre-installed system Rust cannot shadow rustup's shims.
       - name: Install pinned Rust toolchain (host)
         run: |
           CHANNEL=$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
           echo "Pinned channel: $CHANNEL"
           rustup toolchain install "$CHANNEL" --target wasm32v1-none --no-self-update
           rustup default "$CHANNEL"
-          # Prepend rustup's bin to PATH for this and all subsequent steps.
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          rustc --version   # must print exactly the pinned version
+          rustc --version
           cargo --version
 
-      # ── Host build ───────────────────────────────────────────────────────
-      # RUSTFLAGS path remapping normalises host-specific paths that Cargo can
-      # embed in WASM metadata (via proc-macros, build scripts, or debug info):
-      #   - Source tree:    $GITHUB_WORKSPACE  → /workspace        (container WORKDIR)
-      #   - Cargo registry: $HOME/.cargo       → /usr/local/cargo  (container path)
-      #   - Rustup sysroot: $HOME/.rustup      → /usr/local/rustup (container path)
-      # SOURCE_DATE_EPOCH=0 removes any timestamp the compiler injects.
+      # ── Set reproducible build environment (shared by host and container) ─
+      # SOURCE_DATE_EPOCH=0  — strips any timestamp the compiler injects.
+      # RUSTFLAGS remaps     — normalise all absolute paths the compiler may
+      #   embed in WASM metadata (source tree, Cargo registry, rustup sysroot)
+      #   to the container-canonical values so host and container artifacts are
+      #   path-identical before hashing.
+      - name: Set reproducible build environment
+        run: |
+          {
+            echo "SOURCE_DATE_EPOCH=0"
+            echo "RUSTFLAGS=--remap-path-prefix=${GITHUB_WORKSPACE}=/workspace --remap-path-prefix=${HOME}/.cargo=/usr/local/cargo --remap-path-prefix=${HOME}/.rustup=/usr/local/rustup"
+          } >> "$GITHUB_ENV"
+
+      # ── Build the Docker image ────────────────────────────────────────────
+      # The image installs the compiler and pre-fetches all Cargo deps but
+      # does NOT run cargo build — compilation happens at container run time.
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f docker/Dockerfile.reproducible \
+            -t stellarcred-build:ci \
+            .
+
+      # ── Hard gate: compiler versions must match ───────────────────────────
+      # If rust-toolchain.toml and the Dockerfile diverge this step fails
+      # loudly before we waste time building and comparing artifacts.
+      - name: Verify host and container toolchains match
+        run: |
+          host_version="$(rustc --version)"
+          container_version="$(docker run --rm stellarcred-build:ci rustc --version)"
+          echo "Host:      $host_version"
+          echo "Container: $container_version"
+          if [ "$host_version" != "$container_version" ]; then
+            echo "✗ Toolchain mismatch — update rust-toolchain.toml or docker/Dockerfile.reproducible so both pin the same version."
+            exit 1
+          fi
+          echo "✓ Toolchains match."
+
+      # ── Host build ────────────────────────────────────────────────────────
+      # SOURCE_DATE_EPOCH and RUSTFLAGS are set via GITHUB_ENV above.
       - name: Build WASM on host
         run: |
           mkdir -p build-host
-          export RUSTFLAGS="\
-            --remap-path-prefix=${GITHUB_WORKSPACE}=/workspace \
-            --remap-path-prefix=${HOME}/.cargo=/usr/local/cargo \
-            --remap-path-prefix=${HOME}/.rustup=/usr/local/rustup"
-          SOURCE_DATE_EPOCH=0 cargo build \
+          cargo build \
             --release \
             --target wasm32v1-none \
             --locked
@@ -98,24 +123,17 @@ jobs:
           echo "=== Host SHA-256 hashes ==="
           sha256sum build-host/*.wasm | tee build-host/sha256sums.txt
 
-      # ── Build the reproducible Docker image ──────────────────────────────
-      # The image installs the compiler and pre-fetches all Cargo deps but
-      # does NOT run cargo build — compilation happens at container run time
-      # so each docker run is a genuinely independent build.
-      - name: Build Docker image
-        run: |
-          docker build \
-            -f docker/Dockerfile.reproducible \
-            -t stellarcred-build:ci \
-            .
-
-      # ── Container build 1 ────────────────────────────────────────────────
+      # ── Container build 1 ─────────────────────────────────────────────────
+      # Pass SOURCE_DATE_EPOCH and RUSTFLAGS explicitly via -e so the values
+      # are identical to the host build — this overrides the Dockerfile ENV
+      # with the same normalised paths, making the two environments comparable.
       - name: Build WASM (container run 1)
         run: |
           mkdir -p build-1
           docker run --rm \
             -v "${{ github.workspace }}/build-1:/out" \
-            --env SOURCE_DATE_EPOCH=0 \
+            -e SOURCE_DATE_EPOCH=0 \
+            -e "RUSTFLAGS=--remap-path-prefix=/workspace=/workspace --remap-path-prefix=/usr/local/cargo=/usr/local/cargo --remap-path-prefix=/usr/local/rustup=/usr/local/rustup" \
             stellarcred-build:ci \
             sh -c "
               cargo build \
@@ -135,13 +153,14 @@ jobs:
           echo "=== Container run 1 SHA-256 hashes ==="
           sha256sum build-1/*.wasm | tee build-1/sha256sums.txt
 
-      # ── Container build 2 ────────────────────────────────────────────────
+      # ── Container build 2 ─────────────────────────────────────────────────
       - name: Build WASM (container run 2)
         run: |
           mkdir -p build-2
           docker run --rm \
             -v "${{ github.workspace }}/build-2:/out" \
-            --env SOURCE_DATE_EPOCH=0 \
+            -e SOURCE_DATE_EPOCH=0 \
+            -e "RUSTFLAGS=--remap-path-prefix=/workspace=/workspace --remap-path-prefix=/usr/local/cargo=/usr/local/cargo --remap-path-prefix=/usr/local/rustup=/usr/local/rustup" \
             stellarcred-build:ci \
             sh -c "
               cargo build \
@@ -161,59 +180,38 @@ jobs:
           echo "=== Container run 2 SHA-256 hashes ==="
           sha256sum build-2/*.wasm | tee build-2/sha256sums.txt
 
-      # ── Layer 1: within-environment comparison (container vs container) ──
-      # Catches compiler nondeterminism (timestamps, symbol ordering, ASLR).
+      # ── Layer 1: within-environment (container vs container) ──────────────
       - name: "Layer 1: compare container run 1 vs container run 2"
         run: |
           echo "--- Layer 1: container vs container ---"
-          if diff <(awk '{print $1}' build-1/sha256sums.txt | sort) \
-                  <(awk '{print $1}' build-2/sha256sums.txt | sort); then
+          if diff -u \
+               <(sort build-1/sha256sums.txt) \
+               <(sort build-2/sha256sums.txt); then
             echo "✓ Layer 1 passed: both container builds are byte-identical."
           else
             echo "✗ Layer 1 FAILED: container builds differ — compiler is nondeterministic."
-            diff build-1/sha256sums.txt build-2/sha256sums.txt || true
             exit 1
           fi
 
-      # ── Layer 2: cross-environment comparison (host vs container) ────────
-      # Catches environment-dependent nondeterminism: OS/libc path variation,
-      # filesystem layout, rustup vs Docker-baked toolchain path differences.
-      # A pass here means a third party on a different machine with a fresh
-      # `rustup` install will reproduce the same bytes.
+      # ── Layer 2: cross-environment (host vs container) ────────────────────
       - name: "Layer 2: compare host build vs container build"
         run: |
           echo "--- Layer 2: host vs container ---"
-          echo "Host compiler:      $(rustc --version)"
-          echo "Container compiler: $(docker run --rm stellarcred-build:ci rustc --version)"
-          echo ""
           echo "Host hashes:"
           cat build-host/sha256sums.txt
           echo "Container hashes:"
           cat build-1/sha256sums.txt
-          if diff <(awk '{print $1}' build-host/sha256sums.txt | sort) \
-                  <(awk '{print $1}' build-1/sha256sums.txt   | sort); then
+          if diff -u \
+               <(sort build-host/sha256sums.txt) \
+               <(sort build-1/sha256sums.txt); then
             echo "✓ Layer 2 passed: host and container builds are byte-identical."
             echo "  An independent machine with the pinned toolchain reproduces the same WASM."
           else
             echo "✗ Layer 2 FAILED: host and container outputs differ."
-            echo "  The build is not reproducible across environments."
-            echo "  Common causes:"
-            echo "    - rust-toolchain.toml version does not match the Docker base image version"
-            echo "    - A dependency embeds a host-specific path or environment variable"
-            echo "    - SOURCE_DATE_EPOCH is not respected by all build steps"
-            echo ""
-            echo "  Host:"
-            cat build-host/sha256sums.txt
-            echo "  Container:"
-            cat build-1/sha256sums.txt
             exit 1
           fi
 
       # ── Canonical hash manifest ───────────────────────────────────────────
-      # Produced only when both layers pass.  This is the authoritative record
-      # for DEPLOYMENTS.md: copy the hashes from this artifact into the table
-      # after deploying.  The artifact name embeds the commit SHA so it can be
-      # looked up later for any deployment that references this commit.
       - name: Produce canonical hash manifest
         run: |
           {
@@ -224,17 +222,10 @@ jobs:
             echo "# Toolchain: $(rustc --version)"
             echo "# Verified:  host + 2x container (cross-environment)"
             echo "#"
-            echo "# These hashes match across two independent environments:"
-            echo "#   - Host (ubuntu-latest runner, rust-toolchain.toml)"
-            echo "#   - Container (docker/Dockerfile.reproducible, pinned digest)"
-            echo "#"
             awk '{print $1, $2}' build-1/sha256sums.txt
           } > canonical-hashes.txt
-          echo ""
-          echo "=== Canonical hashes for commit ${{ github.sha }} ==="
           cat canonical-hashes.txt
 
-      # ── Upload artifacts ──────────────────────────────────────────────────
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v7
         with:
