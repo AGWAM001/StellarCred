@@ -58,6 +58,8 @@ Open [http://localhost:3000](http://localhost:3000) in your browser to interact 
 ### 4. Run Automated Tests
 ```bash
 npm test
+# Or from the repository root:
+make test-example
 ```
 
 ---
