@@ -71,11 +71,25 @@ jobs:
       #   embed in WASM metadata (source tree, Cargo registry, rustup sysroot)
       #   to the container-canonical values so host and container artifacts are
       #   path-identical before hashing.
+      #
+      # Path remapping strategy:
+      #   Host path                           → Canonical (container) path
+      #   ${{ github.workspace }}             → /workspace
+      #   $CARGO_HOME  (default ~/.cargo)     → /usr/local/cargo
+      #   $RUSTUP_HOME (default ~/.rustup)    → /usr/local/rustup
+      #
+      # We resolve CARGO_HOME and RUSTUP_HOME at shell time so the remaps
+      # cover non-default locations (e.g. when a prior CI step sets them).
+      # The Actions expression ${{ github.workspace }} is used for the source
+      # tree remap to guarantee the exact runner checkout path is covered even
+      # if $GITHUB_WORKSPACE is shadowed or empty.
       - name: Set reproducible build environment
         run: |
+          CARGO_HOME_RESOLVED="${CARGO_HOME:-$HOME/.cargo}"
+          RUSTUP_HOME_RESOLVED="${RUSTUP_HOME:-$HOME/.rustup}"
           {
             echo "SOURCE_DATE_EPOCH=0"
-            echo "RUSTFLAGS=--remap-path-prefix=${GITHUB_WORKSPACE}=/workspace --remap-path-prefix=${HOME}/.cargo=/usr/local/cargo --remap-path-prefix=${HOME}/.rustup=/usr/local/rustup"
+            echo "RUSTFLAGS=--remap-path-prefix=${{ github.workspace }}=/workspace --remap-path-prefix=${CARGO_HOME_RESOLVED}=/usr/local/cargo --remap-path-prefix=${RUSTUP_HOME_RESOLVED}=/usr/local/rustup"
           } >> "$GITHUB_ENV"
 
       # ── Build the Docker image ────────────────────────────────────────────
@@ -108,6 +122,10 @@ jobs:
       # SOURCE_DATE_EPOCH and RUSTFLAGS are set via GITHUB_ENV above.
       - name: Build WASM on host
         run: |
+          echo "=== Resolved RUSTFLAGS ==="
+          echo "$RUSTFLAGS"
+          echo "=== Workspace path ==="
+          echo "${{ github.workspace }}"
           mkdir -p build-host
           cargo build \
             --release \
