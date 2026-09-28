@@ -102,6 +102,30 @@ function fakeRevokedEvent(opts: { ledger: number; holder: string; issuer: string
   };
 }
 
+function fakeHolderRevokedEvent(opts: { ledger: number; holder: string }) {
+  const entries = [
+    ["holder", xdr.ScVal.scvSymbol(opts.holder)],
+    ["revoked_at", xdr.ScVal.scvU64(xdr.Uint64.fromString("1724000000"))],
+  ].map(([key, val]) =>
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol(key as string),
+      val: val as xdr.ScVal,
+    })
+  );
+  return {
+    paging_token: `${opts.ledger * 100_000}`,
+    contract_id: "CTEST",
+    topic: ["proof_reg", "self_rev", "kyc"].map((s) =>
+      scValBase64(xdr.ScVal.scvSymbol(s))
+    ),
+    value: scValBase64(xdr.ScVal.scvMap(entries)),
+    ledger: opts.ledger,
+    ledger_closed_at: "2024-08-18T00:00:00Z",
+    transaction_hash: "holder-revocation-tx",
+    source_account: opts.holder,
+  };
+}
+
 // ── Mock fetch ─────────────────────────────────────────────────────────────
 
 let fetchMock: jest.SpyInstance;
@@ -234,6 +258,60 @@ describe("Ingester finality lag", () => {
       attempts: 1,
     });
     expect(deliveries[0]?.last_error).toMatch(/public IP/);
+  });
+
+  it("queues a holder self-revocation for the exact subscribed wallet and claim", async () => {
+    await db.createWebhookSubscription({
+      url: "https://127.0.0.1/events",
+      wallet: "GALICE",
+      credential_type: "kyc",
+    });
+    await db.upsertClaim({
+      wallet: "GALICE",
+      credential_type: "kyc",
+      issuer: "GISSUER",
+      verified_at: 1_700_000_000,
+      expiry: 9_999_999_999,
+      ledger_sequence: 40,
+      threshold: null,
+      revoked: 0,
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("/ledgers")) {
+        return {
+          ok: true,
+          json: async () => ({ _embedded: { records: [{ sequence: 100 }] } }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          _embedded: {
+            records: [fakeHolderRevokedEvent({ ledger: 90, holder: "GALICE" })],
+          },
+        }),
+      };
+    });
+
+    const ingester = createIngester(
+      makeConfig({ finalityLag: 6, webhookSigningSecret: "w".repeat(32) }),
+      db,
+    );
+    expect(await ingester.tick()).toBe(1);
+
+    expect(await db.claimByWalletAndType("GALICE", "kyc")).toMatchObject({
+      revoked: 1,
+    });
+    const subscriptions = await db.listWebhookSubscriptions();
+    const deliveries = await db.webhookDeliveries(subscriptions[0]!.id, 10);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toMatchObject({
+      type: "revoked",
+      wallet: "GALICE",
+      credential_type: "kyc",
+      reason_code: "holder_revoked",
+      attempts: 1,
+    });
   });
 
   it("returns 0 when head hasn't advanced past the lag buffer", async () => {

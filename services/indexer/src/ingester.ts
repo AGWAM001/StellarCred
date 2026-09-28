@@ -322,6 +322,7 @@ type ParsedEvent =
       credentialType: string;
       issuer: string;
       revokedAt: number;
+      reasonCode: "issuer_revoked" | "holder_revoked";
     }
   | { kind: "unknown" };
 
@@ -339,6 +340,9 @@ type ParsedEvent =
  * Revoked:
  *   topics = ("proof_reg", "revoked", credential_type)
  *   value  = EventProofRevoked { holder, issuer, revoked_at }
+ * Holder self-revocation:
+ *   topics = ("proof_reg", "self_rev", credential_type)
+ *   value  = EventHolderRevoked { holder, revoked_at }
  */
 function parseEvent(
   ev: HorizonContractEvent,
@@ -429,6 +433,24 @@ function parseEvent(
           "revoked_at",
           Math.floor(new Date(ev.ledger_closed_at).getTime() / 1000),
         ),
+        reasonCode: "issuer_revoked",
+      };
+    }
+  }
+
+  if (topics[0] === "proof_reg" && topics[1] === "self_rev" && credentialType) {
+    const holder = addressField("holder");
+    if (holder) {
+      return {
+        kind: "revoked",
+        holder,
+        credentialType,
+        issuer: "",
+        revokedAt: numericField(
+          "revoked_at",
+          Math.floor(new Date(ev.ledger_closed_at).getTime() / 1000),
+        ),
+        reasonCode: "holder_revoked",
       };
     }
   }
@@ -599,7 +621,7 @@ export function createIngester(config: Config, db: Db): Ingester {
         await db.revokeClaim(parsed.holder, parsed.credentialType);
         if (webhookDispatcher) {
           await db.enqueueWebhookEvent({
-            event_id: `revoked:${ev.transaction_hash ?? ev.paging_token}:${parsed.holder}:${parsed.credentialType}`,
+            event_id: `${parsed.reasonCode}:${ev.transaction_hash ?? ev.paging_token}:${parsed.holder}:${parsed.credentialType}`,
             type: "revoked",
             wallet: parsed.holder,
             credential_type: parsed.credentialType,
@@ -607,7 +629,7 @@ export function createIngester(config: Config, db: Db): Ingester {
             ledger_sequence:
               typeof ev.ledger === "string" ? Number(ev.ledger) : ev.ledger,
             occurred_at: parsed.revokedAt,
-            reason_code: "issuer_revoked",
+            reason_code: parsed.reasonCode,
           });
         }
         processed++;

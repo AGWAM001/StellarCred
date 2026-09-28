@@ -920,7 +920,7 @@ fn pause_and_unpause_emit_expected_events() {
 }
 
 #[test]
-fn holder_self_revoke_emits_no_events() {
+fn holder_self_revoke_emits_a_lifecycle_event() {
     let env = Env::default();
     env.mock_all_auths();
     let h = deploy(&env);
@@ -949,10 +949,29 @@ fn holder_self_revoke_emits_no_events() {
     ];
     assert_eq!(env.events().all().filter_by_contract(&h.registry_id), expected);
 
-    // Holder self-revocation removes storage key directly and emits no new event
     h.registry.revoke_proof(&holder, &symbol_short!("kyc"));
 
-    assert_eq!(env.events().all().filter_by_contract(&h.registry_id), vec![&env]);
+    assert_eq!(
+        env.events().all().filter_by_contract(&h.registry_id),
+        vec![
+            &env,
+            expected.get(0).unwrap(),
+            (
+                h.registry_id.clone(),
+                (
+                    symbol_short!("proof_reg"),
+                    symbol_short!("self_rev"),
+                    symbol_short!("kyc"),
+                )
+                    .into_val(&env),
+                EventHolderRevoked {
+                    holder,
+                    revoked_at: env.ledger().timestamp(),
+                }
+                .into_val(&env),
+            ),
+        ]
+    );
 }
 
 // ── Delegated verification (#396) ────────────────────────────────────────────
