@@ -23,6 +23,7 @@
 //   const ok = await StellarCred.hasClaim(walletAddress, "kyc");
 
 export * from "./claims";
+export * from "./capabilities";
 export * from "./challenge";
 export { createClaimGate } from "./core";
 export type { ClaimGateConfig, ClaimGateState, ClaimGateListener, ClaimGate } from "./core";
@@ -54,6 +55,12 @@ import {
 } from "./claims";
 
 import {
+  bootstrap,
+  fetchCapabilities,
+  validateCapabilitiesDescriptor,
+} from "./capabilities";
+
+import {
   createWalletChallenge,
   verifyWalletSignature,
   verifyWalletClaim,
@@ -61,6 +68,9 @@ import {
 
 export const StellarCred = {
   configure,
+  bootstrap,
+  fetchCapabilities,
+  validateCapabilitiesDescriptor,
   healthCheck,
   isConfigured,
   hasClaim,
