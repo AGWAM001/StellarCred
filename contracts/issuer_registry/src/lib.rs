@@ -16,6 +16,13 @@
 //! admin can delegate or rotate holders via `grant_role` / `revoke_role`, and
 //! anyone can query membership with `has_role`.
 //!
+//! Admin transfer is two-step (#342): the root admin calls `propose_admin`
+//! with the incoming address, and that address must call `accept_admin` to
+//! take over. On acceptance, the accepted address becomes the new root admin
+//! AND inherits every role the outgoing admin held — a wholesale governance
+//! transfer. A pending proposal can be overwritten by another `propose_admin`
+//! or cleared with `cancel_admin_proposal`.
+//!
 //! ── Issuer key sets and rotation ───────────────────────────────────────────
 //! An issuer signs credentials with a secp256k1 key, and that key is bound into
 //! every proof's public inputs. Holding a single pubkey per issuer meant any
@@ -83,20 +90,6 @@ pub struct EventIssuerRevoked {
     pub issuer: Address,
 }
 
-/// Payload emitted when the admin is changed.
-/// Topics: ("iss_reg", "admin_rot")
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EventAdminChanged {
-    /// The address of the previous admin.
-    pub old_admin: Address,
-    /// The address of the new admin.
-    pub new_admin: Address,
-    /// Timestamp when the change occurred.
-    pub changed_at: u64,
-}
-
-// Admin rotation event - see issue #342 for implementation details
 /// Payload emitted when an issuer's signing key is rotated.
 /// Topics: ("iss_reg", "key_rot")
 #[contracttype]
@@ -184,6 +177,9 @@ pub struct IssuerMetadata {
 #[contracttype]
 pub enum DataKey {
     Admin,
+    /// Pending root-admin candidate set by `propose_admin` and consumed by
+    /// `accept_admin` (#342).
+    PendingAdmin,
     /// RBAC: role name (Symbol) → current holder (Address).
     Roles,
     Issuer(Address),
@@ -236,6 +232,8 @@ pub enum Error {
     /// `register_issuer` tried to change the pubkey of an existing issuer.
     /// Use `rotate_issuer_key` so outstanding credentials keep verifying.
     KeyChangeRequiresRotation = 12,
+    /// `accept_admin` was called with no pending proposal (#342).
+    NoPendingAdmin = 13,
 }
 
 /// Upper bound on retired keys retained per issuer. Retired keys are pruned
@@ -742,7 +740,11 @@ impl IssuerRegistry {
         logo: Option<String>,
     ) {
         Self::require_role(&env, &symbol_short!("admin"));
-        if !env.storage().persistent().has(&DataKey::Issuer(issuer.clone())) {
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::Issuer(issuer.clone()))
+        {
             panic_with_error!(&env, Error::IssuerNotFound);
         }
         // Enforce per-field length caps to bound storage rent.
@@ -783,41 +785,76 @@ impl IssuerRegistry {
             .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized))
     }
 
-    /// Transfer the root admin to `new_admin`. Root-admin only.
-    ///
-    /// This is a wholesale governance transfer: the `Admin` key and every role
-    /// currently held by the old root admin move to `new_admin`, so the old
-    /// root loses all privileged access exactly as it did before roles existed.
-    /// Fine-grained delegation afterwards uses `grant_role` / `revoke_role`.
-    /// Emits an `admin_changed` event with the transition details.
+    /// Propose a new root admin. Root-admin only. Overwrites any existing
+    /// pending proposal. Emits `("iss_reg", "adm_prop")` with the proposed
+    /// address as the payload (#342).
     #[allow(deprecated)]
-    pub fn set_admin(env: Env, new_admin: Address) {
-        let admin: Address = env
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+
+        env.events().publish(
+            (symbol_short!("iss_reg"), symbol_short!("adm_prop")),
+            new_admin,
+        );
+    }
+
+    /// Accept the pending root-admin role. Callable only by the address named
+    /// in the most recent `propose_admin`. On success the accepted address
+    /// becomes the new `DataKey::Admin` AND inherits every role the outgoing
+    /// admin held — a wholesale governance transfer, so the outgoing root
+    /// loses all privileged access exactly as it did before roles existed.
+    /// Fine-grained delegation afterwards uses `grant_role` / `revoke_role`.
+    /// Emits `("iss_reg", "adm_acc")` with the new admin as the payload (#342).
+    #[allow(deprecated)]
+    pub fn accept_admin(env: Env) {
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NoPendingAdmin));
+        pending.require_auth();
+
+        let old_admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
             .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialized));
-        admin.require_auth();
 
+        // Wholesale governance transfer: hand the new admin every role the old
+        // admin held, so key management power moves with the admin key.
         let mut roles: Map<Symbol, Address> = Self::roles(&env);
         for (role, holder) in roles.iter() {
-            if holder == admin {
-                roles.set(role, new_admin.clone());
+            if holder == old_admin {
+                roles.set(role, pending.clone());
             }
         }
         env.storage().instance().set(&DataKey::Roles, &roles);
-        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().set(&DataKey::Admin, &pending);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
 
-        // Emit: topics = ("iss_reg", "admin_rot")
-        //       data   = EventAdminChanged { old_admin, new_admin, changed_at }
         env.events().publish(
-            (symbol_short!("iss_reg"), symbol_short!("admin_rot")),
-            EventAdminChanged {
-                old_admin: admin,
-                new_admin,
-                changed_at: env.ledger().timestamp(),
-            },
+            (symbol_short!("iss_reg"), symbol_short!("adm_acc")),
+            pending,
         );
+    }
+
+    /// Cancel a pending admin proposal. Root-admin only. Emits
+    /// `("iss_reg", "adm_canc")` with an empty payload (#342).
+    #[allow(deprecated)]
+    pub fn cancel_admin_proposal(env: Env) {
+        Self::require_admin(&env);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        env.events()
+            .publish((symbol_short!("iss_reg"), symbol_short!("adm_canc")), ());
+    }
+
+    /// Read the current pending admin proposal, if any (#342).
+    pub fn pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     /// Assign `address` as the holder of `role`, replacing any previous holder.

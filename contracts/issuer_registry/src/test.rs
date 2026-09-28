@@ -401,12 +401,7 @@ fn metadata_name_over_limit_panics() {
     client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
 
     // name = 65 bytes, one over the 64-byte limit.
-    client.set_issuer_metadata(
-        &issuer,
-        &Some(str_of_len(&env, 65)),
-        &None,
-        &None,
-    );
+    client.set_issuer_metadata(&issuer, &Some(str_of_len(&env, 65)), &None, &None);
 }
 
 #[test]
@@ -421,12 +416,7 @@ fn metadata_url_over_limit_panics() {
     client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
 
     // url = 257 bytes, one over the 256-byte limit.
-    client.set_issuer_metadata(
-        &issuer,
-        &None,
-        &Some(str_of_len(&env, 257)),
-        &None,
-    );
+    client.set_issuer_metadata(&issuer, &None, &Some(str_of_len(&env, 257)), &None);
 }
 
 #[test]
@@ -441,12 +431,7 @@ fn metadata_logo_over_limit_panics() {
     client.register_issuer(&issuer, &pubkey, &vec![&env, symbol_short!("kyc")]);
 
     // logo = 257 bytes, one over the 256-byte limit.
-    client.set_issuer_metadata(
-        &issuer,
-        &None,
-        &None,
-        &Some(str_of_len(&env, 257)),
-    );
+    client.set_issuer_metadata(&issuer, &None, &None, &Some(str_of_len(&env, 257)));
 }
 
 // ── Event schema & drift tests (Issue #429) ──────────────────────────────────
@@ -503,10 +488,7 @@ fn revoke_issuer_emits_expected_event() {
             (
                 client.address.clone(),
                 (symbol_short!("iss_reg"), symbol_short!("revoked")).into_val(&env),
-                EventIssuerRevoked {
-                    issuer,
-                }
-                .into_val(&env),
+                EventIssuerRevoked { issuer }.into_val(&env),
             ),
         ],
     );
@@ -534,7 +516,10 @@ fn set_issuer_metadata_emits_no_events() {
             .into_val(&env),
         ),
     ];
-    assert_eq!(env.events().all().filter_by_contract(&client.address), expected);
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        expected
+    );
 
     client.set_issuer_metadata(
         &issuer,
@@ -544,7 +529,10 @@ fn set_issuer_metadata_emits_no_events() {
     );
 
     // Setting metadata updates persistent storage directly and does not emit new events
-    assert_eq!(env.events().all().filter_by_contract(&client.address), vec![&env]);
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        vec![&env]
+    );
 }
 
 // ── RBAC tests (Issue #123) ─────────────────────────────────────────────────
@@ -765,8 +753,12 @@ fn has_role_is_a_public_view() {
     let delegate = Address::generate(&env);
 
     // Readable with zero mocked auths — no authorization required.
-    assert!(client.mock_auths(&[]).has_role(&symbol_short!("admin"), &admin));
-    assert!(!client.mock_auths(&[]).has_role(&symbol_short!("admin"), &delegate));
+    assert!(client
+        .mock_auths(&[])
+        .has_role(&symbol_short!("admin"), &admin));
+    assert!(!client
+        .mock_auths(&[])
+        .has_role(&symbol_short!("admin"), &delegate));
 
     client.grant_role(&Symbol::new(&env, "issuer_manager"), &delegate);
     assert!(client.has_role(&Symbol::new(&env, "issuer_manager"), &delegate));
@@ -789,82 +781,137 @@ fn register_issuer_by_unmocked_admin_fails() {
     assert!(!client.is_valid_issuer(&issuer, &symbol_short!("kyc")));
 }
 
-// ── Admin rotation tests (#342) ──────────────────────────────────────────────
+// ── Two-step admin transfer tests (#342) ────────────────────────────────────
 
 #[test]
-fn admin_can_transfer_to_new_admin() {
+fn propose_admin_by_non_admin_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let new_admin = Address::generate(&env);
 
-    // The old admin is currently the root admin.
+    // A non-admin cannot even propose a new admin.
+    let res = client.mock_auths(&[]).try_propose_admin(&new_admin);
+    assert!(res.is_err());
+    // No pending proposal was created.
+    assert_eq!(client.pending_admin(), None);
+}
+
+#[test]
+fn accept_admin_without_pending_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (admin, client) = deploy_issuer_registry(&env);
+
+    let res = client.try_accept_admin();
+    assert!(res.is_err());
+    // Admin unchanged.
+    assert_eq!(client.admin(), admin);
+}
+
+#[test]
+fn propose_then_accept_transfers_admin_and_roles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (admin, client) = deploy_issuer_registry(&env);
+    let new_admin = Address::generate(&env);
+
+    // No pending proposal initially.
+    assert_eq!(client.pending_admin(), None);
+
+    client.propose_admin(&new_admin);
+    assert_eq!(client.pending_admin(), Some(new_admin.clone()));
+    // Still the old admin — nothing has moved yet.
     assert_eq!(client.admin(), admin);
 
-    // Old admin transfers to new admin.
-    client.set_admin(&new_admin);
+    client.accept_admin();
 
-    // New admin is now the root admin.
+    // Now the transfer has taken effect.
     assert_eq!(client.admin(), new_admin);
+    assert_eq!(client.pending_admin(), None);
 
-    // Old admin no longer holds the admin role.
-    assert!(!client.has_role(&symbol_short!("admin"), &admin));
-
-    // New admin now holds the admin role.
+    // The admin role moved to the new admin…
     assert!(client.has_role(&symbol_short!("admin"), &new_admin));
+
+    // …and the old admin no longer holds it.
+    assert!(!client.has_role(&symbol_short!("admin"), &admin));
 }
 
 #[test]
-fn admin_transfer_moves_roles_to_new_admin() {
+fn accept_by_wrong_address_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let (admin, client) = setup(&env);
+    let (admin, client) = deploy_issuer_registry(&env);
     let new_admin = Address::generate(&env);
+    let wrong = Address::generate(&env);
 
-    // The admin role initially belongs to the deployer.
-    assert!(client.has_role(&symbol_short!("admin"), &admin));
+    client.propose_admin(&new_admin);
 
-    // Transfer to new admin.
-    client.set_admin(&new_admin);
-
-    // Root admin + every role the old root held move to the new admin.
-    assert_eq!(client.admin(), new_admin);
-    assert!(!client.has_role(&symbol_short!("admin"), &admin));
-    assert!(client.has_role(&symbol_short!("admin"), &new_admin));
-}
-
-#[test]
-fn only_current_admin_can_rotate() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (_admin, client) = setup(&env);
-    let stranger = Address::generate(&env);
-    let new_admin = Address::generate(&env);
-
-    // A non-admin cannot rotate the admin.
+    // Only the proposed address can accept — not any authenticated address.
     let res = client
         .mock_auths(&[MockAuth {
-            address: &stranger,
+            address: &wrong,
             invoke: &MockAuthInvoke {
                 contract: &client.address,
-                fn_name: "set_admin",
-                args: (&new_admin,).into_val(&env),
+                fn_name: "accept_admin",
+                args: ().into_val(&env),
                 sub_invokes: &[],
             },
         }])
-        .try_set_admin(&new_admin);
+        .try_accept_admin();
     assert!(res.is_err());
+    // Admin unchanged, proposal still pending.
+    assert_eq!(client.admin(), admin);
+    assert_eq!(client.pending_admin(), Some(new_admin));
+}
+
+#[test]
+fn cancel_admin_proposal_clears_pending() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = deploy_issuer_registry(&env);
+    let new_admin = Address::generate(&env);
+
+    client.propose_admin(&new_admin);
+    assert_eq!(client.pending_admin(), Some(new_admin.clone()));
+
+    client.cancel_admin_proposal();
+    assert_eq!(client.pending_admin(), None);
+
+    // Accept after cancel must fail.
+    let res = client.try_accept_admin();
+    assert!(res.is_err());
+}
+
+#[test]
+fn propose_admin_overwrites_pending() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = deploy_issuer_registry(&env);
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+
+    client.propose_admin(&first);
+    assert_eq!(client.pending_admin(), Some(first.clone()));
+
+    // Second proposal overwrites the first — no cancel required.
+    client.propose_admin(&second);
+    assert_eq!(client.pending_admin(), Some(second.clone()));
+
+    client.accept_admin();
+    assert_eq!(client.admin(), second);
 }
 
 #[test]
 fn post_rotation_new_admin_can_perform_ops() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_old_admin, client) = setup(&env);
+    let (_old_admin, client) = deploy_issuer_registry(&env);
     let new_admin = Address::generate(&env);
 
-    // Rotate to new admin.
-    client.set_admin(&new_admin);
+    // Propose and accept the rotation.
+    client.propose_admin(&new_admin);
+    client.accept_admin();
 
     // New admin can register an issuer.
     let issuer = Address::generate(&env);
@@ -890,11 +937,12 @@ fn post_rotation_new_admin_can_perform_ops() {
 fn post_rotation_old_admin_cannot_perform_ops() {
     let env = Env::default();
     env.mock_all_auths();
-    let (old_admin, client) = setup(&env);
+    let (old_admin, client) = deploy_issuer_registry(&env);
     let new_admin = Address::generate(&env);
 
-    // Rotate to new admin.
-    client.set_admin(&new_admin);
+    // Propose and accept the rotation.
+    client.propose_admin(&new_admin);
+    client.accept_admin();
 
     // Old admin can NO LONGER register an issuer.
     let issuer = Address::generate(&env);
@@ -916,16 +964,16 @@ fn post_rotation_old_admin_cannot_perform_ops() {
 }
 
 #[test]
-fn set_admin_emits_expected_event() {
+fn propose_admin_emits_expected_event() {
     let env = Env::default();
     env.mock_all_auths();
-    let (admin, client) = setup(&env);
+    let (_admin, client) = deploy_issuer_registry(&env);
     let new_admin = Address::generate(&env);
 
     // Drain the initial setup events (none for IssuerRegistry setup).
     let _ = env.events().all();
 
-    client.set_admin(&new_admin);
+    client.propose_admin(&new_admin);
 
     assert_eq!(
         env.events().all().filter_by_contract(&client.address),
@@ -933,13 +981,62 @@ fn set_admin_emits_expected_event() {
             &env,
             (
                 client.address.clone(),
-                (symbol_short!("iss_reg"), symbol_short!("admin_rot")).into_val(&env),
-                EventAdminChanged {
-                    old_admin: admin.clone(),
-                    new_admin: new_admin.clone(),
-                    changed_at: env.ledger().timestamp(),
-                }
-                .into_val(&env),
+                (symbol_short!("iss_reg"), symbol_short!("adm_prop")).into_val(&env),
+                new_admin.into_val(&env),
+            ),
+        ],
+    );
+}
+
+#[test]
+fn accept_admin_emits_expected_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = deploy_issuer_registry(&env);
+    let new_admin = Address::generate(&env);
+
+    client.propose_admin(&new_admin);
+
+    // Drain events emitted by the proposal.
+    let _ = env.events().all();
+
+    client.accept_admin();
+
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        vec![
+            &env,
+            (
+                client.address.clone(),
+                (symbol_short!("iss_reg"), symbol_short!("adm_acc")).into_val(&env),
+                new_admin.into_val(&env),
+            ),
+        ],
+    );
+}
+
+#[test]
+fn cancel_admin_proposal_emits_expected_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = deploy_issuer_registry(&env);
+    let new_admin = Address::generate(&env);
+
+    client.propose_admin(&new_admin);
+
+    // Drain events emitted by the proposal.
+    let _ = env.events().all();
+
+    client.cancel_admin_proposal();
+
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        vec![
+            &env,
+            (
+                client.address.clone(),
+                (symbol_short!("iss_reg"), symbol_short!("adm_canc")).into_val(&env),
+                ().into_val(&env),
             ),
         ],
     );
@@ -1387,9 +1484,7 @@ fn refresh_issuer_keys_ttl_requires_admin_role() {
     let issuer = Address::generate(&env);
     register_k0(&env, &client, &issuer);
 
-    let res = client
-        .mock_auths(&[])
-        .try_refresh_issuer_keys_ttl(&issuer);
+    let res = client.mock_auths(&[]).try_refresh_issuer_keys_ttl(&issuer);
     assert!(res.is_err());
 }
 
