@@ -599,6 +599,10 @@ if (!result.ok) {
 // Access granted: caller proved wallet control AND satisfies credential requirements
 ```
 
+### Canonical Integration Example
+
+A runnable reference application implementing this entire pattern from start to finish is located in the repository at [`examples/canonical-integration`](../../examples/canonical-integration). It provides a working backend with challenge replay protection, session token management, route gating, and failure-state evaluation against Soroban testnet.
+
 ---
 
 ## Support

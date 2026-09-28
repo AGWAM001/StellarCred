@@ -125,6 +125,8 @@ npm install @stellarcred/sdk
 ```
 
 > Full SDK docs: [`frontend/packages/sdk/README.md`](frontend/packages/sdk/README.md) · [npm](https://www.npmjs.com/package/@stellarcred/sdk)
+>
+> **Canonical Integration Example**: Looking for a complete, runnable end-to-end integration with wallet control challenge proof and server-side route gating? See [`examples/canonical-integration`](examples/canonical-integration).
 
 Protocols never handle credential data - they ask the on-chain registry one
 question: _has this wallet proven the claim I require?_
@@ -378,6 +380,7 @@ StellarCred spans four toolchains (Rust contracts, Noir zk-circuits, Next.js fro
 | `make compile-circuits`| Circuits | Compiles Noir circuits and verifies verification keys (`bb`). |
 | `make test-frontend` | Frontend | Runs frontend SDK tests, theme tests, and issuer package tests. |
 | `make test-sdk` | SDK | Runs standalone `@stellarcred/sdk` integration tests. |
+| `make test-example` | Examples | Runs typecheck and test suite for `examples/canonical-integration`. |
 | `make test-a11y` | Frontend | Runs axe-core accessibility checks via Playwright. |
 | `make test-indexer` | Indexer | Runs Jest test suite for the indexer service. |
 | `make run-indexer` | Indexer | Starts the local indexer service. |

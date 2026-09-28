@@ -11,7 +11,7 @@ SHELL := /bin/bash
 .PHONY: help all build test lint fmt clean \
         build-contracts test-contracts lint-contracts \
         compile-circuits check-circuits \
-        build-frontend test-frontend lint-frontend test-sdk test-a11y \
+        build-frontend test-frontend lint-frontend test-sdk test-example test-a11y \
         build-indexer test-indexer run-indexer
 
 # ------------------------------------------------------------------------------
@@ -41,6 +41,7 @@ help:
 	@echo "  make test-frontend   - Run frontend and SDK unit tests"
 	@echo "  make lint-frontend   - Run ESLint on frontend code"
 	@echo "  make test-sdk        - Run standalone @stellarcred/sdk integration tests"
+	@echo "  make test-example    - Run canonical integration example typecheck & tests"
 	@echo "  make test-a11y       - Run axe-core accessibility tests (requires Playwright)"
 	@echo "  make build-indexer   - Compile TypeScript indexer service"
 	@echo "  make test-indexer    - Run Jest test suite for indexer"
@@ -53,7 +54,7 @@ all: build test lint
 build: build-contracts build-frontend build-indexer
 
 ## test: Run all unit and integration test suites
-test: test-contracts test-frontend test-indexer
+test: test-contracts test-frontend test-indexer test-example
 
 ## lint: Run clippy and frontend linters
 lint: lint-contracts lint-frontend
@@ -112,6 +113,10 @@ lint-frontend:
 ## test-sdk: Run SDK standalone integration tests
 test-sdk:
 	cd frontend/packages/sdk && pnpm typecheck && pnpm test:integration
+
+## test-example: Run canonical integration example typecheck and test suite
+test-example:
+	cd examples/canonical-integration && npm run typecheck && npm test
 
 ## test-a11y: Run axe-core accessibility tests
 test-a11y:
