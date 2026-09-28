@@ -87,6 +87,23 @@ jobs:
             --to ${{ github.event.pull_request.head.sha }} \
             --verbose
 
+  # ── Docs: contract API reference drift check (issue #525) ─────────────────
+  # Cheap source-vs-docs gate: fails when a ProofRegistry entrypoint is added,
+  # removed or renamed without the matching update to docs/PROOF_REGISTRY_API.md,
+  # or when a documented section goes stale / loses its Audience, Auth or Panics
+  # line. Runs before the heavyweight jobs so doc drift fails fast.
+  api-reference:
+    name: Contract API reference drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check API reference against contract source
+        run: node .github/scripts/check-api-reference.mjs
+
   # ── Contracts: Rust / WASM / Clippy ────────────────────────────────────────
   # Runs in parallel with circuits, frontend, and indexer.
   contracts:

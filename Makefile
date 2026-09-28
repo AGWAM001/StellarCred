@@ -8,7 +8,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help all build test lint fmt clean \
+.PHONY: help all build test lint fmt clean check-api-reference \
         build-contracts test-contracts lint-contracts \
         compile-circuits check-circuits \
         build-frontend test-frontend lint-frontend test-sdk test-example test-a11y \
@@ -31,6 +31,7 @@ help:
 	@echo "  make lint            - Run clippy, commitlint, and frontend linters"
 	@echo "  make fmt             - Check or apply formatting across Rust and TS"
 	@echo "  make clean           - Remove build artifacts and caches"
+	@echo "  make check-api-reference - Check docs/PROOF_REGISTRY_API.md against the contract source (issue #525)"
 	@echo ""
 	@echo "Focused Workspace Targets:"
 	@echo "  make build-contracts - Compile Soroban contracts to wasm32v1-none"
@@ -62,6 +63,10 @@ lint: lint-contracts lint-frontend
 ## fmt: Check Rust formatting
 fmt:
 	cargo fmt --all --check
+
+## check-api-reference: Verify the ProofRegistry API reference matches the contract source
+check-api-reference:
+	node .github/scripts/check-api-reference.mjs
 
 ## clean: Remove all target outputs and build artifacts
 clean:
