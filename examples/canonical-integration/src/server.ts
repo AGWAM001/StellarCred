@@ -35,7 +35,7 @@ import StellarCred, {
   type ClaimType,
   type ClaimOptions,
   type WalletChallenge,
-} from "@stellarcred/sdk/server";
+} from "@stellarcred/sdk";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
