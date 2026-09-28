@@ -79,7 +79,7 @@ COPY contracts/ contracts/
 # contains /workspace and /usr/local/cargo regardless of the build context.
 # This makes container output byte-identical to a host build that applies the
 # equivalent --remap-path-prefix flags for its own paths.
-ENV RUSTFLAGS="--remap-path-prefix=/workspace=/workspace --remap-path-prefix=/usr/local/cargo=/usr/local/cargo"
+ENV RUSTFLAGS="--remap-path-prefix=/workspace=/workspace --remap-path-prefix=/usr/local/cargo=/usr/local/cargo --remap-path-prefix=/usr/local/rustup=/usr/local/rustup"
 
 # Default command: build and copy WASM artifacts to /out.
 # The caller is expected to bind-mount a host directory at /out.

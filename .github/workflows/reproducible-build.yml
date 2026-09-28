@@ -72,15 +72,17 @@ jobs:
       # ── Host build ───────────────────────────────────────────────────────
       # RUSTFLAGS path remapping normalises host-specific paths that Cargo can
       # embed in WASM metadata (via proc-macros, build scripts, or debug info):
-      #   - Source tree: $GITHUB_WORKSPACE  → /workspace  (matches container)
-      #   - Cargo registry: $HOME/.cargo    → /usr/local/cargo (matches container)
+      #   - Source tree:    $GITHUB_WORKSPACE  → /workspace        (container WORKDIR)
+      #   - Cargo registry: $HOME/.cargo       → /usr/local/cargo  (container path)
+      #   - Rustup sysroot: $HOME/.rustup      → /usr/local/rustup (container path)
       # SOURCE_DATE_EPOCH=0 removes any timestamp the compiler injects.
       - name: Build WASM on host
         run: |
           mkdir -p build-host
           export RUSTFLAGS="\
             --remap-path-prefix=${GITHUB_WORKSPACE}=/workspace \
-            --remap-path-prefix=${HOME}/.cargo=/usr/local/cargo"
+            --remap-path-prefix=${HOME}/.cargo=/usr/local/cargo \
+            --remap-path-prefix=${HOME}/.rustup=/usr/local/rustup"
           SOURCE_DATE_EPOCH=0 cargo build \
             --release \
             --target wasm32v1-none \
