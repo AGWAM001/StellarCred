@@ -52,6 +52,49 @@ deployable contracts are the workspace's `default-members` and a bare
 `cargo build --release --target wasm32v1-none` never compiles it. It is still
 covered by `cargo test` and by `cargo clippy --workspace`.
 
+## Setting up your environment
+
+Full install instructions — including exact commands, PATH configuration, and
+a troubleshooting table — are in **[SETUP.md](SETUP.md)**.
+
+After following SETUP.md, run:
+
+```bash
+make doctor
+```
+
+`make doctor` checks every pinned toolchain version and tells you exactly what
+is wrong before you hit a confusing CI failure. A passing run looks like:
+
+```
+[ok]   rustc                  1.93.1
+[ok]   wasm32v1-none          installed
+[ok]   nargo                  1.0.0-beta.9
+[ok]   bb                     0.87.0
+[ok]   node                   v20.x.x  (need 20.x)
+[ok]   pnpm                   9.x.x    (need 9.x)
+[ok]   npm                    10.x.x
+All checks passed — environment is ready.
+```
+
+Fix any `[FAIL]` lines before running `make build` or `make test`.
+
+### Pinned versions at a glance
+
+| Tool | Pinned version | Why pinned |
+|------|---------------|------------|
+| Rust | **1.93.1** | Byte-identical WASM artifacts (`rust-toolchain.toml`) |
+| wasm32v1-none | — | Required compile target for Soroban contracts |
+| nargo | **1.0.0-beta.9** | VK determinism — must match `bb` exactly |
+| bb | **0.87.0** | VK determinism — must match `nargo` exactly |
+| Node | **20** | Frontend and indexer |
+| pnpm | **9** | Frontend workspace manager |
+
+> **Circuit toolchain warning:** the `nargo` and `bb` versions are load-bearing.
+> A mismatch produces a VK that differs from the committed fixture, and CI fails
+> with `VK mismatch for <circuit>` — which looks like your change broke
+> something but is actually a version problem. Run `make doctor` first.
+
 ## Docker quickstart
 
 Skip local toolchain installs — use the pinned dev image:
@@ -70,21 +113,8 @@ docker compose run --rm contracts cargo test
 docker compose run --rm circuits nargo compile --workspace
 ```
 
-The image pins Rust stable, Stellar CLI v27, nargo 1.0.0-beta.9, bb 0.87.0, Node 20, and pnpm 9 — matching the versions in the table below.
-
-## Prerequisites
-
-| Tool | Version | Install |
-|------|---------|---------|
-| Rust | stable | `rustup` |
-| wasm32v1-none target | — | `rustup target add wasm32v1-none` |
-| Stellar CLI | v27 | `brew install stellar-cli` |
-| nargo | 1.0.0-beta.9 | `noirup -v 1.0.0-beta.9` |
-| bb | 0.87.0 | `bbup -v 0.87.0` |
-| Node | 20 | `nvm` / `volta` |
-| pnpm | 9 | `corepack enable && corepack prepare pnpm@9 --activate` |
-
-> The nargo and bb versions must match exactly — the verification key is deterministic from the circuit compiler version, and a mismatch will cause proof verification to fail on-chain.
+The image pins Rust 1.93.1, nargo 1.0.0-beta.9, bb 0.87.0, Node 20, and pnpm 9,
+so version mismatches are not possible inside the container.
 
 ## Getting started
 

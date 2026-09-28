@@ -8,7 +8,16 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help all build test lint fmt clean check-api-reference \
+# ------------------------------------------------------------------------------
+# Pinned toolchain versions (single source of truth — mirrors .github/workflows/ci.yml)
+# ------------------------------------------------------------------------------
+RUST_VERSION    := 1.93.1
+NOIR_VERSION    := 1.0.0-beta.9
+BB_VERSION      := 0.87.0
+NODE_MAJOR      := 20
+PNPM_MAJOR      := 9
+
+.PHONY: help all build test lint fmt clean check-api-reference doctor \
         build-contracts test-contracts lint-contracts \
         compile-circuits check-circuits \
         build-frontend test-frontend lint-frontend test-sdk test-example test-a11y \
@@ -25,6 +34,7 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Top-Level Targets:"
+	@echo "  make doctor          - Check that every pinned toolchain version is installed correctly"
 	@echo "  make all             - Run build, test, and lint across all workspaces"
 	@echo "  make build           - Build contracts, circuits, frontend, and indexer"
 	@echo "  make test            - Run all unit, integration, and contract test suites"
@@ -72,6 +82,118 @@ check-api-reference:
 clean:
 	cargo clean
 	rm -rf frontend/.next frontend/dist services/indexer/dist circuits/target
+
+# ------------------------------------------------------------------------------
+# Doctor — environment version check
+# ------------------------------------------------------------------------------
+
+# Colour helpers (no-op when stdout is not a terminal)
+_RED    := $(shell tput setaf 1 2>/dev/null || true)
+_GREEN  := $(shell tput setaf 2 2>/dev/null || true)
+_RESET  := $(shell tput sgr0    2>/dev/null || true)
+
+## doctor: Verify every pinned toolchain version is installed and on PATH
+# Exits non-zero if any check fails so `make doctor && make build` short-circuits.
+doctor:
+	@echo ""
+	@echo "StellarCred environment check"
+	@echo "=============================="
+	@PASS=true; \
+	\
+	ok()   { printf "$(_GREEN)[ok]$(_RESET)   %-22s %s\n" "$$1" "$$2"; }; \
+	fail() { printf "$(_RED)[FAIL]$(_RESET) %-22s %s\n" "$$1" "$$2"; PASS=false; }; \
+	\
+	echo ""; \
+	echo "── 1. Rust ──────────────────────────────────────────────────────"; \
+	if command -v rustc >/dev/null 2>&1; then \
+	  GOT=$$(rustc --version 2>/dev/null | awk '{print $$2}'); \
+	  if [ "$$GOT" = "$(RUST_VERSION)" ]; then \
+	    ok "rustc" "$$GOT"; \
+	  else \
+	    fail "rustc" "got $$GOT, need $(RUST_VERSION)  →  rustup install $(RUST_VERSION)"; \
+	  fi; \
+	else \
+	  fail "rustc" "not found  →  curl https://sh.rustup.rs | sh"; \
+	fi; \
+	\
+	if rustup target list --installed 2>/dev/null | grep -q '^wasm32v1-none$$'; then \
+	  ok "wasm32v1-none" "installed"; \
+	else \
+	  fail "wasm32v1-none" "not installed  →  rustup target add wasm32v1-none"; \
+	fi; \
+	\
+	echo ""; \
+	echo "── 2. Noir circuits ─────────────────────────────────────────────"; \
+	echo "   (nargo and bb MUST match exactly — a mismatch silently"; \
+	echo "    produces wrong VKs and the artifact-freshness check fails)"; \
+	if command -v nargo >/dev/null 2>&1; then \
+	  GOT=$$(nargo --version 2>/dev/null | grep -oP 'nargo version = \K[^\s]+' || nargo --version 2>/dev/null | awk 'NR==1{print $$NF}'); \
+	  if [ "$$GOT" = "$(NOIR_VERSION)" ]; then \
+	    ok "nargo" "$$GOT"; \
+	  else \
+	    fail "nargo" "got $$GOT, need $(NOIR_VERSION)  →  noirup -v $(NOIR_VERSION)"; \
+	  fi; \
+	else \
+	  fail "nargo" "not found  →  curl -sSfL https://raw.githubusercontent.com/noir-lang/noirup/main/install | bash && noirup -v $(NOIR_VERSION)"; \
+	fi; \
+	\
+	if command -v bb >/dev/null 2>&1; then \
+	  GOT=$$(bb --version 2>/dev/null | tr -d '[:space:]'); \
+	  if [ "$$GOT" = "$(BB_VERSION)" ]; then \
+	    ok "bb" "$$GOT"; \
+	  else \
+	    fail "bb" "got $$GOT, need $(BB_VERSION)  →  bbup -v $(BB_VERSION)"; \
+	  fi; \
+	else \
+	  fail "bb" "not found  →  curl -sSfL https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash && bbup -v $(BB_VERSION)"; \
+	fi; \
+	\
+	echo ""; \
+	echo "── 3. Node.js + pnpm (frontend / SDK) ───────────────────────────"; \
+	if command -v node >/dev/null 2>&1; then \
+	  GOT=$$(node --version 2>/dev/null); \
+	  MAJOR=$$(echo "$$GOT" | sed 's/v//' | cut -d. -f1); \
+	  if [ "$$MAJOR" = "$(NODE_MAJOR)" ]; then \
+	    ok "node" "$$GOT  (need $(NODE_MAJOR).x)"; \
+	  else \
+	    fail "node" "got $$GOT, need $(NODE_MAJOR).x  →  nvm install $(NODE_MAJOR) && nvm use $(NODE_MAJOR)"; \
+	  fi; \
+	else \
+	  fail "node" "not found  →  https://nodejs.org or nvm install $(NODE_MAJOR)"; \
+	fi; \
+	\
+	if command -v pnpm >/dev/null 2>&1; then \
+	  GOT=$$(pnpm --version 2>/dev/null); \
+	  MAJOR=$$(echo "$$GOT" | cut -d. -f1); \
+	  if [ "$$MAJOR" = "$(PNPM_MAJOR)" ]; then \
+	    ok "pnpm" "$$GOT  (need $(PNPM_MAJOR).x)"; \
+	  else \
+	    fail "pnpm" "got $$GOT, need $(PNPM_MAJOR).x  →  corepack prepare pnpm@9 --activate"; \
+	  fi; \
+	else \
+	  fail "pnpm" "not found  →  corepack enable && corepack prepare pnpm@9 --activate"; \
+	fi; \
+	\
+	echo ""; \
+	echo "── 4. Indexer (npm, bundled with Node) ──────────────────────────"; \
+	if command -v npm >/dev/null 2>&1; then \
+	  GOT=$$(npm --version 2>/dev/null); \
+	  ok "npm" "$$GOT"; \
+	else \
+	  fail "npm" "not found — npm ships with Node; reinstall Node $(NODE_MAJOR)"; \
+	fi; \
+	\
+	echo ""; \
+	if [ "$$PASS" = "true" ]; then \
+	  echo "$(_GREEN)All checks passed — environment is ready.$(_RESET)"; \
+	  echo ""; \
+	else \
+	  echo "$(_RED)One or more checks failed. Fix the items marked [FAIL] above,$(_RESET)"; \
+	  echo "$(_RED)then re-run: make doctor$(_RESET)"; \
+	  echo "$(_RED)See SETUP.md for full install instructions.$(_RESET)"; \
+	  echo ""; \
+	  exit 1; \
+	fi
 
 # ------------------------------------------------------------------------------
 # Contracts (Soroban / Rust)
