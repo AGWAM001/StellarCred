@@ -147,17 +147,23 @@ jobs:
       # ── Host build ────────────────────────────────────────────────────────
       # SOURCE_DATE_EPOCH and RUSTFLAGS are set via GITHUB_ENV above and
       # validated by the preceding step.
+      # CARGO_TARGET_DIR is set to a path outside the workspace so the host's
+      # incremental cache is never visible inside the bind-mounted /workspace
+      # when the container runs. Without this, the container would find and
+      # reuse the host's compiled artifacts, silently producing host-built
+      # WASM rather than an independent container build.
       - name: Build WASM on host
         run: |
           mkdir -p build-host
+          CARGO_TARGET_DIR="${{ github.workspace }}/target-host" \
           cargo build \
             --release \
             --target wasm32v1-none \
             --locked
-          cp target/wasm32v1-none/release/credential_verifier.wasm \
-             target/wasm32v1-none/release/issuer_registry.wasm \
-             target/wasm32v1-none/release/proof_registry.wasm \
-             target/wasm32v1-none/release/gated_pool.wasm \
+          cp "${{ github.workspace }}/target-host/wasm32v1-none/release/credential_verifier.wasm" \
+             "${{ github.workspace }}/target-host/wasm32v1-none/release/issuer_registry.wasm" \
+             "${{ github.workspace }}/target-host/wasm32v1-none/release/proof_registry.wasm" \
+             "${{ github.workspace }}/target-host/wasm32v1-none/release/gated_pool.wasm" \
              build-host/
 
       - name: Hash host artifacts
@@ -168,16 +174,21 @@ jobs:
       # ── Container build 1 ─────────────────────────────────────────────────
       # Mount the live workspace as /workspace (overrides the baked-in source)
       # so container and host compile the identical current checkout.
+      # The container gets a fresh CARGO_TARGET_DIR (/tmp/target inside the
+      # container) so it never touches or reuses any host-built artifacts that
+      # may exist in the workspace mount.
       - name: Build WASM (container run 1)
         run: |
           mkdir -p build-1
           cat > /tmp/container-build.sh << 'SCRIPT'
           set -e
+          export CARGO_TARGET_DIR=/tmp/target
+          rm -rf "$CARGO_TARGET_DIR"
           cargo build --release --target wasm32v1-none --locked --offline
-          cp target/wasm32v1-none/release/credential_verifier.wasm \
-             target/wasm32v1-none/release/issuer_registry.wasm \
-             target/wasm32v1-none/release/proof_registry.wasm \
-             target/wasm32v1-none/release/gated_pool.wasm \
+          cp "$CARGO_TARGET_DIR/wasm32v1-none/release/credential_verifier.wasm" \
+             "$CARGO_TARGET_DIR/wasm32v1-none/release/issuer_registry.wasm" \
+             "$CARGO_TARGET_DIR/wasm32v1-none/release/proof_registry.wasm" \
+             "$CARGO_TARGET_DIR/wasm32v1-none/release/gated_pool.wasm" \
              /out/
           SCRIPT
           chmod +x /tmp/container-build.sh
@@ -196,7 +207,9 @@ jobs:
           sha256sum build-1/*.wasm | tee build-1/sha256sums.txt
 
       # ── Container build 2 ─────────────────────────────────────────────────
-      # Reuses the same bind-mounted script and live workspace mount.
+      # Reuses the same bind-mounted script. Each run gets a fresh
+      # CARGO_TARGET_DIR (/tmp/target) inside the container so the two runs
+      # are fully independent of each other and of the host build.
       - name: Build WASM (container run 2)
         run: |
           mkdir -p build-2
