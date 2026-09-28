@@ -35,7 +35,7 @@ function ProtocolDetailBody({
   isPreview: boolean;
   scVerified: boolean;
 }) {
-  const { state, statuses, retry, eligible, checking } = useProtocolAccessCheck(
+  const { state, statuses, retry, eligible, checking, unresolved, issue } = useProtocolAccessCheck(
     protocol.requirements,
     activeWallet,
     // Preview mode is "!address"; don't auto-grant when disconnected — match /apps list cards.
@@ -135,8 +135,8 @@ function ProtocolDetailBody({
                 <span className="row" style={{ gap: "0.6rem" }}>
                   {checking ? (
                     <IconLoader2 size={15} color="var(--faint)" className="spin" />
-                  ) : state === "error" ? (
-                    <IconAlertCircle size={15} color="var(--danger)" />
+                  ) : unresolved ? (
+                    <IconAlertCircle size={15} color="var(--warn)" />
                   ) : statuses[i] ? (
                     <IconCheck size={15} color="var(--accent)" stroke={2.5} />
                   ) : (
@@ -146,7 +146,7 @@ function ProtocolDetailBody({
                     style={{
                       fontSize: "0.875rem",
                       color:
-                        !checking && state !== "error" && statuses[i]
+                        !checking && !unresolved && statuses[i]
                           ? "var(--text)"
                           : "var(--muted)",
                     }}
@@ -156,8 +156,8 @@ function ProtocolDetailBody({
                 </span>
                 {checking ? (
                   <Badge variant="pending">Checking</Badge>
-                ) : state === "error" ? (
-                  <Badge variant="denied">Unavailable</Badge>
+                ) : unresolved ? (
+                  <Badge variant="pending">Unknown</Badge>
                 ) : statuses[i] ? (
                   <Badge variant="verified">Proved</Badge>
                 ) : (
@@ -167,7 +167,7 @@ function ProtocolDetailBody({
             ))}
           </div>
 
-          {state === "error" && (
+          {unresolved && (
             <button
               type="button"
               className="btn btn-secondary"
@@ -177,6 +177,13 @@ function ProtocolDetailBody({
               <IconRefresh size={14} />
               Retry access check
             </button>
+          )}
+
+          {issue && (
+            <p className="faint" style={{ fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+              Access could not be determined: {issue.message} This is a network
+              problem, not a failed check.
+            </p>
           )}
 
           {state === "denied" && !isPreview && (
@@ -238,7 +245,7 @@ function ProtocolDetailBody({
             )}
             {state === "granted" && <Badge variant="verified">Access granted</Badge>}
             {state === "denied" && <Badge variant="denied">Access denied</Badge>}
-            {state === "error" && <Badge variant="denied">Check failed</Badge>}
+            {unresolved && <Badge variant="pending">Cannot verify</Badge>}
           </div>
 
           <label className="field-label" htmlFor="protocol-input">

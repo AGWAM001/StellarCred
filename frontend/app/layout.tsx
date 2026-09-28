@@ -6,6 +6,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { SiteNav } from "@/components/SiteNav";
 import { NetworkBanner } from "@/components/NetworkBanner";
+import { RpcStatusBanner } from "@/components/RpcStatusBanner";
 import { Footer } from "@/components/Footer";
 import { LocaleMetaTags } from "@/components/LocaleMetaTags";
 import { WalletProvider } from "@/lib/wallet-context";
@@ -82,6 +83,7 @@ export default async function RootLayout({
               <OnboardingTour />
               <SiteNav />
               <NetworkBanner />
+              <RpcStatusBanner />
               <OnboardingWizard />
               <main id="main-content" tabIndex={-1} className="container">
                 {children}
