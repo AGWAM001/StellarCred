@@ -119,10 +119,15 @@ npm run dev
 
 ## Branch Cleanup
 
-- **After merging:** Delete your feature branch once its pull request has been merged, unless it is still needed for ongoing work.
-- **Automatic deletion:** Repository maintainers should enable GitHub's automatic deletion of head branches after pull requests are merged.
-- **Stale branches:** Periodically review remote branches and remove those confirmed to be merged, reverted, or abandoned. Check for open pull requests or ongoing work before deleting any branch.
-- **Branch naming:** Use descriptive names for feature, fix, and documentation branches so their purpose is clear.
+- **After merging:** Head branches are deleted automatically when a pull request
+  is merged, so you don't need to delete yours. If you need to keep working,
+  create a new branch from the latest `main`.
+- **Stale branches:** Maintainers periodically prune branches that are merged,
+  reverted, or abandoned (including superseded Dependabot branches). To keep a
+  branch, keep its PR open or ask a maintainer.
+- **Local cleanup:** Run `git fetch --prune` to drop references to deleted
+  remote branches.
+- **Branch naming:** Use descriptive names so a branch's purpose is clear.
 
 ## Preview Deployments
 
