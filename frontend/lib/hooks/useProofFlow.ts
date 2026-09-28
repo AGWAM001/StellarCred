@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Credential } from "../credential";
 
-import { proveOffMainThread } from "../proof-client";
+import { proveOffMainThread, type ProofStageProgress } from "../proof-client";
 import { withTimeout, ProofTimeoutError, DEFAULT_PROOF_TIMEOUT_MS } from "../proof-timeout";
 import {
   submitProof as defaultSubmitProof,
@@ -49,6 +49,8 @@ export type Stage =
 
 export type ErrorPhase = "proving" | "preflight" | "submitting" | "timeout" | "network" | null;
 
+export { type ProofStageProgress };
+
 /** Custom submission function signature — injected by the page for sponsored mode. */
 export type SubmitFn = (params: {
   holder: string;
@@ -77,6 +79,8 @@ export function useProofFlow(
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** The in-flight job's controller — aborting it cancels the work in the worker. */
   const abortRef = useRef<AbortController | null>(null);
+  /** Current stage progress with detailed timing information. */
+  const [stageProgress, setStageProgress] = useState<ProofStageProgress | null>(null);
   const toast = useToast();
   const { addEvent } = useProofTimeline(cred);
 
@@ -158,6 +162,10 @@ export function useProofFlow(
                     }
                     setStage(workerStage);
                   },
+                  onStageProgress: (progress) => {
+                    if (sig.aborted) return;
+                    setStageProgress(progress);
+                  },
                 },
               ),
             { signal, timeoutMs: DEFAULT_PROOF_TIMEOUT_MS },
@@ -166,6 +174,7 @@ export function useProofFlow(
 
           setProof(result);
           setStage("generated");
+          setStageProgress(null);
           addEvent("generated");
           toast.success(`Proof generated for ${cred.title}`);
         } catch (e) {
@@ -181,6 +190,7 @@ export function useProofFlow(
             });
             setErrorPhase("timeout");
             setStage("error");
+            setStageProgress(null);
             toast.error("Proof timed out — please try again.");
             return;
           }
@@ -188,6 +198,7 @@ export function useProofFlow(
           setError(parsed);
           setErrorPhase("proving");
           setStage("error");
+          setStageProgress(null);
           toast.error(`Proof generation failed: ${parsed.friendly}`);
         } finally {
           // Always clean up: the timer. The abort controller stays referenced by
@@ -214,6 +225,7 @@ export function useProofFlow(
     setErrorPhase(null);
     setFee(null);
     setRpcIssue(null);
+    setStageProgress(null);
 
     void (async () => {
       const issue = await probeRpcHealth();
@@ -238,6 +250,7 @@ export function useProofFlow(
       controller.abort();
       abortRef.current = null;
       stopElapsedTimer();
+      setStageProgress(null);
     };
   }, [cred, runProving, stopElapsedTimer]);
 
@@ -379,6 +392,7 @@ export function useProofFlow(
     errorPhase,
     fee,
     elapsed,
+    stageProgress,
     /** Set while the network is unreachable and proving is deferred. */
     rpcIssue,
     /** True while the pre-proving reachability check is in flight. */

@@ -5,6 +5,7 @@ if (typeof window !== "undefined") {
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Credential, CredentialType, ClaimParams } from "@stellarcred/issuer";
+import { stripPiiKeys } from "./pii";
 
 // ---------------------------------------------------------------------------
 // Security & PII Protection
@@ -79,6 +80,8 @@ export function alpha2ToNumeric(code: string): string {
 // In-memory caches with short TTL
 const pendingInquiries = new Map<string, PendingInquiry>();
 const inquiryResults = new Map<string, InquiryResult>();
+const processingInquiries = new Set<string>();
+const processedEventIds = new Set<string>();
 
 function evictExpired(): void {
   const now = Date.now();
@@ -99,8 +102,17 @@ export function registerPendingInquiry(
   data: Omit<PendingInquiry, "inquiryId" | "createdAt">,
 ): void {
   evictExpired();
+  // This record survives (for the cache TTL) after the request that created it,
+  // and `claimParams` arrives straight from the client — so it is the one
+  // caller-supplied field here that can carry identity attributes. Strip it
+  // with the same denylist the browser-side resume blob uses, at every depth.
+  // Without this, POST /api/issue persists whatever the client sent in
+  // claimParams for 15 minutes (issue #627).
   pendingInquiries.set(inquiryId, {
     ...data,
+    ...(data.claimParams
+      ? { claimParams: stripPiiKeys(data.claimParams) }
+      : {}),
     inquiryId,
     createdAt: Date.now(),
   });
@@ -139,6 +151,20 @@ export function deleteInquiryResult(inquiryId: string): void {
 export function clearPersonaCaches(): void {
   pendingInquiries.clear();
   inquiryResults.clear();
+  processingInquiries.clear();
+  processedEventIds.clear();
+}
+
+export function beginInquiryProcessing(inquiryId: string, eventId?: string): boolean {
+  if (eventId && processedEventIds.has(eventId)) return false;
+  if (processingInquiries.has(inquiryId)) return false;
+  processingInquiries.add(inquiryId);
+  if (eventId) processedEventIds.add(eventId);
+  return true;
+}
+
+export function finishInquiryProcessing(inquiryId: string): void {
+  processingInquiries.delete(inquiryId);
 }
 
 /**
