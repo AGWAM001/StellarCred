@@ -227,7 +227,7 @@ export default function IssuerPageClient() {
       )}
 
       {!preview && (
-
+        <>
       <div
         style={{
           marginBottom: "1.75rem",
@@ -490,6 +490,7 @@ export default function IssuerPageClient() {
           )}
         </div>
       </div>
+        </>
       )}
     </>
   );
