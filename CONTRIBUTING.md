@@ -117,6 +117,18 @@ npm run dev
 5. For frontend changes: run `pnpm tsc --noEmit` (zero errors required) and `pnpm build`.
 6. Open a pull request against `main` with a clear description of what changed and why.
 
+## Branch Cleanup
+
+- **After merging:** Head branches are deleted automatically when a pull request
+  is merged, so you don't need to delete yours. If you need to keep working,
+  create a new branch from the latest `main`.
+- **Stale branches:** Maintainers periodically prune branches that are merged,
+  reverted, or abandoned (including superseded Dependabot branches). To keep a
+  branch, keep its PR open or ask a maintainer.
+- **Local cleanup:** Run `git fetch --prune` to drop references to deleted
+  remote branches.
+- **Branch naming:** Use descriptive names so a branch's purpose is clear.
+
 ## Preview Deployments
 
 Every Pull Request automatically triggers a live preview deployment via GitHub Actions.
