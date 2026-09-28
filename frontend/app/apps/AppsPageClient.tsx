@@ -12,6 +12,7 @@ import {
   IconAlertCircle,
   IconRefresh,
   IconPlus,
+  IconFlask,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
 import { useWallet, usePreviewMode } from "@/lib/wallet-context";
@@ -74,6 +75,29 @@ function ProtocolCard({
         >
           {protocol.icon}
           {protocol.name}
+          {protocol.isDemo && (
+            <span
+              title="This is an illustrative demo — not a live integration"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.25rem",
+                padding: "0.1rem 0.45rem",
+                borderRadius: "999px",
+                fontSize: "0.6rem",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                background: "rgba(250,180,50,0.12)",
+                color: "#f5b942",
+                border: "1px solid rgba(250,180,50,0.3)",
+                lineHeight: 1.4,
+              }}
+            >
+              <IconFlask size={9} stroke={2.2} />
+              Demo
+            </span>
+          )}
         </span>
         <div className="row" style={{ gap: "0.3rem" }}>
           {protocol.requirements.map((r, i) => {
