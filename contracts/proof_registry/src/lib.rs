@@ -50,7 +50,7 @@ use soroban_sdk::{
 // Increment MAJOR on breaking changes (new entry points, changed ABI)
 // Increment MINOR on additive changes (new events, new query endpoints)
 // Increment PATCH on bug fixes with no ABI changes
-const CONTRACT_VERSION: u32 = 1_000_000; // 1.0.0 encoded as (major * 1000000) + (minor * 1000) + patch
+const CONTRACT_VERSION: u32 = 1_001_000; // 1.1.0 encoded as (major * 1000000) + (minor * 1000) + patch
 
 // ── Data schema versioning ──────────────────────────────────────────────────────
 // ProofRecord schema versions: used for forward-compatible migrations.
@@ -85,6 +85,14 @@ pub struct EventProofSubmitted {
 pub struct EventProofRevoked {
     pub holder: Address,
     pub issuer: Address,
+    pub revoked_at: u64,
+}
+
+/// Payload emitted when a holder revokes their own cached proof.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventHolderRevoked {
+    pub holder: Address,
     pub revoked_at: u64,
 }
 
@@ -924,13 +932,27 @@ impl ProofRegistry {
     }
 
     /// Revoke a cached proof. The holder authorizes their own revocation.
+    #[allow(deprecated)]
     pub fn revoke_proof(env: Env, holder: Address, credential_type: Symbol) {
         holder.require_auth();
-        env.storage()
-            .persistent()
-            .remove(&DataKey::Proof(holder, credential_type));
+        let key = DataKey::Proof(holder.clone(), credential_type.clone());
+        if env.storage().persistent().has(&key) {
+            env.storage().persistent().remove(&key);
+            env.events().publish(
+                (
+                    symbol_short!("proof_reg"),
+                    symbol_short!("self_rev"),
+                    credential_type,
+                ),
+                EventHolderRevoked {
+                    holder,
+                    revoked_at: env.ledger().timestamp(),
+                },
+            );
+        }
     }
 
+    #[allow(deprecated)]
     pub fn revoke_all(env: Env, holder: Address) {
         holder.require_auth();
         let types = [
@@ -942,10 +964,22 @@ impl ProofRegistry {
             Symbol::new(&env, "accreditation"),
             Symbol::new(&env, "employment"),
         ];
-        for t in types {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::Proof(holder.clone(), t));
+        for credential_type in types {
+            let key = DataKey::Proof(holder.clone(), credential_type.clone());
+            if env.storage().persistent().has(&key) {
+                env.storage().persistent().remove(&key);
+                env.events().publish(
+                    (
+                        symbol_short!("proof_reg"),
+                        symbol_short!("self_rev"),
+                        credential_type,
+                    ),
+                    EventHolderRevoked {
+                        holder: holder.clone(),
+                        revoked_at: env.ledger().timestamp(),
+                    },
+                );
+            }
         }
     }
 
