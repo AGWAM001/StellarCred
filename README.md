@@ -125,6 +125,8 @@ npm install @stellarcred/sdk
 ```
 
 > Full SDK docs: [`frontend/packages/sdk/README.md`](frontend/packages/sdk/README.md) · [npm](https://www.npmjs.com/package/@stellarcred/sdk)
+>
+> **Canonical Integration Example**: Looking for a complete, runnable end-to-end integration with wallet control challenge proof and server-side route gating? See [`examples/canonical-integration`](examples/canonical-integration).
 
 Protocols never handle credential data - they ask the on-chain registry one
 question: _has this wallet proven the claim I require?_
@@ -200,6 +202,11 @@ across every linked Plaid item:
   balance is attested at all, because a partial sum is not the sum the
   issuer would be attesting to.
 
+**Issuing credentials?** The issuer is the trust anchor of the system and has
+the most responsibility of the three roles — registration, key custody, what a
+signature actually attests to, rotation and revocation. Start here:
+**[Issuer onboarding guide](docs/ISSUER_ONBOARDING.md)**.
+
 ---
 
 ## Security model
@@ -225,6 +232,10 @@ across every linked Plaid item:
 4. **Proof expiry.** `ProofRegistry` uses persistent storage with an explicit
    `expiry` (checked against ledger time) plus TTL extension.
 5. **Contract governance is role-based.** Privileged actions on `CredentialVerifier`, `IssuerRegistry`, and `ProofRegistry` are gated by a role map (`Map<Symbol, Address>`) rather than a single admin key. The deployer is seeded the `admin` role (plus `upgrader` and `pauser` on `ProofRegistry`) at construction, and the root admin can delegate or rotate holders with `grant_role` / `revoke_role` (`has_role` is a public view). Each privileged function is guarded by its specific role: `set_vk` / `deprecate_version` / `refresh_latest_version_ttl` → `admin`, issuer registration / revocation / metadata → `admin`, `ProofRegistry.upgrade` → `upgrader`, `pause` / `unpause` → `pauser`, `migrate_record` → `admin`. Upgrade and pause power can therefore live on separate keys (multisig, release engineer, security/ops key, DAO) from day-to-day administration, and each key can be rotated independently. `set_admin` transfers the root key together with every role the old root held, so the existing deploy/upgrade flow is unchanged.
+
+Points 1–3 are **obligations on every issuer**, not background reading. The
+[issuer onboarding guide](docs/ISSUER_ONBOARDING.md) states each of them as a
+requirement, with the custody, rotation and revocation duties that go with them.
 
 ---
 
@@ -369,6 +380,7 @@ StellarCred spans four toolchains (Rust contracts, Noir zk-circuits, Next.js fro
 | `make compile-circuits`| Circuits | Compiles Noir circuits and verifies verification keys (`bb`). |
 | `make test-frontend` | Frontend | Runs frontend SDK tests, theme tests, and issuer package tests. |
 | `make test-sdk` | SDK | Runs standalone `@stellarcred/sdk` integration tests. |
+| `make test-example` | Examples | Runs typecheck and test suite for `examples/canonical-integration`. |
 | `make test-a11y` | Frontend | Runs axe-core accessibility checks via Playwright. |
 | `make test-indexer` | Indexer | Runs Jest test suite for the indexer service. |
 | `make run-indexer` | Indexer | Starts the local indexer service. |

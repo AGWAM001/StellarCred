@@ -1,5 +1,5 @@
 import { Buffer } from "buffer";
-import { RPC_URL, NETWORK_PASSPHRASE, CONTRACTS } from "./stellar";
+import { RPC_URL, NETWORK_PASSPHRASE, CONTRACTS, CREDENTIAL_TYPES } from "./stellar";
 import type { CredentialType } from "./stellar";
 import { truncateAddress } from "./format";
 
@@ -125,7 +125,7 @@ export async function fetchRegisteredIssuers(
       name: meta?.name ?? names[address] ?? truncateAddress(address),
       pubkeyHex: bytesToHex(record.pubkey),
       credentialTypes: record.credential_types.filter((t): t is CredentialType =>
-        ["kyc", "age", "jurisdiction", "income", "funds"].includes(t),
+        (CREDENTIAL_TYPES as readonly string[]).includes(t),
       ),
       revoked: record.revoked,
       metadata: meta,
