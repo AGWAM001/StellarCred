@@ -1279,9 +1279,6 @@ fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
     // Drain the rotation event.
     let _ = env.events().all();
     client.revoke_issuer_key(&issuer, &k0);
-    // Captured before the read-only checks below: a subsequent query starts a
-    // fresh invocation and discards the recorded events.
-    let events = env.events().all().filter_by_contract(&client.address);
 
     assert!(!client.is_valid_issuer_key(&issuer, &k0));
     // The replacement key and the issuer's trust are untouched.
@@ -1289,10 +1286,11 @@ fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
     assert!(client.is_valid_issuer(&issuer, &symbol_short!("kyc")));
 }
 
-/// Emergency revocation of a retired key is immediate: the difference from
-/// rotation is that the window is ignored.
+/// Emergency revocation of the CURRENT key is immediate too: the issuer's
+/// trust dies until a rotation to a fresh key restores it, and the revocation
+/// emits `key_revk` with `was_current: true`.
 #[test]
-fn revoke_issuer_key_kills_a_retired_key_inside_its_window() {
+fn revoke_issuer_key_kills_current_key_and_emits_event() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(T0);
