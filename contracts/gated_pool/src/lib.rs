@@ -1,4 +1,4 @@
-#![no_std]
+﻿#![no_std]
 //! GatedPool
 //!
 //! A DeFi pool that gates **deposits** behind a valid KYC proof in the
@@ -23,7 +23,7 @@ use soroban_sdk::{
     symbol_short, token, Address, Env, Symbol, Vec,
 };
 
-// ── Event payload structs ───────────────────────────────────────────────────
+// â”€â”€ Event payload structs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Payload emitted when a caller successfully deposits into the gated pool.
 /// Topics: (symbol_short!("gate_pool"), symbol_short!("deposit"))
@@ -50,7 +50,7 @@ const DAY_IN_LEDGERS: u32 = 17280;
 const BALANCE_BUMP_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
 const BALANCE_TTL: u32 = 120 * DAY_IN_LEDGERS;
 
-// ── Contract versioning ──────────────────────────────────────────────────────
+// â”€â”€ Contract versioning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Semantic version: MAJOR.MINOR.PATCH
 // Increment MAJOR on breaking changes (new entry points, changed ABI)
 // Increment MINOR on additive changes (new events, new query endpoints)
@@ -150,7 +150,7 @@ impl GatedPool {
         // preventing the internal ledger balance from diverging.
         if let Some(token_addr) = env.storage().instance().get::<_, Address>(&DataKey::Token) {
             let token_client = token::Client::new(&env, &token_addr);
-            token_client.transfer(&caller, &env.current_contract_address(), &amount);
+            token_client.transfer(&caller, env.current_contract_address(), &amount);
         }
 
         let balance = Self::balance_of(&env, &caller) + amount;
@@ -191,7 +191,7 @@ impl GatedPool {
         // Transfer failure will panic and revert the transaction, leaving caller balance intact.
         if let Some(token_addr) = env.storage().instance().get::<_, Address>(&DataKey::Token) {
             let token_client = token::Client::new(&env, &token_addr);
-            token_client.transfer(&env.current_contract_address(), &caller, &amount);
+            token_client.transfer(env.current_contract_address(), &caller, &amount);
         }
 
         Self::set_balance(&env, &caller, remaining);
