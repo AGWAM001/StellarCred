@@ -213,9 +213,10 @@ The indexer queues notifications for one exact `(wallet, claimType)` pair.
 Issuer revocations are detected from indexed ProofRegistry events; expiry is
 detected by the regular indexer poll once `expiry <= now`. Delivery is
 asynchronous and eventual, with a delay bounded by the configured polling
-interval, finality lag, and delivery retries. The indexer does not observe
-holder self-revocation because the contract does not emit an event for it; the
-normal request-time on-chain check remains necessary.
+interval, finality lag, and delivery retries. The upgraded ProofRegistry also
+emits an event for holder self-revocation; deployments on older contract
+versions must upgrade before those revocations can generate notifications.
+The normal request-time on-chain check remains necessary.
 
 Set both `API_KEY` and a random `WEBHOOK_SIGNING_SECRET` of at least 32
 characters before registering subscriptions. The API key protects subscription

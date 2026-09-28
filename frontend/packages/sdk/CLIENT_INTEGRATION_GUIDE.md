@@ -219,9 +219,10 @@ can miss requests during delivery delays or outages.
 
 See the indexer's [protocol lifecycle webhook guide](../../../services/indexer/README.md#protocol-claim-lifecycle-webhooks)
 for authenticated subscription management, payloads, signature verification,
-expiry semantics, retry behavior, and limitations. In particular, holder
-self-revocation currently emits no contract event, so request-time checks are
-still required.
+expiry semantics, retry behavior, and limitations. Holder self-revocation
+notifications require a ProofRegistry deployment with the new lifecycle event;
+request-time checks are still required to cover notification delays and older
+deployments.
 
 ---
 
