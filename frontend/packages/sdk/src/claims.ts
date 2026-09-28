@@ -415,6 +415,30 @@ export interface PresetVerificationResult {
   allValid: boolean;
 }
 
+export type CredentialFailureReason =
+  | "not_verified"
+  | "expired"
+  | "revoked"
+  | "wrong_issuer"
+  | "unmet_threshold";
+
+export interface ProofRecordDetails {
+  verifiedAt: number;
+  expiry: number;
+  revoked: boolean;
+  issuer?: string;
+  threshold?: number;
+  vkVersion: number;
+}
+
+export interface CredentialStatusResult {
+  valid: boolean;
+  status: "verified" | CredentialFailureReason;
+  record?: ProofRecordDetails | null;
+  error?: string;
+}
+
+
 // ---------------------------------------------------------------------------
 // Low-level read: ProofRegistry.is_verified via simulation
 // ---------------------------------------------------------------------------
@@ -658,6 +682,53 @@ async function readCheckClaim(
   }
 }
 
+async function readRecord(
+  wallet: string,
+  claimType: string,
+  throwOnError = false,
+  requestTimeoutMs = _config.requestTimeoutMs,
+  retryOptions?: RetryOptions,
+): Promise<ProofRecordDetails | null> {
+  const client = await getClient(throwOnError);
+  if (!client) return null;
+
+  try {
+    const { result } = await withRequestTimeout(
+      () =>
+        withRetry(
+          () =>
+            client.get_record({
+              holder: wallet,
+              credential_type: claimType,
+            }),
+          retryOptions,
+        ),
+      requestTimeoutMs,
+    );
+    if (!result) return null;
+    return {
+      verifiedAt: Number(result.verified_at),
+      expiry: Number(result.expiry),
+      revoked: Boolean(result.revoked),
+      issuer: result.issuer ? String(result.issuer) : undefined,
+      threshold:
+        result.threshold !== undefined && result.threshold !== null
+          ? Number(result.threshold)
+          : undefined,
+      vkVersion: Number(result.vk_version),
+    };
+  } catch (err) {
+    if (throwOnError) {
+      if (err instanceof ConfigError) throw err;
+      throw new RpcError(`get_record RPC failed for claim "${claimType}"`, {
+        cause: err,
+      });
+    }
+    return null;
+  }
+}
+
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -741,6 +812,142 @@ export async function getClaim(
   );
   return r && r.valid ? r : null;
 }
+
+/**
+ * Returns the raw stored ProofRecord details (verifiedAt, expiry, revoked, issuer,
+ * threshold, vkVersion) from ProofRegistry, or null if no record exists.
+ */
+export async function getClaimRecord(
+  wallet: string,
+  claimType: string,
+  opts?: Pick<ClaimOptions, "requestTimeoutMs" | "throwOnError" | "retryOptions">,
+): Promise<ProofRecordDetails | null> {
+  warnIfMissingRegistryIdOnce();
+
+  let normalizedWallet: string;
+  try {
+    normalizedWallet = await normalizeAndValidateWallet(wallet);
+  } catch (err) {
+    if (opts?.throwOnError && err instanceof InvalidAddressError) throw err;
+    return null;
+  }
+
+  return readRecord(
+    normalizedWallet,
+    claimType,
+    opts?.throwOnError === true,
+    opts?.requestTimeoutMs,
+    opts?.retryOptions,
+  );
+}
+
+/**
+ * Inspects a wallet's credential claim on-chain and returns a detailed status result,
+ * evaluating failure states: "not_verified", "expired", "revoked", "wrong_issuer",
+ * "unmet_threshold", or "verified".
+ */
+export async function checkClaimStatus(
+  wallet: string,
+  claimType: string,
+  opts?: ClaimOptions,
+): Promise<CredentialStatusResult> {
+  warnIfMissingRegistryIdOnce();
+  const throwOnError = opts?.throwOnError === true;
+
+  let normalizedWallet: string;
+  try {
+    normalizedWallet = await normalizeAndValidateWallet(wallet);
+  } catch (err) {
+    if (err instanceof InvalidAddressError) {
+      if (throwOnError) throw err;
+      return {
+        valid: false,
+        status: "not_verified",
+        record: null,
+        error: "Invalid Stellar address",
+      };
+    }
+    if (throwOnError) {
+      throw new RpcError("Failed to validate Stellar address", { cause: err });
+    }
+    return {
+      valid: false,
+      status: "not_verified",
+      record: null,
+      error: "Failed to validate Stellar address",
+    };
+  }
+
+  if (opts?.minThreshold !== undefined) {
+    validateThreshold(opts.minThreshold);
+  }
+
+  const record = await readRecord(
+    normalizedWallet,
+    claimType,
+    throwOnError,
+    opts?.requestTimeoutMs,
+    opts?.retryOptions,
+  );
+
+  if (!record) {
+    return {
+      valid: false,
+      status: "not_verified",
+      record: null,
+      error: `Wallet has no on-chain proof for "${claimType}".`,
+    };
+  }
+
+  if (record.revoked) {
+    return {
+      valid: false,
+      status: "revoked",
+      record,
+      error: `Credential "${claimType}" was revoked by issuer.`,
+    };
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (record.expiry <= nowSeconds) {
+    return {
+      valid: false,
+      status: "expired",
+      record,
+      error: `Credential "${claimType}" expired at ${new Date(record.expiry * 1000).toISOString()}.`,
+    };
+  }
+
+  if (opts?.trustedIssuers && opts.trustedIssuers.length > 0) {
+    if (!record.issuer || !opts.trustedIssuers.includes(record.issuer)) {
+      return {
+        valid: false,
+        status: "wrong_issuer",
+        record,
+        error: `Credential issuer "${record.issuer ?? "unknown"}" is not in trusted issuers list.`,
+      };
+    }
+  }
+
+  if (opts?.minThreshold !== undefined) {
+    const proventhreshold = record.threshold ?? 0;
+    if (proventhreshold < opts.minThreshold) {
+      return {
+        valid: false,
+        status: "unmet_threshold",
+        record,
+        error: `Proven threshold (${proventhreshold}) is less than required minimum (${opts.minThreshold}).`,
+      };
+    }
+  }
+
+  return {
+    valid: true,
+    status: "verified",
+    record,
+  };
+}
+
 
 /**
  * Batched form of {@link hasClaim}: checks several claim types for one wallet.

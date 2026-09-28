@@ -170,7 +170,10 @@ jobs:
         # Blocking — clippy warnings are treated as errors for all contract
         # crates. Any new lint must either be fixed or explicitly allowed with
         # a documented reason using #[allow(clippy::lint_name)] inline.
-        run: cargo clippy --all-targets -- -D warnings
+        # --workspace so the host-only test harness (contracts/test_support) is
+        # linted too; a bare build skips it, since only the deployable contracts
+        # are default workspace members.
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   # ── Circuits: Noir compile + VK freshness check ────────────────────────────
   # Runs in parallel with contracts, frontend, and indexer.
@@ -447,6 +450,21 @@ jobs:
 
       - name: Run issuer tests (incl. cross-boundary circuit test)
         run: pnpm --filter @stellarcred/issuer test
+
+      - name: Build SDK distribution
+        working-directory: frontend/packages/sdk
+        run: npx --yes -p tsup -p typescript@5 tsup src/index.ts src/server.ts --format cjs,esm --dts --clean
+
+      - name: Typecheck SDK
+        working-directory: frontend/packages/sdk
+        run: pnpm typecheck
+
+      - name: Test canonical integration example
+        working-directory: examples/canonical-integration
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
 
   # ── Indexer: SQLite + Postgres test matrix ─────────────────────────────────
   # Runs in parallel with contracts, circuits, and frontend.
