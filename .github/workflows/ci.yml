@@ -435,6 +435,16 @@ jobs:
       - name: Test frontend SDK
         run: pnpm test
 
+      # Required privacy gate (issue #627). Runs the flow-level identity-leak
+      # test on its own so a new persistence path that reintroduces identity
+      # data — a log line, the audit file, the error-report sink, the
+      # idempotency cache, the persisted Persona context, or the response
+      # body — fails the build with an unambiguous step name instead of hiding
+      # inside a 554-test run. `pnpm test` above also covers it; this step
+      # exists to make the guarantee a first-class, greppable check.
+      - name: Identity data leak gate (#627)
+        run: pnpm exec vitest run app/api/issue/__tests__/identity-leakage.test.ts
+
       - name: Test theme helpers (node:test)
         run: pnpm test:theme
 
