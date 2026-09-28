@@ -141,7 +141,7 @@ fn four_contract_lifecycle_end_to_end() {
         w.c.issuers.address
     );
     assert_eq!(w.pool.gate(), (symbol_short!("kyc"), None));
-    assert_eq!(w.c.registry.version(), 1_000_000);
+    assert_eq!(w.c.registry.version(), 1_001_000);
 
     // 3. Register the issuer in IssuerRegistry → IssuerRegistered.
     w.c.issuers
