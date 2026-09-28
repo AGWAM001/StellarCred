@@ -174,12 +174,14 @@ jobs:
       - name: "Layer 1: compare container run 1 vs container run 2"
         run: |
           echo "--- Layer 1: container vs container ---"
-          if diff -u \
-               <(sort build-1/sha256sums.txt) \
-               <(sort build-2/sha256sums.txt); then
+          if diff \
+               <(awk '{print $1}' build-1/sha256sums.txt | sort) \
+               <(awk '{print $1}' build-2/sha256sums.txt | sort); then
             echo "✓ Layer 1 passed: both container builds are byte-identical."
           else
             echo "✗ Layer 1 FAILED: container builds differ — compiler is nondeterministic."
+            echo "build-1:"; cat build-1/sha256sums.txt
+            echo "build-2:"; cat build-2/sha256sums.txt
             exit 1
           fi
 
@@ -191,9 +193,9 @@ jobs:
           cat build-host/sha256sums.txt
           echo "Container hashes:"
           cat build-1/sha256sums.txt
-          if diff -u \
-               <(sort build-host/sha256sums.txt) \
-               <(sort build-1/sha256sums.txt); then
+          if diff \
+               <(awk '{print $1}' build-host/sha256sums.txt | sort) \
+               <(awk '{print $1}' build-1/sha256sums.txt   | sort); then
             echo "✓ Layer 2 passed: host and container builds are byte-identical."
             echo "  An independent machine with the pinned toolchain reproduces the same WASM."
           else
