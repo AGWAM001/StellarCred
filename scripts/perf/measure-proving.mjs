@@ -158,7 +158,14 @@ function measureSubmitProxy(payloadBytes, cwd) {
 
 // ── Tool discovery ───────────────────────────────────────────────────────────
 
-const PATH_ENV = `${process.env.HOME}/.nargo/bin:${process.env.HOME}/.bb/bin:${process.env.PATH ?? ""}`;
+// bbup installs `bb` flat at ~/.bb/bb (ci.yml exports $HOME/.bb, not a bin/ subdir);
+// keep ~/.bb/bin too so hand-installed layouts still resolve. noirup uses ~/.nargo/bin.
+const PATH_ENV = [
+  `${process.env.HOME}/.nargo/bin`,
+  `${process.env.HOME}/.bb/bin`,
+  `${process.env.HOME}/.bb`,
+  process.env.PATH ?? "",
+].join(":");
 function runTool(cmd, cmdArgs, cwd) {
   return run(cmd, cmdArgs, cwd); // PATH inherited by spawnSync by default
 }

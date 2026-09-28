@@ -76,7 +76,8 @@ jobs:
         shell: bash
         working-directory: circuits
         run: |
-          export PATH="$HOME/.nargo/bin:$HOME/.bb/bin:$PATH"
+          # bbup installs bb flat at ~/.bb (no bin/ subdir) — mirror ci.yml.
+          export PATH="$HOME/.nargo/bin:$HOME/.bb:$HOME/.bb/bin:$PATH"
           # kyc_proof is the representative circuit: the smallest full pipeline
           # (Poseidon2 commitment + secp256k1 ECDSA) and the one every other
           # credential circuit is a superset of. Its Prover.toml is committed,
