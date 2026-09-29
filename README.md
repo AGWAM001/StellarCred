@@ -12,6 +12,13 @@ and submits it once on-chain. Any Stellar protocol can then check the result
 with a single read-only contract call — **verify once, trusted everywhere** —
 and the underlying credential data never touches the chain.
 
+> **Scope of that guarantee.** StellarCred hides the *contents* of a credential, not the
+> *fact* of a verification. On-chain claims, the wallet-to-claim link, the issuer's view of
+> the attribute at issuance, and delegation grants are deliberately **not** private. See
+> **[Limitations and non-goals](docs/LIMITATIONS.md)** for exactly what each party — issuer,
+> verifier, chain observer, indexer operator — observes, and what the system does not hide,
+> recover, or guarantee.
+
 StellarCred is not a KYC app. It's the interoperability layer between issuers
 and protocols: issuers integrate once, protocols integrate once, and users carry
 reusable proofs instead of re-submitting personal data to every app.
@@ -236,6 +243,11 @@ signature actually attests to, rotation and revocation. Start here:
 Points 1–3 are **obligations on every issuer**, not background reading. The
 [issuer onboarding guide](docs/ISSUER_ONBOARDING.md) states each of them as a
 requirement, with the custody, rotation and revocation duties that go with them.
+
+These controls enforce what the cryptography protects. They do not make a verification
+private: for what the system deliberately does **not** hide, recover, or guarantee — broken
+down by which party observes what — see
+**[Limitations and non-goals](docs/LIMITATIONS.md)**.
 
 ---
 
