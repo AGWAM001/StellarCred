@@ -356,6 +356,13 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Guard HolderPageClient size (#606)
+        # Fails if HolderPageClient.tsx grows past the line-count ceiling.
+        # New holder features belong in lib/hooks/ and components/holder/ —
+        # see CONTRIBUTING.md §"Holder page architecture".
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/check-holder-size.sh
+
       - name: Check i18n locale key parity
         run: pnpm check:i18n
 

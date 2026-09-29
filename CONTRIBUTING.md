@@ -69,6 +69,27 @@ npm install
 npm run dev
 ```
 
+## Holder page architecture
+
+`frontend/app/holder/HolderPageClient.tsx` is the shell for the `/holder` route.
+It must stay thin: **only top-level view state and modal open/close logic belong
+there**. Everything else has a designated home:
+
+| What | Where |
+|------|-------|
+| Async state, effects, derived data | `frontend/lib/hooks/use*.ts` |
+| UI primitives, cards, flows | `frontend/components/holder/*.tsx` |
+| Shared credential helpers (TTL, expiry maths) | `frontend/lib/proof-helpers.ts` |
+
+**Never add inline logic to HolderPageClient.tsx.** The pattern is:
+1. Write the logic in `lib/hooks/` or the helper library.
+2. Write the UI in `components/holder/`.
+3. Import and wire them in HolderPageClient.
+
+A CI guard (`scripts/check-holder-size.sh`) enforces a hard line-count ceiling on
+HolderPageClient.tsx. Adding inline feature code will fail CI. The guard was added
+in [#606](https://github.com/ToluLabs/StellarCred/issues/606).
+
 ## Development workflow
 
 1. **Fork** the repo and create a branch from `main`.
