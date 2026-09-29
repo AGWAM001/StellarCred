@@ -12,6 +12,13 @@ and submits it once on-chain. Any Stellar protocol can then check the result
 with a single read-only contract call — **verify once, trusted everywhere** —
 and the underlying credential data never touches the chain.
 
+> **Scope of that guarantee.** StellarCred hides the *contents* of a credential, not the
+> *fact* of a verification. On-chain claims, the wallet-to-claim link, the issuer's view of
+> the attribute at issuance, and delegation grants are deliberately **not** private. See
+> **[Limitations and non-goals](docs/LIMITATIONS.md)** for exactly what each party — issuer,
+> verifier, chain observer, indexer operator — observes, and what the system does not hide,
+> recover, or guarantee.
+
 StellarCred is not a KYC app. It's the interoperability layer between issuers
 and protocols: issuers integrate once, protocols integrate once, and users carry
 reusable proofs instead of re-submitting personal data to every app.
@@ -107,6 +114,7 @@ scripts/deploy.sh       deploy + wire + register issuer + install all VKs on tes
 scripts/benchmark.sh    measure instruction budget for every public function on testnet
 BENCHMARKS.md           per-function instruction counts, ledger I/O, and fee estimates
 EVENTS.md               authoritative contract event topic & payload schemas
+docs/STORAGE_TTL.md     contract storage lifetime model, rent fees, and archival behavior
 ```
 
 All five credential circuits share one commitment scheme,
@@ -125,6 +133,8 @@ npm install @stellarcred/sdk
 ```
 
 > Full SDK docs: [`frontend/packages/sdk/README.md`](frontend/packages/sdk/README.md) · [npm](https://www.npmjs.com/package/@stellarcred/sdk)
+>
+> **Canonical Integration Example**: Looking for a complete, runnable end-to-end integration with wallet control challenge proof and server-side route gating? See [`examples/canonical-integration`](examples/canonical-integration).
 
 Protocols never handle credential data - they ask the on-chain registry one
 question: _has this wallet proven the claim I require?_
@@ -229,11 +239,16 @@ signature actually attests to, rotation and revocation. Start here:
    result. Identity fields are sent once to the provider and never stored.
 4. **Proof expiry.** `ProofRegistry` uses persistent storage with an explicit
    `expiry` (checked against ledger time) plus TTL extension.
-5. **Contract governance is role-based.** Privileged actions on `CredentialVerifier`, `IssuerRegistry`, and `ProofRegistry` are gated by a role map (`Map<Symbol, Address>`) rather than a single admin key. The deployer is seeded the `admin` role (plus `upgrader` and `pauser` on `ProofRegistry`) at construction, and the root admin can delegate or rotate holders with `grant_role` / `revoke_role` (`has_role` is a public view). Each privileged function is guarded by its specific role: `set_vk` / `deprecate_version` / `refresh_latest_version_ttl` → `admin`, issuer registration / revocation / metadata → `admin`, `ProofRegistry.upgrade` → `upgrader`, `pause` / `unpause` → `pauser`, `migrate_record` → `admin`. Upgrade and pause power can therefore live on separate keys (multisig, release engineer, security/ops key, DAO) from day-to-day administration, and each key can be rotated independently. `set_admin` transfers the root key together with every role the old root held, so the existing deploy/upgrade flow is unchanged.
+5. **Contract governance is role-based.** Privileged actions on `CredentialVerifier`, `IssuerRegistry`, and `ProofRegistry` are gated by a role map (`Map<Symbol, Address>`) rather than a single admin key. The deployer is seeded the `admin` role (plus `upgrader` and `pauser` on `ProofRegistry`) at construction, and the root admin can delegate or rotate holders with `grant_role` / `revoke_role` (`has_role` is a public view). Each privileged function is guarded by its specific role: `set_vk` / `deprecate_version` / `refresh_latest_version_ttl` → `admin`, issuer registration / revocation / metadata → `admin`, `ProofRegistry.upgrade` → `upgrader`, `pause` / `unpause` → `pauser`, `migrate_record` → `admin`. Upgrade and pause power can therefore live on separate keys (multisig, release engineer, security/ops key, DAO) from day-to-day administration, and each key can be rotated independently. The two-step `propose_admin` / `accept_admin` flow transfers the root key together with every role the old root held, so the existing deploy/upgrade flow is unchanged.
 
 Points 1–3 are **obligations on every issuer**, not background reading. The
 [issuer onboarding guide](docs/ISSUER_ONBOARDING.md) states each of them as a
 requirement, with the custody, rotation and revocation duties that go with them.
+
+These controls enforce what the cryptography protects. They do not make a verification
+private: for what the system deliberately does **not** hide, recover, or guarantee — broken
+down by which party observes what — see
+**[Limitations and non-goals](docs/LIMITATIONS.md)**.
 
 ---
 
@@ -378,6 +393,7 @@ StellarCred spans four toolchains (Rust contracts, Noir zk-circuits, Next.js fro
 | `make compile-circuits`| Circuits | Compiles Noir circuits and verifies verification keys (`bb`). |
 | `make test-frontend` | Frontend | Runs frontend SDK tests, theme tests, and issuer package tests. |
 | `make test-sdk` | SDK | Runs standalone `@stellarcred/sdk` integration tests. |
+| `make test-example` | Examples | Runs typecheck and test suite for `examples/canonical-integration`. |
 | `make test-a11y` | Frontend | Runs axe-core accessibility checks via Playwright. |
 | `make test-indexer` | Indexer | Runs Jest test suite for the indexer service. |
 | `make run-indexer` | Indexer | Starts the local indexer service. |

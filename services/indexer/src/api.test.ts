@@ -12,6 +12,7 @@ import { createSqliteDb } from "./db";
 import type { Db, ClaimRow } from "./db";
 import type { Config } from "./config";
 import type { Ingester, IngesterHealth, IngesterMetrics } from "./ingester";
+import { Keypair } from "@stellar/stellar-sdk";
 
 import os from "os";
 import path from "path";
@@ -711,5 +712,87 @@ describe("claim response schema", () => {
     expect(res.body.indexed).toBe(true);
     expect(res.body.wallet).toBe("GCHARLIE");
     expect(res.body.events.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("claim lifecycle webhook subscriptions", () => {
+  const wallet = Keypair.random().publicKey();
+
+  it("requires an API key and signing secret before exposing management", async () => {
+    const res = await request(app)
+      .post("/webhooks/subscriptions")
+      .send({
+        url: "https://protocol.example/events",
+        wallet,
+        claimType: "kyc",
+      });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/API_KEY/);
+  });
+
+  it("registers an exact wallet/type filter, lists it, and removes it", async () => {
+    app = buildApp(db, makeIngester(), {
+      ...makeConfig(tmpFile),
+      apiKey: "indexer-test-key",
+      webhookSigningSecret: "w".repeat(32),
+      rateLimitEnabled: false,
+    });
+
+    const headers = { Authorization: "Bearer indexer-test-key" };
+    const subscription = {
+      url: "https://protocol.example/events",
+      wallet,
+      claimType: "kyc",
+    };
+    const created = await request(app)
+      .post("/webhooks/subscriptions")
+      .set(headers)
+      .send(subscription);
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ wallet, claimType: "kyc" });
+
+    const duplicate = await request(app)
+      .post("/webhooks/subscriptions")
+      .set(headers)
+      .send(subscription);
+    expect(duplicate.status).toBe(201);
+    expect(duplicate.body.id).toBe(created.body.id);
+
+    const listed = await request(app)
+      .get(`/webhooks/subscriptions?wallet=${wallet}`)
+      .set(headers);
+    expect(listed.status).toBe(200);
+    expect(listed.body.subscriptions).toHaveLength(1);
+
+    const removed = await request(app)
+      .delete(`/webhooks/subscriptions/${created.body.id}`)
+      .set(headers);
+    expect(removed.status).toBe(204);
+  });
+
+  it("rejects insecure URLs and unknown claim types", async () => {
+    app = buildApp(db, makeIngester(), {
+      ...makeConfig(tmpFile),
+      apiKey: "indexer-test-key",
+      webhookSigningSecret: "w".repeat(32),
+      rateLimitEnabled: false,
+    });
+    const headers = { Authorization: "Bearer indexer-test-key" };
+
+    const insecure = await request(app)
+      .post("/webhooks/subscriptions")
+      .set(headers)
+      .send({ url: "http://protocol.example/events", wallet, claimType: "kyc" });
+    expect(insecure.status).toBe(400);
+
+    const unknownClaim = await request(app)
+      .post("/webhooks/subscriptions")
+      .set(headers)
+      .send({
+        url: "https://protocol.example/events",
+        wallet,
+        claimType: "unknown",
+      });
+    expect(unknownClaim.status).toBe(400);
   });
 });

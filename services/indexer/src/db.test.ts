@@ -156,6 +156,67 @@ function registerSuite(
       expect(rows[0].revoked).toBe(1);
     });
 
+    it("queues matching lifecycle webhooks once and retains attempts after unsubscribe", async () => {
+      const id = await db.createWebhookSubscription({
+        url: "https://protocol.example/events",
+        wallet: "GALICE",
+        credential_type: "kyc",
+      });
+      expect(
+        await db.createWebhookSubscription({
+          url: "https://protocol.example/events",
+          wallet: "GALICE",
+          credential_type: "kyc",
+        }),
+      ).toBe(id);
+
+      const event = {
+        event_id: "revoked:tx-1:GALICE:kyc",
+        type: "revoked" as const,
+        wallet: "GALICE",
+        credential_type: "kyc",
+        expiry: 1_755_000_000,
+        ledger_sequence: 123,
+        occurred_at: 1_724_000_000,
+        reason_code: "issuer_revoked",
+      };
+      await db.enqueueWebhookEvent(event);
+      await db.enqueueWebhookEvent(event);
+
+      const deliveries = await db.pendingWebhookDeliveries(1_724_000_000, 10, 8);
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0]).toMatchObject({
+        subscription_id: id,
+        event_id: event.event_id,
+        type: "revoked",
+        target_url: "https://protocol.example/events",
+      });
+
+      expect(await db.deleteWebhookSubscription(id)).toBe(true);
+      expect(await db.deleteWebhookSubscription(id)).toBe(false);
+      expect(await db.webhookDeliveries(id, 10)).toHaveLength(1);
+    });
+
+    it("returns only subscribed active claims whose expiry has passed", async () => {
+      await db.upsertClaim(makeClaim({
+        wallet: "GALICE",
+        expiry: 1_724_000_000,
+      }));
+      await db.upsertClaim(makeClaim({
+        wallet: "GBOB",
+        expiry: 1_723_000_000,
+      }));
+      await db.createWebhookSubscription({
+        url: "https://protocol.example/events",
+        wallet: "GALICE",
+        credential_type: "kyc",
+      });
+
+      expect(await db.expiredActiveClaims(1_724_000_000)).toMatchObject([
+        { wallet: "GALICE", credential_type: "kyc", expiry: 1_724_000_000 },
+      ]);
+    });
+
     it("claimsByWallet returns only that wallet's claims", async () => {
       await db.upsertClaim(makeClaim({ wallet: "GALICE" }));
       await db.upsertClaim(makeClaim({ wallet: "GBOB", credential_type: "age" }));

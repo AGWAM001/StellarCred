@@ -14,6 +14,8 @@
  *                     verified event, updated on revoke.
  *   ledger_cursor   — single-row table; tracks the last fully processed ledger.
  *   app_submissions — third-party apps requesting credential access.
+ *   webhook_subscriptions — wallet/claim-specific protocol notifications.
+ *   webhook_deliveries — durable signed-event delivery and retry state.
  *
  * Only public chain data is stored — no identity fields.
  */
@@ -88,6 +90,34 @@ export function buildSchema(dialect: SqlDialect): Schema {
   ${column("reviewed_at", dialect.timestampType)}
 )`;
 
+  const webhookSubscriptions = `CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+  ${column("id", dialect.submissionIdType)},
+  ${column("url", "TEXT", { notNull: true })},
+  ${column("wallet", "TEXT", { notNull: true })},
+  ${column("credential_type", "TEXT", { notNull: true })},
+  ${column("created_at", dialect.createdAtType)},
+  UNIQUE (url, wallet, credential_type)
+)`;
+
+  const webhookDeliveries = `CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  ${column("id", dialect.submissionIdType)},
+  ${column("subscription_id", dialect.intType, { notNull: true })},
+  ${column("event_id", "TEXT", { notNull: true })},
+  ${column("event_type", "TEXT", { notNull: true })},
+  ${column("wallet", "TEXT", { notNull: true })},
+  ${column("credential_type", "TEXT", { notNull: true })},
+  ${column("expiry", dialect.intType, { notNull: true })},
+  ${column("ledger_sequence", dialect.intType, { notNull: true })},
+  ${column("occurred_at", dialect.intType, { notNull: true })},
+  ${column("reason_code", "TEXT", { notNull: true })},
+  ${column("target_url", "TEXT", { notNull: true })},
+  ${column("attempts", "INTEGER", { notNull: true, default: "0" })},
+  ${column("next_attempt_at", dialect.intType, { notNull: true, default: "0" })},
+  ${column("delivered_at", dialect.intType)},
+  ${column("last_error", "TEXT")},
+  UNIQUE (subscription_id, event_id)
+)`;
+
   // The cursor row is a singleton, so the seed must ignore an existing one.
   const seedCursor = `INSERT ${dialect.insertIgnorePrefix}INTO ledger_cursor (id, last_ledger)
   VALUES (1, 0)${dialect.conflictDoNothing}`;
@@ -97,8 +127,14 @@ export function buildSchema(dialect: SqlDialect): Schema {
     ledgerCursor,
     seedCursor,
     appSubmissions,
+    webhookSubscriptions,
+    webhookDeliveries,
     `CREATE INDEX IF NOT EXISTS idx_app_submissions_status
   ON app_submissions (status)`,
+    `CREATE INDEX IF NOT EXISTS idx_webhook_subscriptions_wallet_type
+  ON webhook_subscriptions (wallet, credential_type)`,
+    `CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due
+  ON webhook_deliveries (delivered_at, next_attempt_at, attempts)`,
   ].join(";\n\n");
 
   const indexes = [
