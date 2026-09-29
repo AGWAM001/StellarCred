@@ -747,25 +747,10 @@ function HolderInner() {
           )}
 
           {/* ── Empty state ── */}
-          {creds.length === 0 && !importing && (
+          {!loading && creds.length === 0 && !importing && (
             <div className="card empty-state">
               <EmptyStateIllustration />
               <h3 style={{ marginTop: "1.25rem" }}>No credentials yet</h3>
-          {!loading && creds.length === 0 && !importing && (
-            <div
-              className="card"
-              style={{ textAlign: "center", padding: "3.5rem 1.5rem", borderStyle: "dashed" }}
-            >
-              <IconCertificate size={30} stroke={1.3} color="var(--faint)" />
-              <h3 style={{ margin: "1rem 0 0.4rem" }}>No credentials yet</h3>
-              <p className="muted" style={{ fontSize: "0.875rem", maxWidth: 340, margin: "0 auto 1.5rem" }}>
-                Get a credential from a trusted issuer, then generate a
-                zero-knowledge proof to verify it on-chain.
-              </p>
-              <a href="/verify" className="btn btn-primary btn-sm" style={{ display: "inline-flex" }}>
-                Get a credential
-                <IconArrowRight size={14} />
-              </a>
               <p
                 className="muted"
                 style={{ fontSize: "0.875rem", maxWidth: 340, margin: "0.4rem auto 1.5rem" }}
