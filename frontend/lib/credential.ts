@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { CREDENTIAL_TYPES, type CredentialType } from "./stellar";
 import { deploymentMismatchMessage, type DeploymentRef } from "./deployment";
+import { circuitVersionMismatchMessage } from "./circuit-versions";
 import { isStorageAvailable } from "./safe-storage";
 import {
   ENVELOPE_VERSION,
@@ -60,6 +61,21 @@ export interface Credential {
    * Absent on credentials minted before this field existed.
    */
   deployment?: DeploymentRef;
+  /**
+   * The circuit version this credential was issued against (#633). A circuit
+   * source change can alter the public-input layout, and nothing else on the
+   * credential would reveal that the circuit which can prove it has been
+   * superseded — the only symptom would be an invalid witness at prove time.
+   * Stamped by /api/issue and checked before every proof; absent on
+   * credentials minted before this field existed.
+   */
+  circuitVersion?: string;
+  /**
+   * The `CredentialVerifier` VK version paired with {@link circuitVersion},
+   * so the credential → circuit → VK chain is explicit on the credential
+   * itself rather than implied by whichever app build happens to be running.
+   */
+  circuitVkVersion?: number;
   /**
    * Last-checked status of this credential's issuer in IssuerRegistry (#626).
    *
@@ -470,6 +486,27 @@ export function parseCredential(json: string): Credential {
   // without a deployment reference predate this field and pass through.
   const mismatch = deploymentMismatchMessage(c.deployment);
   if (mismatch) throw new Error(mismatch);
+
+  // Circuit-compatibility guard (#633): a credential issued against a
+  // superseded circuit version may no longer be expressible by the circuits
+  // this app serves. Rejecting it at import — alongside the deployment guard —
+  // is the earliest point at which the holder can be told, and the prove path
+  // re-checks it independently. Credentials with no recorded circuit version
+  // predate this field and pass through.
+  const circuitMismatch = circuitVersionMismatchMessage(c.type, c.circuitVersion);
+  if (circuitMismatch) throw new Error(circuitMismatch);
+
+  // The VK version is advisory next to `circuitVersion` (the registry is
+  // authoritative), but a non-integer is a corrupted credential and would
+  // silently poison the credential → circuit → VK chain.
+  if (
+    c.circuitVkVersion !== undefined &&
+    (!Number.isInteger(c.circuitVkVersion) || (c.circuitVkVersion as number) < 1)
+  ) {
+    throw new Error(
+      "Not a valid credential: circuitVkVersion must be a positive integer when present.",
+    );
+  }
 
   return c as unknown as Credential;
 }
