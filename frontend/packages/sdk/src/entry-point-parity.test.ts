@@ -40,6 +40,7 @@ const CLAIMS_EXPORTS = [
   "ConfigError",
   "InvalidAddressError",
   "RpcError",
+  "IndexerError",
 ] as const;
 
 // â”€â”€ Challenge functions (sourced from challenge.ts) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -106,6 +107,7 @@ describe("entry-point parity (issue #609 / #522)", () => {
     expect(ns.ConfigError).toBe(fromClaims.ConfigError);
     expect(ns.InvalidAddressError).toBe(fromClaims.InvalidAddressError);
     expect(ns.RpcError).toBe(fromClaims.RpcError);
+    expect(ns.IndexerError).toBe(fromClaims.IndexerError);
   });
 
   it("StellarCred namespace members are the same references as challenge.ts exports", () => {
