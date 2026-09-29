@@ -16,6 +16,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
+import path from "path";
+import os from "os";
 
 const HOLDER = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 const ISSUER_ID = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBHF2";
@@ -39,7 +41,10 @@ const ENV_KEYS = [
   "NEXT_PUBLIC_ISSUER_ADDRESS",
   "PERSONA_API_KEY",
   "PERSONA_KYC_TEMPLATE_ID",
+  "PLAID_CLIENT_ID",
+  "PLAID_SECRET",
   "PLAID_ACCESS_TOKEN",
+  "PLAID_ACCESS_TOKENS",
 ] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
@@ -110,6 +115,143 @@ describe("signature correctness", () => {
     const sig = Uint8Array.from(credential.sig);
 
     expect(secp256k1.verify(sig, digest, pubkey, { prehash: false })).toBe(true);
+  });
+});
+
+describe("funds issuance (aggregate proof-of-funds)", () => {
+  function plaidItemResponse(accounts: unknown[]) {
+    return { ok: true, json: async () => ({ accounts }) };
+  }
+
+  // Env validation requires client id, secret, and a token to be set
+  // together, so every aggregation test configures the full Plaid triple.
+  function setPlaidEnv(tokens: string) {
+    delete process.env.PLAID_ACCESS_TOKEN;
+    process.env.PLAID_CLIENT_ID = "test-plaid-client-id";
+    process.env.PLAID_SECRET = "test-plaid-secret";
+    process.env.PLAID_ACCESS_TOKENS = tokens;
+  }
+
+  it("overwrites a user-supplied balance with the aggregate summed across linked Plaid items", async () => {
+    delete process.env.ISSUER_PRIVATE_KEY;
+    setPlaidEnv("item-a,item-b");
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          plaidItemResponse([
+            { type: "depository", name: "Checking", balances: { available: 1500 } },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          plaidItemResponse([
+            { type: "depository", name: "Savings", balances: { available: 25000 } },
+          ]),
+        ),
+    );
+
+    const { POST } = await loadRoute();
+
+    const res = await POST(
+      postRequest({
+        credential_types: ["funds"],
+        holder: HOLDER,
+        issuerId: ISSUER_ID,
+        // User-supplied figure — Plaid's verified aggregate must win.
+        attributes: { balance: "1" },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const { credentials } = await res.json();
+    expect(credentials).toHaveLength(1);
+    expect(credentials[0].type).toBe("funds");
+    expect(credentials[0].value).toBe("26500");
+  });
+
+  it("fails closed when any linked item errors instead of attesting a partial sum", async () => {
+    delete process.env.ISSUER_PRIVATE_KEY;
+    setPlaidEnv("item-a,item-broken");
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          plaidItemResponse([
+            { type: "depository", name: "Checking", balances: { available: 90000 } },
+          ]),
+        )
+        .mockResolvedValueOnce({
+          ok: false,
+          json: async () => ({ error_code: "ITEM_LOGIN_REQUIRED" }),
+        }),
+    );
+
+    const { POST } = await loadRoute();
+
+    const res = await POST(
+      postRequest({
+        credential_types: ["funds"],
+        holder: HOLDER,
+        issuerId: ISSUER_ID,
+      }),
+    );
+
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.code).toBe("PLAID_ERROR");
+  });
+
+  it("attests only the aggregate — per-source account data never reaches the credential or the logs", async () => {
+    delete process.env.ISSUER_PRIVATE_KEY;
+    setPlaidEnv("item-a,item-b");
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          plaidItemResponse([
+            { type: "depository", name: "Acme Checking", balances: { available: 1200 } },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          plaidItemResponse([
+            { type: "depository", name: "Acme Savings", balances: { available: 8800 } },
+          ]),
+        ),
+    );
+
+    const { POST } = await loadRoute();
+    // Imported after loadRoute()'s vi.resetModules() so this resolves to the
+    // same fresh logger instance route.ts itself just imported.
+    const { logger } = await import("@/lib/logger");
+    const infoSpy = vi.spyOn(logger, "info");
+    const warnSpy = vi.spyOn(logger, "warn");
+    const errorSpy = vi.spyOn(logger, "error");
+
+    const res = await POST(
+      postRequest({
+        credential_types: ["funds"],
+        holder: HOLDER,
+        issuerId: ISSUER_ID,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const { credentials } = await res.json();
+    // The aggregate (10000) is attested; component names/balances stay private.
+    expect(credentials).toHaveLength(1);
+    expect(credentials[0].value).toBe("10000");
+    expect(credentials[0].accounts).toBeUndefined();
+    expect(credentials[0].sources).toBeUndefined();
+
+    for (const spy of [infoSpy, warnSpy, errorSpy]) {
+      for (const call of spy.mock.calls) {
+        const logged = JSON.stringify(call);
+        expect(logged).not.toMatch(/Acme|item-a|item-b/);
+      }
+    }
   });
 });
 
@@ -239,6 +381,90 @@ describe("no identity leakage", () => {
         expect(logged).not.toMatch(/first_name|last_name|id_number|first-name|last-name|id-number/);
       }
     }
+  });
+});
+
+describe("issuance audit log (hash-chained, PII-free)", () => {
+  // Each test points AUDIT_LOG_PATH at a throwaway file so the chain asserted
+  // here is exactly what this test produced (the default path could carry
+  // entries from earlier runs / other tests).
+  afterEach(() => {
+    delete process.env.AUDIT_LOG_PATH;
+  });
+
+  it("appends one PII-free, chained entry per issued commitment", async () => {
+    delete process.env.ISSUER_PRIVATE_KEY;
+    process.env.AUDIT_LOG_PATH = path.join(
+      os.tmpdir(),
+      `stellarcred-audit-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
+    );
+
+    const { POST } = await loadRoute();
+    // Imported after loadRoute()'s vi.resetModules() so this resolves to the
+    // same fresh audit-log module instance route.ts just imported.
+    const { auditLogEntries, auditLogVerify, auditLogSize } = await import("@/lib/audit-log");
+
+    const res = await POST(
+      postRequest({ type: "kyc", holder: HOLDER, issuerId: ISSUER_ID }),
+    );
+    expect(res.status).toBe(200);
+    const { credentials } = await res.json();
+    expect(credentials).toHaveLength(1);
+
+    expect(auditLogSize()).toBe(1);
+    const [entry] = auditLogEntries();
+    expect(entry.index).toBe(0);
+    expect(entry.commitment).toBe(credentials[0].commitment);
+    expect(entry.issuer).toBe(ISSUER_ID);
+    expect(entry.timestamp).toBe(credentials[0].issuedAt);
+    expect(entry.requestId).toMatch(/^[0-9a-f]{32}$/);
+    expect(auditLogVerify().valid).toBe(true);
+
+    // The audit entry itself carries no identity data.
+    expect(JSON.stringify(entry)).not.toMatch(
+      /holder|wallet|first_name|last_name|id_number|date_of_birth|value|salt/,
+    );
+  });
+
+  it("chains successive issuances and persists a file a fresh verifier accepts", async () => {
+    delete process.env.ISSUER_PRIVATE_KEY;
+    const auditFile = path.join(
+      os.tmpdir(),
+      `stellarcred-audit-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
+    );
+    process.env.AUDIT_LOG_PATH = auditFile;
+
+    const { POST } = await loadRoute();
+    const { auditLogEntries, auditLogVerify, readAuditLogFile, verifyAuditChain } =
+      await import("@/lib/audit-log");
+
+    const res1 = await POST(
+      postRequest({ type: "kyc", holder: HOLDER, issuerId: ISSUER_ID }),
+    );
+    expect(res1.status).toBe(200);
+    const res2 = await POST(
+      postRequest({
+        credential_types: ["age"],
+        holder: HOLDER,
+        issuerId: ISSUER_ID,
+        attributes: { date_of_birth: "1995-06-15" },
+      }),
+    );
+    expect(res2.status).toBe(200);
+
+    const entries = auditLogEntries();
+    expect(entries).toHaveLength(2);
+    expect(entries[1].index).toBe(1);
+    expect(entries[1].prevHash).toBe(entries[0].hash);
+    expect(entries[1].hash).not.toBe(entries[0].hash);
+    expect(auditLogVerify().valid).toBe(true);
+
+    // The persisted file must be accepted by an independent verifier reading
+    // from disk — i.e. `pnpm verify:audit-log` semantics.
+    const reloaded = await readAuditLogFile(auditFile);
+    expect(reloaded).toHaveLength(2);
+    expect(reloaded).toEqual(entries);
+    expect(verifyAuditChain(reloaded).valid).toBe(true);
   });
 });
 

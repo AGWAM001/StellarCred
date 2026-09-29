@@ -1,9 +1,13 @@
 import { createRequire } from "module";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import createNextIntlPlugin from "next-intl/plugin";
 
 const withBundleReport = withBundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
 });
+
+const withNextIntl = createNextIntlPlugin();
+
 
 const require = createRequire(import.meta.url);
 const bufferPath = require.resolve("buffer/");
@@ -12,6 +16,9 @@ const processPath = require.resolve("process/browser");
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+
+  // Disable Google Fonts optimization to avoid network errors during build
+  optimizeFonts: false,
 
   // The /api/issue route runs Noir server-side to compute the Poseidon
   // commitment. Keep these out of the server bundle so Node require()s them
@@ -146,4 +153,4 @@ const nextConfig = {
   },
 };
 
-export default withBundleReport(nextConfig);
+export default withBundleReport(withNextIntl(nextConfig));
