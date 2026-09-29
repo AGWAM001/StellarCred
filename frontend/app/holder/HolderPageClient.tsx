@@ -57,7 +57,7 @@ import CredentialDetailModal from "@/components/CredentialDetailModal";
 import { useToast } from "@/components/Toast";
 import { IMPORT_PARAM } from "@/lib/transfer";
 
-// The encrypted-transfer modals are heavy (crypto.ts PBKDF2/AES-GCM, QR
+// The encrypted-transfer modals are heavy (credential-crypto.ts PBKDF2/AES-GCM, QR
 // rendering) and only needed when the user actually starts a transfer — load
 // them lazily so the holder route's 15 kB bundle budget stays intact.
 const TransferExportModal = dynamic(
