@@ -1,12 +1,33 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 // Regression guard for #605: two extraction attempts (#378, #346) left data
 // files under app/docs/ that no component ever imported. Every non-route file
 // in app/docs must be consumed by production code, or it is dead code.
-const FRONTEND_ROOT = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
+
+// import.meta.url is deliberately NOT used: under vitest's vite-node module
+// runner it is a dev-server (non-file:) URL, so fileURLToPath throws there.
+// Walk up from the working directory instead — pnpm test runs from frontend/,
+// and the upward search also survives `vitest --root` invocations.
+function findFrontendRoot(): string {
+  let dir = process.cwd();
+  while (true) {
+    if (
+      existsSync(path.join(dir, "package.json")) &&
+      existsSync(path.join(dir, "app", "docs"))
+    ) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      throw new Error("could not locate frontend root from " + process.cwd());
+    }
+    dir = parent;
+  }
+}
+
+const FRONTEND_ROOT = findFrontendRoot();
 const DOCS_DIR = path.join(FRONTEND_ROOT, "app", "docs");
 
 const NEXT_ROUTE_BASENAMES = new Set([
