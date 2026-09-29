@@ -1,4 +1,4 @@
-﻿#![no_std]
+#![no_std]
 //! GatedPool
 //!
 //! A DeFi pool that gates **deposits** behind a valid KYC proof in the
@@ -191,7 +191,7 @@ impl GatedPool {
         // Transfer failure will panic and revert the transaction, leaving caller balance intact.
         if let Some(token_addr) = env.storage().instance().get::<_, Address>(&DataKey::Token) {
             let token_client = token::Client::new(&env, &token_addr);
-            token_client.transfer(env.current_contract_address(), &caller, &amount);
+            token_client.transfer(&env.current_contract_address(), &caller, &amount);
         }
 
         Self::set_balance(&env, &caller, remaining);
