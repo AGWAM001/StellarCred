@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const isVerified = vi.fn();
 const checkClaim = vi.fn();
+const getRecord = vi.fn();
 
 vi.mock("../../proof-registry/src/index", () => ({
   Client: vi.fn(function ProofRegistryClient() {
     return {
       is_verified: isVerified,
       check_claim: checkClaim,
+      get_record: getRecord,
     };
   }),
 }));
@@ -25,6 +27,8 @@ import {
   configure,
   hasClaim,
   getClaims,
+  getClaimRecord,
+  checkClaimStatus,
   verifyPreset,
   ConfigError,
   InvalidAddressError,
@@ -561,5 +565,136 @@ describe("warnOnClientServerBoundaryViolation", () => {
     } finally {
       envMut["NODE_ENV"] = origNodeEnv;
     }
+  });
+});
+
+describe("checkClaimStatus and getClaimRecord — failure state handling", () => {
+  beforeEach(() => {
+    getRecord.mockReset();
+    configure({ registryId: "C_TEST_REGISTRY" });
+  });
+
+  it("evaluates 'not_verified' when no on-chain record exists", async () => {
+    getRecord.mockResolvedValue({ result: null });
+    const res = await checkClaimStatus(WALLET, "kyc");
+    expect(res.valid).toBe(false);
+    expect(res.status).toBe("not_verified");
+    expect(res.record).toBeNull();
+    expect(res.error).toContain("no on-chain proof");
+  });
+
+  it("evaluates 'revoked' when record.revoked is true", async () => {
+    getRecord.mockResolvedValue({
+      result: {
+        verified_at: 1_700_000_000n,
+        expiry: 2_000_000_000n,
+        revoked: true,
+        issuer: "G_ISSUER_1",
+        threshold: undefined,
+        vk_version: 1,
+      },
+    });
+    const res = await checkClaimStatus(WALLET, "kyc");
+    expect(res.valid).toBe(false);
+    expect(res.status).toBe("revoked");
+    expect(res.record?.revoked).toBe(true);
+    expect(res.error).toContain("revoked");
+  });
+
+  it("evaluates 'expired' when expiry is in the past", async () => {
+    getRecord.mockResolvedValue({
+      result: {
+        verified_at: 1_000_000_000n,
+        expiry: 1_000_000_100n, // way in the past
+        revoked: false,
+        issuer: "G_ISSUER_1",
+        threshold: undefined,
+        vk_version: 1,
+      },
+    });
+    const res = await checkClaimStatus(WALLET, "kyc");
+    expect(res.valid).toBe(false);
+    expect(res.status).toBe("expired");
+    expect(res.error).toContain("expired");
+  });
+
+  it("evaluates 'wrong_issuer' when issuer is not in trustedIssuers list", async () => {
+    getRecord.mockResolvedValue({
+      result: {
+        verified_at: 1_700_000_000n,
+        expiry: 2_000_000_000n,
+        revoked: false,
+        issuer: "G_UNTRUSTED_ISSUER",
+        threshold: undefined,
+        vk_version: 1,
+      },
+    });
+    const res = await checkClaimStatus(WALLET, "kyc", {
+      trustedIssuers: ["G_TRUSTED_PERSONA_ISSUER"],
+    });
+    expect(res.valid).toBe(false);
+    expect(res.status).toBe("wrong_issuer");
+    expect(res.error).toContain("not in trusted issuers list");
+  });
+
+  it("evaluates 'unmet_threshold' when threshold is below required minimum", async () => {
+    getRecord.mockResolvedValue({
+      result: {
+        verified_at: 1_700_000_000n,
+        expiry: 2_000_000_000n,
+        revoked: false,
+        issuer: "G_ISSUER_1",
+        threshold: 25_000n,
+        vk_version: 1,
+      },
+    });
+    const res = await checkClaimStatus(WALLET, "funds", {
+      minThreshold: 50_000,
+    });
+    expect(res.valid).toBe(false);
+    expect(res.status).toBe("unmet_threshold");
+    expect(res.error).toContain("less than required minimum");
+  });
+
+  it("evaluates 'verified' when all requirements are met", async () => {
+    getRecord.mockResolvedValue({
+      result: {
+        verified_at: 1_700_000_000n,
+        expiry: 2_000_000_000n,
+        revoked: false,
+        issuer: "G_TRUSTED_ISSUER",
+        threshold: 75_000n,
+        vk_version: 1,
+      },
+    });
+    const res = await checkClaimStatus(WALLET, "funds", {
+      minThreshold: 50_000,
+      trustedIssuers: ["G_TRUSTED_ISSUER"],
+    });
+    expect(res.valid).toBe(true);
+    expect(res.status).toBe("verified");
+    expect(res.record?.threshold).toBe(75_000);
+  });
+
+  it("getClaimRecord returns formatted details or null", async () => {
+    getRecord.mockResolvedValue({
+      result: {
+        verified_at: 1_700_000_000n,
+        expiry: 2_000_000_000n,
+        revoked: false,
+        issuer: "G_ISSUER_A",
+        threshold: 21n,
+        vk_version: 2,
+      },
+    });
+    const rec = await getClaimRecord(WALLET, "age");
+    expect(rec).toEqual({
+      verifiedAt: 1_700_000_000,
+      expiry: 2_000_000_000,
+      revoked: false,
+      issuer: "G_ISSUER_A",
+      threshold: 21,
+      vkVersion: 2,
+    });
   });
 });

@@ -125,6 +125,8 @@ npm install @stellarcred/sdk
 ```
 
 > Full SDK docs: [`frontend/packages/sdk/README.md`](frontend/packages/sdk/README.md) · [npm](https://www.npmjs.com/package/@stellarcred/sdk)
+>
+> **Canonical Integration Example**: Looking for a complete, runnable end-to-end integration with wallet control challenge proof and server-side route gating? See [`examples/canonical-integration`](examples/canonical-integration).
 
 Protocols never handle credential data - they ask the on-chain registry one
 question: _has this wallet proven the claim I require?_
@@ -179,7 +181,31 @@ full reference.
 | `age`          | Age ≥ threshold              | Date of birth             |
 | `income`       | Income ≥ threshold           | Actual income             |
 | `jurisdiction` | Country not restricted       | Country code              |
-| `funds`        | Balance ≥ threshold          | Exact balance (from Plaid)|
+| `funds`        | Balance ≥ threshold          | Exact balances (aggregate of linked Plaid accounts) |
+
+### Aggregate proof-of-funds
+
+Real proof-of-funds spans multiple accounts — checking here, a high-yield
+savings there. `funds` credentials attest to the **aggregate** balance summed
+across every linked Plaid item:
+
+- Configure one item via `PLAID_ACCESS_TOKEN`, or several (up to 25) via
+  `PLAID_ACCESS_TOKENS` (comma-separated); both may be set together.
+- The issuance server fetches each linked item, sums the available depository
+  balances, and the issuer signs a single commitment to the **sum**.
+- The `funds_proof` circuit then proves `sum ≥ threshold` without revealing
+  any component balance.
+- Per-source data (account names, per-item balances, access tokens) stays
+  server-side: it is never committed, logged (only source/account counts
+  reach the logs), stored in the browser credential, or written on-chain.
+- Aggregation **fails closed** — if any linked item errors or times out, no
+  balance is attested at all, because a partial sum is not the sum the
+  issuer would be attesting to.
+
+**Issuing credentials?** The issuer is the trust anchor of the system and has
+the most responsibility of the three roles — registration, key custody, what a
+signature actually attests to, rotation and revocation. Start here:
+**[Issuer onboarding guide](docs/ISSUER_ONBOARDING.md)**.
 
 ---
 
@@ -206,6 +232,10 @@ full reference.
 4. **Proof expiry.** `ProofRegistry` uses persistent storage with an explicit
    `expiry` (checked against ledger time) plus TTL extension.
 5. **Contract governance is role-based.** Privileged actions on `CredentialVerifier`, `IssuerRegistry`, and `ProofRegistry` are gated by a role map (`Map<Symbol, Address>`) rather than a single admin key. The deployer is seeded the `admin` role (plus `upgrader` and `pauser` on `ProofRegistry`) at construction, and the root admin can delegate or rotate holders with `grant_role` / `revoke_role` (`has_role` is a public view). Each privileged function is guarded by its specific role: `set_vk` / `deprecate_version` / `refresh_latest_version_ttl` → `admin`, issuer registration / revocation / metadata → `admin`, `ProofRegistry.upgrade` → `upgrader`, `pause` / `unpause` → `pauser`, `migrate_record` → `admin`. Upgrade and pause power can therefore live on separate keys (multisig, release engineer, security/ops key, DAO) from day-to-day administration, and each key can be rotated independently. `set_admin` transfers the root key together with every role the old root held, so the existing deploy/upgrade flow is unchanged.
+
+Points 1–3 are **obligations on every issuer**, not background reading. The
+[issuer onboarding guide](docs/ISSUER_ONBOARDING.md) states each of them as a
+requirement, with the custody, rotation and revocation duties that go with them.
 
 ---
 
@@ -350,6 +380,7 @@ StellarCred spans four toolchains (Rust contracts, Noir zk-circuits, Next.js fro
 | `make compile-circuits`| Circuits | Compiles Noir circuits and verifies verification keys (`bb`). |
 | `make test-frontend` | Frontend | Runs frontend SDK tests, theme tests, and issuer package tests. |
 | `make test-sdk` | SDK | Runs standalone `@stellarcred/sdk` integration tests. |
+| `make test-example` | Examples | Runs typecheck and test suite for `examples/canonical-integration`. |
 | `make test-a11y` | Frontend | Runs axe-core accessibility checks via Playwright. |
 | `make test-indexer` | Indexer | Runs Jest test suite for the indexer service. |
 | `make run-indexer` | Indexer | Starts the local indexer service. |

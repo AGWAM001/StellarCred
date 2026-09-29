@@ -103,6 +103,22 @@ Emitted when a trusted issuer explicitly revokes a holder's cached proof for a c
 - **When it fires:**
   - `revoke(issuer, holder, credential_type)`: Emitted when the registered issuer marks the proof record as revoked.
 
+#### `proof_reg.self_rev` — Holder Self-Revocation
+
+Emitted when a holder removes one or all of their cached proofs.
+
+- **Topics:** `("proof_reg", "self_rev", <credential_type>)`
+- **Payload (`EventHolderRevoked`):**
+  ```rust
+  pub struct EventHolderRevoked {
+      pub holder: Address,
+      pub revoked_at: u64,
+  }
+  ```
+- **When it fires:**
+  - `revoke_proof`: Emitted when the holder removes an existing proof.
+  - `revoke_all`: Emitted once for each existing proof removed.
+
 ---
 
 #### `proof_reg.paused` — Submissions Paused
@@ -155,7 +171,6 @@ Emitted when protocol administration resumes proof submissions.
 
 | Function | Description | Reason No Event Emitted |
 |---|---|---|
-| `revoke_proof` / `revoke_all` | Holder self-revocation | Removes the persistent entry directly from contract storage; no third-party issuer is involved. |
 | `upgrade` | Contract bytecode upgrade | Handled directly by Soroban's WASM deployer host function (`update_current_contract_wasm`). |
 | `set_admin` | Admin address update | Standard instance storage update. |
 | `bump_claim` | Storage TTL extension | Maintenance operation renewing persistent entry rent. |

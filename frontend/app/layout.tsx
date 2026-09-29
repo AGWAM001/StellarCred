@@ -6,6 +6,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { SiteNav } from "@/components/SiteNav";
 import { NetworkBanner } from "@/components/NetworkBanner";
+import { RpcStatusBanner } from "@/components/RpcStatusBanner";
 import { Footer } from "@/components/Footer";
 import { LocaleMetaTags } from "@/components/LocaleMetaTags";
 import { WalletProvider } from "@/lib/wallet-context";
@@ -18,18 +19,23 @@ const body = Inter({
   subsets: ["latin"],
   weight: ["400", "500"],
   variable: "--font-body",
+  // preload:false prevents Next.js from fetching Google Fonts at build time,
+  // which avoids flaky CI failures when the runner cannot reach fonts.googleapis.com.
+  preload: false,
 });
 
 const display = Space_Grotesk({
   subsets: ["latin"],
   weight: ["500", "600", "700"],
   variable: "--font-display",
+  preload: false,
 });
 
 const mono = JetBrains_Mono({
   subsets: ["latin"],
   weight: ["400", "500"],
   variable: "--font-mono",
+  preload: false,
 });
 
 export const dynamic = "force-dynamic";
@@ -82,6 +88,7 @@ export default async function RootLayout({
               <OnboardingTour />
               <SiteNav />
               <NetworkBanner />
+              <RpcStatusBanner />
               <OnboardingWizard />
               <main id="main-content" tabIndex={-1} className="container">
                 {children}
