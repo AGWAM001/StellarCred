@@ -143,6 +143,36 @@ function formatExpiryDate(ts: number): string {
   });
 }
 
+// ── Storage TTL vs Credential expiry helpers (Issue #552) ───────────────────
+// Soroban persistent storage TTL is refreshed to ~90 days (17,280 * 90 ledgers)
+// on proof submission and whenever bumped via bump_claim.
+const STORAGE_RENT_TTL_SECS = 90 * 86_400;
+
+function storageExpiryTimestamp(cred: Credential): number | null {
+  if (!cred.provedAt) return null;
+  return cred.provedAt + STORAGE_RENT_TTL_SECS;
+}
+
+function storageDaysRemaining(cred: Credential): number {
+  const ts = storageExpiryTimestamp(cred);
+  if (!ts) return 0;
+  const secsLeft = ts - Math.floor(Date.now() / 1000);
+  return Math.max(0, Math.ceil(secsLeft / 86_400));
+}
+
+function isStorageLapsed(cred: Credential): boolean {
+  const ts = storageExpiryTimestamp(cred);
+  if (!ts) return false;
+  return ts <= Math.floor(Date.now() / 1000);
+}
+
+function isStorageExpiringSoon(cred: Credential, windowDays = 14): boolean {
+  const ts = storageExpiryTimestamp(cred);
+  if (!ts) return false;
+  const now = Math.floor(Date.now() / 1000);
+  return ts > now && ts <= now + windowDays * 86_400;
+}
+
 // ── Credential card ──────────────────────────────────────────────────────────
 
 function CredCard({
@@ -188,7 +218,7 @@ function CredCard({
                 <>
                   {" · "}
                   <span style={{ color: "var(--accent)", opacity: 0.75 }}>
-                    expires in {daysRemaining(c)}d
+                    credential expires in {daysRemaining(c)}d
                   </span>
                   {c.provedTxHash && (
                     <>
@@ -206,16 +236,31 @@ function CredCard({
                 </>
               )}
               {status === "expired" && (
-                <> · <span style={{ color: "var(--danger)", opacity: 0.8 }}>expired</span></>
+                <> · <span style={{ color: "var(--danger)", opacity: 0.8 }}>proof expired</span></>
               )}
             </div>
-            <div style={{ marginTop: "0.1rem" }}>
-              {credIsExpired(c) ? (
-                <span style={{ color: "var(--danger)", fontWeight: 500 }}>Expired</span>
-              ) : (
-                <span style={{ color: credExpiryWithinDays(c, 30) ? "var(--warn)" : "var(--faint)" }}>
-                  Expires {formatExpiryDate(credExpiryTimestamp(c))}
-                </span>
+            <div style={{ marginTop: "0.15rem", display: "flex", flexWrap: "wrap", gap: "0.75rem", fontSize: "0.72rem" }}>
+              <div>
+                <span style={{ color: "var(--faint)" }}>Credential: </span>
+                {credIsExpired(c) ? (
+                  <span style={{ color: "var(--danger)", fontWeight: 500 }}>Expired</span>
+                ) : (
+                  <span style={{ color: credExpiryWithinDays(c, 30) ? "var(--warn)" : "var(--fg)" }}>
+                    Expires {formatExpiryDate(credExpiryTimestamp(c))}
+                  </span>
+                )}
+              </div>
+              {c.provedAt && (
+                <div>
+                  <span style={{ color: "var(--faint)" }}>Storage Rent: </span>
+                  {isStorageLapsed(c) ? (
+                    <span style={{ color: "var(--danger)", fontWeight: 500 }}>Archived (TTL lapsed)</span>
+                  ) : (
+                    <span style={{ color: isStorageExpiringSoon(c) ? "var(--warn)" : "var(--fg)" }}>
+                      ~{storageDaysRemaining(c)}d until archive
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -231,11 +276,17 @@ function CredCard({
             <Badge variant="denied" dot>Issuer key revoked</Badge>
           )}
           <Badge variant="verified" dot={false}>Held</Badge>
-          {status === "proved" && !isExpiringSoon(c) && (
+          {status === "proved" && !isExpiringSoon(c) && !isStorageLapsed(c) && (
             <Badge variant="verified" dot={false}>On-chain</Badge>
           )}
           {status === "proved" && isExpiringSoon(c) && (
             <Badge variant="pending" dot={true}>Expiring in {daysRemaining(c)}d</Badge>
+          )}
+          {status === "proved" && isStorageLapsed(c) && (
+            <Badge variant="denied" dot={true}>Storage Archived</Badge>
+          )}
+          {status === "proved" && !isStorageLapsed(c) && isStorageExpiringSoon(c) && (
+            <Badge variant="pending" dot={true}>Rent: {storageDaysRemaining(c)}d left</Badge>
           )}
           {status === "expired" && (
             <Badge variant="denied" dot={true}>Proof Expired</Badge>
