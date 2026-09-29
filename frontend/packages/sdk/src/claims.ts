@@ -1,4 +1,4 @@
-// @stellarcred/sdk — shared claim-checking core
+// @stellarcred/sdk â€” shared claim-checking core
 //
 // Authoritative module holding the complete claim-checking machinery:
 // config, low-level ProofRegistry reads, and the public functions
@@ -6,7 +6,7 @@
 // plus all associated types and error classes.
 //
 // `index.ts`, `core.ts`, `react.ts`, `server.ts`, and `challenge.ts` all import
-// from here, so nothing in this module imports back from those files — keeping
+// from here, so nothing in this module imports back from those files â€” keeping
 // the module graph acyclic.
 
 import { Client as ProofRegistryClient } from "../../proof-registry/src/index";
@@ -17,7 +17,7 @@ import { Client as ProofRegistryClient } from "../../proof-registry/src/index";
 
 /**
  * Returns true when the SDK is running in a browser (or browser-like) context.
- * Used only for development-mode boundary warnings — never throws.
+ * Used only for development-mode boundary warnings â€” never throws.
  */
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -44,7 +44,7 @@ function isDev(): boolean {
 let _warnedBoundaryViolation = false;
 
 /**
- * @internal — test-only hook to reset the one-shot boundary violation flag
+ * @internal â€” test-only hook to reset the one-shot boundary violation flag
  * between test cases. Not part of the public API.
  */
 export function __resetBoundaryWarningForTesting(): void {
@@ -91,13 +91,13 @@ function warnOnClientServerBoundaryViolation(opts: {
       "appear to come from server-only environment variables (e.g. STELLARCRED_REGISTRY_ID " +
       "or PROOF_REGISTRY_ID without the NEXT_PUBLIC_ prefix).\n\n" +
       "The ProofRegistry contract ID and RPC URL are read-only infrastructure config " +
-      "that is safe to expose to the client — but they must reach the browser through " +
+      "that is safe to expose to the client â€” but they must reach the browser through " +
       "public env vars (NEXT_PUBLIC_PROOF_REGISTRY_ID / NEXT_PUBLIC_RPC_URL in Next.js, " +
       "VITE_* in Vite) rather than server-only names.\n\n" +
       "If you are verifying claims server-side (recommended for access control), " +
-      "import from '@stellarcred/sdk/server' instead — the intent is explicit at " +
+      "import from '@stellarcred/sdk/server' instead â€” the intent is explicit at " +
       "the import site and this warning will not fire.\n\n" +
-      "See the SDK README §Trust boundary for details. " +
+      "See the SDK README Â§Trust boundary for details. " +
       "This warning only appears in development mode.",
   );
 }
@@ -188,7 +188,7 @@ let _config: Required<SDKConfig> = { ...DEFAULT_CONFIG };
 
 /**
  * Override SDK defaults at runtime. Call this once at app startup before any
- * `hasClaim` / `getClaims` calls. Each key is optional — omitted keys keep
+ * `hasClaim` / `getClaims` calls. Each key is optional â€” omitted keys keep
  * their env-var-derived or default values.
  */
 export function configure(opts: SDKConfig): void {
@@ -197,7 +197,7 @@ export function configure(opts: SDKConfig): void {
     rpcUrl: opts.rpcUrl,
   });
   _config = { ..._config, ...opts };
-  // The cached client is bound to the old config — drop it so the next read
+  // The cached client is bound to the old config â€” drop it so the next read
   // rebuilds against the new one.
   _client = null;
   _clientKey = "";
@@ -248,7 +248,7 @@ export function healthCheck(): {
 }
 
 /**
- * Alias for `healthCheck().configured` — a quick boolean check.
+ * Alias for `healthCheck().configured` â€” a quick boolean check.
  */
 export function isConfigured(): boolean {
   return healthCheck().configured;
@@ -1088,6 +1088,13 @@ export function buildVerifyUrl(opts: {
   wallet?: string;
   state?: string;
   baseUrl?: string;
+  expiresInMinutes?: number;
+  /**
+   * When true, generate a URL-safe single-use token id (`jti`) and embed it
+   * in the link. The verify page consumes it on first successful use and
+   * rejects subsequent visits in the same browser session.
+   */
+  singleUse?: boolean;
   claimParams?: {
     threshold?: string;
     threshold_years?: string;
@@ -1123,6 +1130,34 @@ export function buildVerifyUrl(opts: {
         : opts.claimParams.restricted;
       url.searchParams.set("param_restricted", restricted);
     }
+  }
+
+  if (opts.expiresInMinutes !== undefined) {
+    if (
+      !Number.isFinite(opts.expiresInMinutes) ||
+      opts.expiresInMinutes <= 0
+    ) {
+      throw new Error("expiresInMinutes must be a positive number");
+    }
+    const exp =
+      Math.floor(Date.now() / 1000) + Math.floor(opts.expiresInMinutes * 60);
+    url.searchParams.set("exp", String(exp));
+  }
+
+  if (opts.singleUse) {
+    let jti: string;
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      jti = crypto.randomUUID().replace(/-/g, "");
+    } else if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      jti = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    } else {
+      throw new Error(
+        "singleUse requires a crypto implementation with randomUUID or getRandomValues",
+      );
+    }
+    url.searchParams.set("jti", jti);
   }
 
   return url.toString();

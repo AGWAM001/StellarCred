@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -16,7 +16,9 @@ import { saveCredential, TYPE_META, type Credential } from "@/lib/credential";
 import type { CredentialType } from "@/lib/stellar";
 import { useToast } from "@/components/Toast";
 import { Badge } from "@/components/Badge";
-import { parseTrustedIssuersParam, validateVerifyParams } from "@/lib/verifyParams";
+import { parseTrustedIssuersParam, validateVerifyParams, parseVerifyParams, type VerifyError } from "@/lib/verifyParams";
+import { consumeVerifyNonce, isVerifyNonceConsumed } from "@/lib/verify-nonce";
+import VerifyLinkError from "./VerifyLinkError";
 import {
   eligibleIssuers,
   isProtocolAccepted,
@@ -51,8 +53,8 @@ const DEMO_ISSUER_ID = process.env.NEXT_PUBLIC_ISSUER_ADDRESS ?? "";
 const VALID_CLAIMS = TYPES.map(([k]) => k);
 
 // One id per verify session, sent as `x-request-id` on every /api/issue and
-// /api/plaid-balance call so server logs for a single issuance — including
-// across the Persona redirect round-trip — can be correlated together.
+// /api/plaid-balance call so server logs for a single issuance â€” including
+// across the Persona redirect round-trip â€” can be correlated together.
 function getOrCreateRequestId(): string {
   if (typeof window === "undefined") return "";
   const KEY = "sc_request_id";
@@ -70,11 +72,51 @@ function VerifyInner() {
   const router = useRouter();
   const { address } = useWallet();
   const searchParams = useSearchParams();
+
+  // Structured parse of every /verify query param — the single source of
+  // truth for whether this link is usable. Expired / malformed / consumed
+  // links are rejected here, before any form is rendered.
+  const parsedLink = useMemo(
+    () =>
+      parseVerifyParams({
+        return_url: searchParams.get("return_url"),
+        claim: searchParams.get("claim"),
+        threshold_years: searchParams.get("threshold_years"),
+        threshold: searchParams.get("threshold"),
+        min_threshold: searchParams.get("min_threshold"),
+        restricted: searchParams.get("restricted"),
+        inquiry_id: searchParams.get("inquiry-id"),
+        exp: searchParams.get("exp"),
+        jti: searchParams.get("jti"),
+      }),
+    [searchParams],
+  );
+
+  const [linkError, setLinkError] = useState<VerifyError | null>(
+    parsedLink.ok ? null : parsedLink.error ?? null,
+  );
+
+  useEffect(() => {
+    if (!parsedLink.ok) {
+      setLinkError(parsedLink.error ?? null);
+      return;
+    }
+    if (parsedLink.jti && isVerifyNonceConsumed(parsedLink.jti)) {
+      setLinkError({
+        code: "consumed_link",
+        title: "This verification link has already been used",
+        detail:
+          "Each single-use verification link can only be opened once. Ask the service that sent you here for a fresh link.",
+      });
+    } else {
+      setLinkError(null);
+    }
+  }, [parsedLink]);
   const toast = useToast();
 
   // When a protocol redirects here it can specify where to send the user back
   // (return_url) and exactly which claim it requires (claim). A required claim
-  // locks the selector — the user can't pick something the protocol didn't ask
+  // locks the selector â€” the user can't pick something the protocol didn't ask
   // for.
   const returnUrl = searchParams.get("return_url");
   const personaInquiryId = searchParams.get("inquiry-id");
@@ -155,7 +197,7 @@ function VerifyInner() {
     claimParamsFromUrl.mode ?? "0",
   );
 
-  // #620 — several registered issuers can attest the same claim type, so let
+  // #620 â€” several registered issuers can attest the same claim type, so let
   // the holder pick which one issues to them.
   const [issuers, setIssuers] = useState<RegisteredIssuer[]>([]);
   const [selectedIssuerId, setSelectedIssuerId] = useState("");
@@ -203,7 +245,7 @@ function VerifyInner() {
     issuersForType.some((issuer) => isProtocolAccepted(issuer.id, trustedIssuerGate));
 
   // A protocol can display this scanned code instead of a clickable link
-  // (e.g. on a kiosk or a screen the phone doesn't have a direct link to) —
+  // (e.g. on a kiosk or a screen the phone doesn't have a direct link to) â€”
   // it's the exact same /verify?return_url=...&claim=... URL buildVerifyUrl
   // produces, so scanning it just navigates there like clicking the link would.
   function onScanRequest(text: string) {
@@ -215,7 +257,7 @@ function VerifyInner() {
       toast.error("That QR code isn't a valid StellarCred verify request.");
       return;
     }
-    // A real verify request always has return_url — reject anything else
+    // A real verify request always has return_url â€” reject anything else
     // outright rather than treating an arbitrary scanned URL as trustworthy.
     if (dest.pathname !== "/verify" || !dest.searchParams.has("return_url")) {
       toast.error("That QR code isn't a valid StellarCred verify request.");
@@ -223,7 +265,7 @@ function VerifyInner() {
     }
     if (dest.origin === window.location.origin) {
       // The scanned URL itself is same-origin, but its embedded return_url
-      // is where the wallet address ends up after issuance — a QR can stay
+      // is where the wallet address ends up after issuance â€” a QR can stay
       // on stellarcred.xyz throughout and still smuggle in a cross-origin
       // return_url, so that param needs the same confirmation the top-level
       // origin check gets below.
@@ -250,7 +292,7 @@ function VerifyInner() {
     } else if (dest.protocol === "https:") {
       // Leaving the app entirely on a scanned code's say-so is exactly the
       // shape of an open-redirect/phishing risk (a malicious QR could point
-      // anywhere) — confirm the destination with the user first instead of
+      // anywhere) â€” confirm the destination with the user first instead of
       // silently redirecting.
       if (!window.confirm(`This code will take you to ${dest.hostname} to continue verification there. Continue?`)) {
         return;
@@ -326,7 +368,7 @@ function VerifyInner() {
   }, [fundsSelected]);
 
   // Guarantee cleanup on abandonment: if the user comes back from Persona
-  // without an inquiry-id (cancelled mid-flow) — or never left — any lingering
+  // without an inquiry-id (cancelled mid-flow) â€” or never left â€” any lingering
   // sc_persona_pending blob is wiped on mount. loadPersonaPending() clears on
   // read for the success/failure paths below.
   useEffect(() => {
@@ -458,6 +500,9 @@ function VerifyInner() {
 
   // Where the user is sent after a successful issue.
   function redirectAfterIssue() {
+    if (parsedLink.ok && parsedLink.jti) {
+      consumeVerifyNonce(parsedLink.jti, parsedLink.exp ?? 0);
+    }
     if (returnUrl && !urlError && address) {
       let dest;
       try {
@@ -486,7 +531,7 @@ function VerifyInner() {
         if (dest.origin === window.location.origin) {
           router.push(dest.pathname + dest.search);
         } else {
-          // Never router.push an external URL — do a real browser navigation.
+          // Never router.push an external URL â€” do a real browser navigation.
           window.location.href = dest.toString();
         }
       } catch {
@@ -510,7 +555,7 @@ function VerifyInner() {
       const issuerName = selectedIssuer?.name ?? "StellarCred Authority";
       if (!issuerId) {
         throw new Error(
-          "NEXT_PUBLIC_ISSUER_ADDRESS is not set — cannot issue credentials",
+          "NEXT_PUBLIC_ISSUER_ADDRESS is not set â€” cannot issue credentials",
         );
       }
       const payload = {
@@ -533,7 +578,7 @@ function VerifyInner() {
           returnUrl: returnUrl ?? undefined,
         }),
       });
-      // 202 means Persona identity verification is required — redirect user.
+      // 202 means Persona identity verification is required â€” redirect user.
       if (res.status === 202) {
         const { personaUrl } = (await res.json()) as { personaUrl: string };
         // Stash only what resuming issuance needs. savePersonaPending
@@ -549,7 +594,7 @@ function VerifyInner() {
           claimParams: { ...payload.claimParams },
         });
         window.location.href = personaUrl;
-        return; // don't clear busy — page is navigating away
+        return; // don't clear busy â€” page is navigating away
       }
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as {
@@ -590,10 +635,13 @@ function VerifyInner() {
         <WalletButton />
       </div>
 
-      {/* Same shared check as /api/ready — surfaces misconfiguration before
+      {/* Same shared check as /api/ready â€” surfaces misconfiguration before
           the user fills anything in, instead of failing mid-issue. */}
       <ConfigBanner requireIssuance />
 
+      {linkError ? (
+        <VerifyLinkError error={linkError} onBack={() => router.push("/")} />
+      ) : (
       <div style={{ maxWidth: 520, margin: "0 auto" }}>
         {!locked && (
           <div style={{ textAlign: "right", marginBottom: "0.75rem" }}>
@@ -653,8 +701,8 @@ function VerifyInner() {
                 style={{ fontSize: "0.85rem", marginTop: "0.3rem" }}
               >
                 {requestingDomain && !urlError
-                  ? `Returning to ${requestingDomain}…`
-                  : "Credential saved — redirecting to your wallet…"}
+                  ? `Returning to ${requestingDomain}â€¦`
+                  : "Credential saved â€” redirecting to your walletâ€¦"}
               </div>
             </div>
           ) : (
@@ -803,15 +851,15 @@ function VerifyInner() {
                             ? `balance > $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
                             : key === "age" &&
                                 claimParamsFromUrl.threshold_years
-                              ? `age ≥ ${claimParamsFromUrl.threshold_years}`
+                              ? `age â‰¥ ${claimParamsFromUrl.threshold_years}`
                               : key === "income" && claimParamsFromUrl.threshold
                                 ? `income > $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
                                 : key === "accreditation" &&
                                     claimParamsFromUrl.threshold
-                                  ? `net worth ≥ $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
+                                  ? `net worth â‰¥ $${Number(claimParamsFromUrl.threshold).toLocaleString("en-US")}`
                                   : key === "employment" &&
                                       claimParamsFromUrl.threshold
-                                    ? `seniority ≥ ${claimParamsFromUrl.threshold} yrs`
+                                    ? `seniority â‰¥ ${claimParamsFromUrl.threshold} yrs`
                                     : m.claim}
                         </span>
                       </div>
@@ -889,7 +937,7 @@ function VerifyInner() {
                               }}
                             >
                               <IconLoader2 size={12} className="spin" />
-                              Reading balance from Plaid…
+                              Reading balance from Plaidâ€¦
                             </p>
                           ) : (
                             <div
@@ -920,7 +968,7 @@ function VerifyInner() {
                                   {plaidMock
                                     ? "Mock balance"
                                     : plaidSources && plaidSources > 1
-                                      ? `Aggregate balance — ${plaidSources} linked sources`
+                                      ? `Aggregate balance â€” ${plaidSources} linked sources`
                                       : "Verified balance (Plaid)"}
                                 </span>
                                 <span
@@ -978,7 +1026,7 @@ function VerifyInner() {
                                     color: "var(--accent)",
                                   }}
                                 >
-                                  balance ≥ $
+                                  balance â‰¥ $
                                   {Number(
                                     claimParamsFromUrl.threshold ?? "10000",
                                   ).toLocaleString("en-US")}
@@ -992,8 +1040,8 @@ function VerifyInner() {
                                 }}
                               >
                                 Balances from all linked accounts are summed
-                                before attestation. The aggregate — not any
-                                individual account — is committed, and only
+                                before attestation. The aggregate â€” not any
+                                individual account â€” is committed, and only
                                 this threshold is ever public.
                               </p>
                             </div>
@@ -1040,8 +1088,8 @@ function VerifyInner() {
                           </select>
                           <p className="faint" style={{ fontSize: "0.72rem", margin: "0.35rem 0 0" }}>
                             {jurisdictionMode === "0"
-                              ? "Proves your country is NOT in the restricted list — your country is never revealed on-chain."
-                              : "Proves your country IS in the allowed list — your country is never revealed on-chain."}
+                              ? "Proves your country is NOT in the restricted list â€” your country is never revealed on-chain."
+                              : "Proves your country IS in the allowed list â€” your country is never revealed on-chain."}
                           </p>
                         </div>
                       )}
@@ -1101,7 +1149,7 @@ function VerifyInner() {
                         issuer.metadata?.url,
                       ]
                         .filter(Boolean)
-                        .join(" · ");
+                        .join(" Â· ");
                       const focus = (index: number) => {
                         const next =
                           issuersForType[
@@ -1243,7 +1291,7 @@ function VerifyInner() {
                       }}
                     >
                       None of the issuers registered for this claim is accepted
-                      by {requestingDomain || "this protocol"} — its gate will
+                      by {requestingDomain || "this protocol"} â€” its gate will
                       reject the proof whichever issuer you pick.
                     </p>
                   )}
@@ -1280,7 +1328,7 @@ function VerifyInner() {
                   className="mono"
                   style={{ fontSize: "0.8125rem", color: "var(--muted)" }}
                 >
-                  {address.slice(0, 6)}…{address.slice(-4)}
+                  {address.slice(0, 6)}â€¦{address.slice(-4)}
                 </span>
               </div>
 
@@ -1300,7 +1348,7 @@ function VerifyInner() {
                   <strong>{selectedIssuer.name}</strong> is not on{" "}
                   {requestingDomain || "this protocol"}&apos;s trusted-issuer
                   list. The credential will still be issued, but the protocol
-                  will reject a proof from it — pick an issuer marked
+                  will reject a proof from it â€” pick an issuer marked
                   &ldquo;Accepted by protocol&rdquo; to pass its gate.
                 </div>
               )}
@@ -1320,7 +1368,7 @@ function VerifyInner() {
                 title={
                   issuanceConfigured()
                     ? undefined
-                    : "App not configured — NEXT_PUBLIC_ISSUER_ADDRESS / IssuerRegistry missing"
+                    : "App not configured â€” NEXT_PUBLIC_ISSUER_ADDRESS / IssuerRegistry missing"
                 }
                 onClick={onRequest}
               >
@@ -1328,8 +1376,8 @@ function VerifyInner() {
                   <>
                     <IconLoader2 size={15} className="spin" />
                     {selected === "kyc"
-                      ? "Redirecting to verification…"
-                      : "Creating credential…"}
+                      ? "Redirecting to verificationâ€¦"
+                      : "Creating credentialâ€¦"}
                   </>
                 ) : (
                   <>
@@ -1360,12 +1408,13 @@ function VerifyInner() {
                 }}
               >
                 Each claim is committed with Poseidon2 and stays private. You
-                prove a statement about it — never the underlying value.
+                prove a statement about it â€” never the underlying value.
               </p>
             </>
           )}
         </div>
       </div>
+      )}
     </>
   );
 }
