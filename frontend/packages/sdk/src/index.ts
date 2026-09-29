@@ -1,9 +1,14 @@
 // @stellarcred/sdk
 //
 // A tiny, zero-dependency* read-only client for protocols integrating
-// StellarCred. The only thing a protocol trusts is the on-chain
+// StellarCred. By default the only thing a protocol trusts is the on-chain
 // ProofRegistry — there is no API key, no backend, and no personal data
 // handling. `hasClaim` is the primary integration call.
+//
+// Reads can optionally be sourced from a StellarCred indexer instead
+// (`{ source: "indexer" }`), which is much faster but trusts whoever operates
+// that indexer. It is off by default and must never be the sole basis for a
+// security decision. See the SDK README §Indexer fast path (issue #613).
 //
 // *Requires @stellar/stellar-sdk as a peer dependency.
 //
@@ -51,6 +56,7 @@ import {
   ConfigError,
   InvalidAddressError,
   RpcError,
+  IndexerError,
 } from "./claims";
 
 import {
@@ -84,5 +90,6 @@ export const StellarCred = {
   ConfigError,
   InvalidAddressError,
   RpcError,
+  IndexerError,
 };
 export default StellarCred;

@@ -52,6 +52,49 @@ deployable contracts are the workspace's `default-members` and a bare
 `cargo build --release --target wasm32v1-none` never compiles it. It is still
 covered by `cargo test` and by `cargo clippy --workspace`.
 
+## Setting up your environment
+
+Full install instructions — including exact commands, PATH configuration, and
+a troubleshooting table — are in **[SETUP.md](SETUP.md)**.
+
+After following SETUP.md, run:
+
+```bash
+make doctor
+```
+
+`make doctor` checks every pinned toolchain version and tells you exactly what
+is wrong before you hit a confusing CI failure. A passing run looks like:
+
+```
+[ok]   rustc                  1.93.1
+[ok]   wasm32v1-none          installed
+[ok]   nargo                  1.0.0-beta.9
+[ok]   bb                     0.87.0
+[ok]   node                   v20.x.x  (need 20.x)
+[ok]   pnpm                   9.x.x    (need 9.x)
+[ok]   npm                    10.x.x
+All checks passed — environment is ready.
+```
+
+Fix any `[FAIL]` lines before running `make build` or `make test`.
+
+### Pinned versions at a glance
+
+| Tool | Pinned version | Why pinned |
+|------|---------------|------------|
+| Rust | **1.93.1** | Byte-identical WASM artifacts (`rust-toolchain.toml`) |
+| wasm32v1-none | — | Required compile target for Soroban contracts |
+| nargo | **1.0.0-beta.9** | VK determinism — must match `bb` exactly |
+| bb | **0.87.0** | VK determinism — must match `nargo` exactly |
+| Node | **20** | Frontend and indexer |
+| pnpm | **9** | Frontend workspace manager |
+
+> **Circuit toolchain warning:** the `nargo` and `bb` versions are load-bearing.
+> A mismatch produces a VK that differs from the committed fixture, and CI fails
+> with `VK mismatch for <circuit>` — which looks like your change broke
+> something but is actually a version problem. Run `make doctor` first.
+
 ## Docker quickstart
 
 Skip local toolchain installs — use the pinned dev image:
@@ -70,21 +113,8 @@ docker compose run --rm contracts cargo test
 docker compose run --rm circuits nargo compile --workspace
 ```
 
-The image pins Rust stable, Stellar CLI v27, nargo 1.0.0-beta.9, bb 0.87.0, Node 20, and pnpm 9 — matching the versions in the table below.
-
-## Prerequisites
-
-| Tool | Version | Install |
-|------|---------|---------|
-| Rust | stable | `rustup` |
-| wasm32v1-none target | — | `rustup target add wasm32v1-none` |
-| Stellar CLI | v27 | `brew install stellar-cli` |
-| nargo | 1.0.0-beta.9 | `noirup -v 1.0.0-beta.9` |
-| bb | 0.87.0 | `bbup -v 0.87.0` |
-| Node | 20 | `nvm` / `volta` |
-| pnpm | 9 | `corepack enable && corepack prepare pnpm@9 --activate` |
-
-> The nargo and bb versions must match exactly — the verification key is deterministic from the circuit compiler version, and a mismatch will cause proof verification to fail on-chain.
+The image pins Rust 1.93.1, nargo 1.0.0-beta.9, bb 0.87.0, Node 20, and pnpm 9,
+so version mismatches are not possible inside the container.
 
 ## Getting started
 
@@ -110,12 +140,83 @@ npm run dev
 
 ## Development workflow
 
-1. **Fork** the repo and create a branch from `main`.
+1. **Pick and claim an issue** (see [Picking up an issue](#picking-up-an-issue) below), then **fork** the repo and create a branch from `main`.
 2. Make your changes. Keep commits focused — one logical change per commit.
 3. For contract changes: run `cargo test` and confirm all tests pass.
 4. For circuit changes: run `./circuits/scripts/build.sh` and update the relevant `fixtures/<type>/` artifacts, then regenerate the regression test vectors with `node circuits/scripts/testvectors.js update` (see `circuits/README.md` — "Test Vectors") and commit the result. CI runs `node circuits/scripts/testvectors.js check` and fails if a circuit or toolchain change silently altered proof output without the vectors being updated.
 5. For frontend changes: run `pnpm tsc --noEmit` (zero errors required) and `pnpm build`.
 6. Open a pull request against `main` with a clear description of what changed and why.
+
+## Picking up an issue
+
+The repo carries dozens of open issues labelled by **area** (`contracts`, `circuits`,
+`frontend`, `sdk`, `backend`, `infrastructure`) and **difficulty** (`easy`, `medium`,
+`hard`). Difficulty alone is *not* a safety signal: a change labelled `easy` that touches
+the signing path or a circuit can silently break a trust property, while a `hard` label
+on an isolated SDK helper may be perfectly safe to attempt. Use the guidance below to
+pick work that matches both your comfort level and the risk the area carries.
+
+### Which issues are safe to pick up
+
+Issues tagged [`good first issue`](https://github.com/ToluLabs/StellarCred/labels/good%20first%20issue)
+are curated by maintainers to be **self-contained and unable to break a trust property**.
+An issue only earns that label when every box below is true:
+
+- It touches only a *Normal* review area (docs, UI copy, isolated frontend components,
+  SDK helpers, additive tests, tooling that does not run with repo credentials).
+- It does **not** modify `contracts/`, `circuits/`, `fixtures/`, the issuance/signing path
+  (`frontend/app/api/issue`, `lib/issuer-signer.ts`, `lib/persona-webhook.ts`), or
+  `.github/workflows/`.
+- It has no unmet dependency — nothing else has to land first.
+- Its correct behaviour is checkable by a test or a type check, not by reading a diff.
+
+If an issue is not labelled `good first issue`, assume it needs the care described in
+[Sensitive areas](#sensitive-areas-and-their-invariants) below, even when the difficulty
+label says `easy`. When in doubt, ask in the issue before starting.
+
+### Claiming an issue (avoid duplicate PRs)
+
+Several issues have accumulated two or three competing PRs because nothing signalled a
+claim. Follow this convention:
+
+1. **Comment on the issue and ask to be assigned.** A maintainer assigns the issue to you;
+   the assignment *is* the claim. Do not open a PR for an issue that is already assigned.
+2. **One assignee per issue.** If someone is already assigned, do not start a parallel PR.
+   Offer to help on theirs instead, or pick an unassigned issue.
+3. **Use draft PRs early.** Opening a `draft` PR that references the issue announces the
+   claim to everyone and lets reviewers course-correct before much code is written.
+4. **Stale claims are released.** If an assignee is inactive for ~2 weeks, a maintainer may
+   unassign the issue so someone else can take it. Say the word if you need more time.
+5. **Reference, don't guess.** Link the PR with `Closes #<n>` / `Fixes #<n>` so the issue and
+   the claim move together.
+
+### Dependencies between issues
+
+When one issue must land before another can be done, that relationship belongs on the
+issues themselves, not in someone's head:
+
+- The blocking issue gains a `blocked` note in its body: **“Blocked by #<n>”** near the top.
+- The *dependent* issue is **not** labelled `good first issue` and should not be claimed
+  until the blocker is merged.
+- If you pick up an issue and discover a dependency that isn’t recorded, comment on it and
+  ask a maintainer to add the “Blocked by” line before you write code — starting out of
+  order is the usual cause of throwaway PRs.
+
+## Sensitive areas and their invariants
+
+The [Review routing](#review-routing) table says *who* reviews each area. This table says
+*what must stay true* — the invariant a plausible-looking change can quietly break. If
+your diff touches one of these areas, name the invariant you preserved in the PR
+description. A change that passes the test suite but weakens any of these is a regression,
+not a fix: the tests often encode the same mistaken assumption (see
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) and the relevant [ADR](#architecture-decision-records)).
+
+| Area | Invariants you must not break |
+|------|-------------------------------|
+| `contracts/` (IssuerRegistry, ProofRegistry, CredentialVerifier, GatedPool) | A proof is accepted only when it verifies on-chain against a registered VK with real BN254 verification — test-side auth mocking (`mock_all_auths`) never stands in for the verification itself; only `IssuerRegistry`-registered issuer keys are trusted (`is_valid_issuer_key`: current key, or a retired key still inside its validity window); `submit_proof` stays holder-authorized (ADR-003); `is_verified`/`check_claim` remain public reads (ADR-004); expiry stays bounded by `MAX_CREDENTIAL_TTL_SECS`; revocation only shortens validity, never extends it. |
+| `circuits/` + `fixtures/` | A credential is only valid when the issuer's secp256k1 signature is verified **inside** the circuit over the committed value (ADR-001); the Poseidon2 commitment keeps its mandatory salt (ADR-002); never remove or loosen a constraint or range check — that is a soundness break that still compiles, proves, and verifies while asserting something untrue; committed fixtures and `testvectors.js` must be regenerated by the pinned `nargo 1.0.0-beta.9` / `bb 0.87.0` build, never hand-edited. |
+| `frontend/app/api/issue/`, `lib/issuer-signer.ts`, `packages/issuer/`, `lib/persona-webhook.ts` | `prehash: false` is preserved on the secp256k1 signing call in `packages/issuer` (`signCommitment`) — Noir consumes the raw 32-byte digest, not a double-SHA256, so re-enabling prehash produces signatures the circuit rejects; the signature stays over the commitment digest that matches the circuit's public inputs; `lib/issuer-signer.ts` keeps its server-only guard and `ISSUER_PRIVATE_KEY` never gains a `NEXT_PUBLIC_` prefix or reaches client-bundled code; no identity field is persisted or logged after a KYC/provider call. |
+| `.github/workflows/`, `Makefile`, `deny.toml` | These run with repo credentials and the release job publishes to npm — a workflow diff is treated like a signing-path diff; do not add `pull_request_target` handlers that check out untrusted PR code, and do not widen license/audit gates without a note. |
 
 ## Branch Cleanup
 
