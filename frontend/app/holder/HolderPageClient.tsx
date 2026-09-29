@@ -56,6 +56,10 @@ import { ConfirmRemoveModal } from "@/components/holder/ConfirmRemoveModal";
 import { proofStatus, isExpiringSoon, daysRemaining } from "@/lib/proof-helpers";
 
 // Heavy modals loaded lazily — keep the route's initial bundle small.
+
+// The encrypted-transfer modals are heavy (credential-crypto.ts PBKDF2/AES-GCM, QR
+// rendering) and only needed when the user actually starts a transfer — load
+// them lazily so the holder route's 15 kB bundle budget stays intact.
 const TransferExportModal = dynamic(
   () => import("@/components/TransferExportModal").then((m) => m.TransferExportModal),
   { ssr: false },
