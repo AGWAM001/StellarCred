@@ -618,6 +618,26 @@ Off-chain indexers (e.g. `services/indexer`) monitor events using Soroban RPC `g
 | `i128` | `ScVal::I128` | `bigint` / `string` |
 | `BytesN<64>` | `ScVal::Bytes` | `Buffer` / `Uint8Array` (64 bytes hex) |
 
+### SDK Real-Time Subscription Helper (`#392`)
+
+Protocols that need push-style notification when a watched wallet gains or
+loses a claim should use `subscribeClaims()` from `@stellarcred/sdk` instead
+of decoding these events themselves. It consumes the indexer service
+(`services/indexer`) so a single subscription covers many wallets:
+
+- **Gains** stream from `GET /recent` — rows are the indexed
+  `("proof_reg", "submitted", <credential_type>)` events, ordered by
+  `(ledger_sequence, id)`; the helper walks pages newer than its stored
+  keyset cursor once per `pollMs`.
+- **Losses** (`("proof_reg", "revoked", <credential_type>)`) are detected by
+  diffing periodic `GET /claims?wallet=…` snapshots (the `revoked` flag), and
+  proof expiry is computed locally from the indexed `expiry` timestamps.
+
+Because both endpoints derive from the event payloads above, event schema
+stability (see §Schema Stability Guarantees) is what makes the subscription
+feed safe to build on. See the SDK README §`subscribeClaims` for the callback
+and webhook payload schemas.
+
 ---
 
 ## Schema Stability Guarantees & Drift Prevention

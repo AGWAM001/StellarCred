@@ -29,6 +29,7 @@
 
 export * from "./claims";
 export * from "./challenge";
+export * from "./subscriptions";
 export { createClaimGate } from "./core";
 export type { ClaimGateConfig, ClaimGateState, ClaimGateListener, ClaimGate } from "./core";
 export { useStellarCred } from "./react";
@@ -65,6 +66,8 @@ import {
   verifyWalletClaim,
 } from "./challenge";
 
+import { subscribeClaims } from "./subscriptions";
+
 export const StellarCred = {
   configure,
   healthCheck,
@@ -82,6 +85,7 @@ export const StellarCred = {
   parseReturnParams,
   watchClaim,
   withRetry,
+  subscribeClaims,
   createWalletChallenge,
   verifyWalletSignature,
   verifyWalletClaim,
