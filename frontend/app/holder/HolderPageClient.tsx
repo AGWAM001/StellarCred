@@ -507,6 +507,10 @@ function HolderInner() {
     const rawImport = searchParams.get(IMPORT_PARAM);
     if (!rawImport || importPayload === rawImport) return;
     setImportPayload(rawImport);
+    router.replace("/holder");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, importPayload, router]);
+
   useEffect(() => { loadCredentials().then((c) => { setCreds(c); setLoading(false); }); }, []);
 
   // Cross-tab sync: listen for storage events from other tabs
