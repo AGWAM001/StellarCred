@@ -114,6 +114,7 @@ scripts/deploy.sh       deploy + wire + register issuer + install all VKs on tes
 scripts/benchmark.sh    measure instruction budget for every public function on testnet
 BENCHMARKS.md           per-function instruction counts, ledger I/O, and fee estimates
 EVENTS.md               authoritative contract event topic & payload schemas
+docs/STORAGE_TTL.md     contract storage lifetime model, rent fees, and archival behavior
 ```
 
 All five credential circuits share one commitment scheme,

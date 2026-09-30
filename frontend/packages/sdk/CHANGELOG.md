@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never cached.
 - Development-mode warning when `indexerApiKey` is configured from a browser
   context, since it is a secret with no `NEXT_PUBLIC_` alias.
+- `subscribeClaims()` real-time subscription helper (#392): push-style `gained`/`lost` claim change notifications for a set of wallets and claim types, backed by the indexer (`GET /recent` cursor feed + `GET /claims` snapshot reconciliation), delivered via callbacks or a registered webhook with retry.
 
 ### Documentation
 - New "Indexer fast path (optional)" section covering the trust tradeoff, the
