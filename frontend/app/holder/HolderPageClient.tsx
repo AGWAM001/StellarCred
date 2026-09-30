@@ -37,6 +37,7 @@ import { IMPORT_PARAM } from "@/lib/transfer";
 import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
 import { useWarmProver } from "@/lib/use-warm-prover";
 import type { Credential } from "@/lib/credential";
+import { DataWipePanel } from "@/components/DataWipePanel";
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 import { useCredentialStore } from "@/lib/hooks/useCredentialStore";
@@ -296,6 +297,13 @@ function HolderInner() {
                 Where your credentials live
               </Link>
             </p>
+          </div>
+        )}
+
+        {/* ── Data Management (Data Wipe) ── */}
+        {!loading && !importing && (
+          <div style={{ marginTop: "2.5rem", paddingTop: "2rem", borderTop: "1px solid var(--border)" }}>
+            <DataWipePanel />
           </div>
         )}
 
