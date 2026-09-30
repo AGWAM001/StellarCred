@@ -503,8 +503,9 @@ function HolderInner() {
 
   // Deep-link: /holder?import=<payload> opens the transfer-import modal and
   // strips the param from the URL so a back/refresh doesn't re-trigger it.
-  const rawImport = searchParams.get(IMPORT_PARAM);
-  if (rawImport && importPayload !== rawImport) {
+  useEffect(() => {
+    const rawImport = searchParams.get(IMPORT_PARAM);
+    if (!rawImport || importPayload === rawImport) return;
     setImportPayload(rawImport);
   useEffect(() => { loadCredentials().then((c) => { setCreds(c); setLoading(false); }); }, []);
 
@@ -546,7 +547,8 @@ function HolderInner() {
     if (!payload) return;
     setImportPayload(payload);
     router.replace("/holder");
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, importPayload, router]);
 
   // ── Derived credential lists ───────────────────────────────────────────────
   const displayCreds = isPreview ? PREVIEW_CREDENTIALS : creds;
