@@ -301,7 +301,7 @@ function HolderInner() {
         )}
 
         {/* ── Data Management (Data Wipe) ── */}
-        {!loading && !importing && (
+        {!importing && (
           <div style={{ marginTop: "2.5rem", paddingTop: "2rem", borderTop: "1px solid var(--border)" }}>
             <DataWipePanel />
           </div>
