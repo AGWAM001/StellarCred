@@ -9,10 +9,10 @@
 // import from this module everywhere else.
 
 // Re-export from SDK to ensure single source of truth (#404)
-export { PROOF_REGISTRY_ERROR_MESSAGES as PROOF_REGISTRY_ERRORS } from "@stellarcred/sdk";
+export { PROOF_REGISTRY_ERROR_MESSAGES as PROOF_REGISTRY_ERRORS } from "../packages/sdk/src/errors";
 
 // Legacy alias for backward compatibility
-import { PROOF_REGISTRY_ERROR_MESSAGES } from "@stellarcred/sdk";
+import { PROOF_REGISTRY_ERROR_MESSAGES } from "../packages/sdk/src/errors";
 export const _PROOF_REGISTRY_ERRORS_LEGACY = PROOF_REGISTRY_ERROR_MESSAGES;
 
 // ── ContractError ─────────────────────────────────────────────────────────────
