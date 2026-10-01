@@ -223,7 +223,7 @@ export function DataWipePanel() {
                   </ul>
                   <p style={{ margin: "0.75rem 0 0", fontWeight: 600, color: "var(--danger)" }}>
                     Your credentials will be backed up as a JSON file before wiping. Keep this
-                    file safe — it's your only way to restore them.
+                    file safe — it&apos;s your only way to restore them.
                   </p>
                 </div>
               </div>
