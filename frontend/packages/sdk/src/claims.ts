@@ -17,6 +17,7 @@ import {
   findClaimRow,
   type IndexerClaimRow,
 } from "./indexer";
+// RpcError has been moved to ./errors.ts (issue #404)
 import { RpcError } from "./errors";
 
 export { IndexerError };
