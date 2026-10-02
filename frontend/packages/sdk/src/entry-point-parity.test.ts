@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import * as fromIndex from "./index";
 import * as fromClaims from "./claims";
 import * as fromChallenge from "./challenge";
+import * as fromErrors from "./errors";
 
 // ── Claim-checking functions (sourced from claims.ts) ────────────────────────
 
@@ -39,7 +40,15 @@ const CLAIMS_EXPORTS = [
   "TimeoutError",
   "ConfigError",
   "InvalidAddressError",
+  "IndexerError",
+] as const;
+
+// Errors exports (sourced from errors.ts) - issue #404
+const ERRORS_EXPORTS = [
   "RpcError",
+  "ContractError",
+  "ContractErrorCode",
+  "parseContractError",
 ] as const;
 
 // ── Challenge functions (sourced from challenge.ts) ──────────────────────────
@@ -81,7 +90,20 @@ describe("entry-point parity (issue #609 / #522)", () => {
     });
   }
 
-  // ── StellarCred namespace holds same references ────────────────────────────
+  // ── errors.ts exports re-exported identically by index.ts (issue #404) ────
+
+  for (const name of ERRORS_EXPORTS) {
+    it(`index.ts re-exports the same ${name} reference as errors.ts`, () => {
+      const fromIndexValue = (fromIndex as Record<string, unknown>)[name];
+      const fromErrorsValue = (fromErrors as Record<string, unknown>)[name];
+
+      expect(fromIndexValue).toBeDefined();
+      expect(fromErrorsValue).toBeDefined();
+      expect(fromIndexValue).toBe(fromErrorsValue);
+    });
+  }
+
+  // ── StellarCred namespace holds same references ──────────────────────────
 
   it("StellarCred namespace members are the same references as claims.ts exports", () => {
     const ns = fromIndex.StellarCred;
@@ -105,7 +127,7 @@ describe("entry-point parity (issue #609 / #522)", () => {
     expect(ns.TimeoutError).toBe(fromClaims.TimeoutError);
     expect(ns.ConfigError).toBe(fromClaims.ConfigError);
     expect(ns.InvalidAddressError).toBe(fromClaims.InvalidAddressError);
-    expect(ns.RpcError).toBe(fromClaims.RpcError);
+    expect(ns.IndexerError).toBe(fromClaims.IndexerError);
   });
 
   it("StellarCred namespace members are the same references as challenge.ts exports", () => {
@@ -114,6 +136,15 @@ describe("entry-point parity (issue #609 / #522)", () => {
     expect(ns.createWalletChallenge).toBe(fromChallenge.createWalletChallenge);
     expect(ns.verifyWalletSignature).toBe(fromChallenge.verifyWalletSignature);
     expect(ns.verifyWalletClaim).toBe(fromChallenge.verifyWalletClaim);
+  });
+
+  it("StellarCred namespace members are the same references as errors.ts exports", () => {
+    const ns = fromIndex.StellarCred;
+
+    expect(ns.RpcError).toBe(fromErrors.RpcError);
+    expect(ns.ContractError).toBe(fromErrors.ContractError);
+    expect(ns.ContractErrorCode).toBe(fromErrors.ContractErrorCode);
+    expect(ns.parseContractError).toBe(fromErrors.parseContractError);
   });
 
   it("default export equals the StellarCred named export", () => {
