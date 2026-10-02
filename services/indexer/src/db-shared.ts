@@ -444,6 +444,37 @@ export function createSharedDb(dialect: SqlDialect): Db {
       );
     },
 
+    async sampleClaimsForVerification(limit) {
+      const cursor = await dialect.get<{ last_claim_id: SqlParam }>(
+        "SELECT last_claim_id FROM data_integrity_state WHERE id = 1",
+      );
+      const lastId = toCount(cursor?.last_claim_id);
+
+      // Take the next `limit` rows past the cursor. When that runs off the end
+      // of the table, top the slice back up from the start so every check
+      // samples the same number of claims — otherwise the run just before the
+      // wrap would report a tiny `checked` count and look like the sweep had
+      // stalled.
+      let rows = await claims(
+        `SELECT * FROM claims WHERE id > ? ORDER BY id ASC LIMIT ?`,
+        [lastId, limit],
+      );
+      if (rows.length < limit && lastId > 0) {
+        const wrapped = await claims(
+          `SELECT * FROM claims WHERE id <= ? ORDER BY id ASC LIMIT ?`,
+          [lastId, limit - rows.length],
+        );
+        rows = rows.concat(wrapped);
+      }
+
+      const nextId = rows.length > 0 ? rows[rows.length - 1].id : lastId;
+      await dialect.run(
+        "UPDATE data_integrity_state SET last_claim_id = ? WHERE id = 1",
+        [nextId],
+      );
+      return rows;
+    },
+
     async pendingWebhookDeliveries(now, limit, maxAttempts) {
       const rows = await dialect.all<Record<string, unknown>>(
         `SELECT * FROM webhook_deliveries
