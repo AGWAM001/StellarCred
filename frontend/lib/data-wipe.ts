@@ -176,14 +176,13 @@ export function getWipeSummary(): {
   }
 
   try {
-    const keys = getAllStorageKeys();
     return {
-      credentials: keys.includes(STORAGE_KEYS.CREDENTIALS),
-      proofCache: keys.includes(STORAGE_KEYS.PROOF_CACHE),
-      timelines: keys.filter((k) => k.startsWith(STORAGE_KEYS.PROOF_TIMELINE_PREFIX)).length,
-      onboarding: keys.includes(STORAGE_KEYS.ONBOARDING) || keys.includes(STORAGE_KEYS.ONBOARDING_LEGACY),
-      wallet: keys.includes(STORAGE_KEYS.WALLET_ID),
-      theme: keys.includes(STORAGE_KEYS.THEME),
+      credentials: localStorage.getItem(STORAGE_KEYS.CREDENTIALS) !== null,
+      proofCache: localStorage.getItem(STORAGE_KEYS.PROOF_CACHE) !== null,
+      timelines: getTimelineKeys().length,
+      onboarding: localStorage.getItem(STORAGE_KEYS.ONBOARDING) !== null || localStorage.getItem(STORAGE_KEYS.ONBOARDING_LEGACY) !== null,
+      wallet: localStorage.getItem(STORAGE_KEYS.WALLET_ID) !== null,
+      theme: localStorage.getItem(STORAGE_KEYS.THEME) !== null,
     };
   } catch {
     return {
