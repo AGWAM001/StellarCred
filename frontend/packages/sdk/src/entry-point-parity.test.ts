@@ -13,8 +13,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import * as fromIndex from "./index";
 import * as fromClaims from "./claims";
 import * as fromChallenge from "./challenge";
+import * as fromErrors from "./errors";
 
-// â”€â”€ Claim-checking functions (sourced from claims.ts) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Claim-checking functions (sourced from claims.ts) ────────────────────────
 
 const CLAIMS_EXPORTS = [
   "configure",
@@ -39,11 +40,18 @@ const CLAIMS_EXPORTS = [
   "TimeoutError",
   "ConfigError",
   "InvalidAddressError",
-  "RpcError",
   "IndexerError",
 ] as const;
 
-// â”€â”€ Challenge functions (sourced from challenge.ts) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Errors exports (sourced from errors.ts) - issue #404
+const ERRORS_EXPORTS = [
+  "RpcError",
+  "ContractError",
+  "ContractErrorCode",
+  "parseContractError",
+] as const;
+
+// ── Challenge functions (sourced from challenge.ts) ──────────────────────────
 
 const CHALLENGE_EXPORTS = [
   "createWalletChallenge",
@@ -56,7 +64,7 @@ describe("entry-point parity (issue #609 / #522)", () => {
     fromClaims.resetConfig();
   });
 
-  // â”€â”€ claims.ts exports re-exported identically by index.ts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── claims.ts exports re-exported identically by index.ts ─────────────────
 
   for (const name of CLAIMS_EXPORTS) {
     it(`index.ts re-exports the same ${name} reference as claims.ts`, () => {
@@ -69,7 +77,7 @@ describe("entry-point parity (issue #609 / #522)", () => {
     });
   }
 
-  // â”€â”€ challenge.ts exports re-exported identically by index.ts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── challenge.ts exports re-exported identically by index.ts ──────────────
 
   for (const name of CHALLENGE_EXPORTS) {
     it(`index.ts re-exports the same ${name} reference as challenge.ts`, () => {
@@ -82,7 +90,20 @@ describe("entry-point parity (issue #609 / #522)", () => {
     });
   }
 
-  // â”€â”€ StellarCred namespace holds same references â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── errors.ts exports re-exported identically by index.ts (issue #404) ────
+
+  for (const name of ERRORS_EXPORTS) {
+    it(`index.ts re-exports the same ${name} reference as errors.ts`, () => {
+      const fromIndexValue = (fromIndex as Record<string, unknown>)[name];
+      const fromErrorsValue = (fromErrors as Record<string, unknown>)[name];
+
+      expect(fromIndexValue).toBeDefined();
+      expect(fromErrorsValue).toBeDefined();
+      expect(fromIndexValue).toBe(fromErrorsValue);
+    });
+  }
+
+  // ── StellarCred namespace holds same references ──────────────────────────
 
   it("StellarCred namespace members are the same references as claims.ts exports", () => {
     const ns = fromIndex.StellarCred;
@@ -106,7 +127,6 @@ describe("entry-point parity (issue #609 / #522)", () => {
     expect(ns.TimeoutError).toBe(fromClaims.TimeoutError);
     expect(ns.ConfigError).toBe(fromClaims.ConfigError);
     expect(ns.InvalidAddressError).toBe(fromClaims.InvalidAddressError);
-    expect(ns.RpcError).toBe(fromClaims.RpcError);
     expect(ns.IndexerError).toBe(fromClaims.IndexerError);
   });
 
@@ -118,11 +138,20 @@ describe("entry-point parity (issue #609 / #522)", () => {
     expect(ns.verifyWalletClaim).toBe(fromChallenge.verifyWalletClaim);
   });
 
+  it("StellarCred namespace members are the same references as errors.ts exports", () => {
+    const ns = fromIndex.StellarCred;
+
+    expect(ns.RpcError).toBe(fromErrors.RpcError);
+    expect(ns.ContractError).toBe(fromErrors.ContractError);
+    expect(ns.ContractErrorCode).toBe(fromErrors.ContractErrorCode);
+    expect(ns.parseContractError).toBe(fromErrors.parseContractError);
+  });
+
   it("default export equals the StellarCred named export", () => {
     expect(fromIndex.default).toBe(fromIndex.StellarCred);
   });
 
-  it("configure() call propagates to getConfig() â€” single config object", () => {
+  it("configure() call propagates to getConfig() — single config object", () => {
     fromIndex.configure({ registryId: "C_PARITY_TEST", requestTimeoutMs: 1234 });
     const cfg = fromClaims.getConfig();
     expect(cfg.registryId).toBe("C_PARITY_TEST");
