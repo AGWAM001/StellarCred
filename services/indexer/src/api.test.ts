@@ -10,6 +10,8 @@ import type { Application } from "express";
 import { buildApp, serializeClaim } from "./api";
 import { createSqliteDb } from "./db";
 import type { Db, ClaimRow } from "./db";
+import { createIntegrityChecker, MISMATCH_KINDS } from "./integrity";
+import type { ChainClaimState, ContractReader } from "./integrity";
 import type { Config } from "./config";
 import type { Ingester, IngesterHealth, IngesterMetrics } from "./ingester";
 import { Keypair } from "@stellar/stellar-sdk";
@@ -72,6 +74,9 @@ function makeConfig(sqlitePath: string): Config {
     rateLimitWindowMs: 60000,
     rateLimitMax: 120,
     rateLimitEnabled: true,
+    integrityCheckEnabled: false,
+    integrityCheckIntervalMs: 900_000,
+    integrityCheckSampleSize: 25,
   };
 }
 
@@ -565,6 +570,8 @@ describe("claim response schema", () => {
       ledger_sequence: 123456789,
       threshold: 50000,
       revoked: 0,
+      expired: false,
+      state: "active",
     });
     for (const field of [
       "id",
@@ -640,6 +647,9 @@ describe("claim response schema", () => {
       "ledger_sequence",
       "threshold",
       "revoked",
+      // Derived, not event-sourced (#612) — see the api.ts module doc comment.
+      "expired",
+      "state",
     ].sort();
 
     const claimsRes = await request(app).get("/claims?wallet=GALICE");
@@ -712,6 +722,157 @@ describe("claim response schema", () => {
     expect(res.body.indexed).toBe(true);
     expect(res.body.wallet).toBe("GCHARLIE");
     expect(res.body.events.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("on-chain data integrity (#612)", () => {
+  const WALLET = Keypair.random().publicKey();
+  const NOW = Math.floor(Date.now() / 1000);
+
+  /** A checker whose contract reads come from a fixed table, never the network. */
+  function buildIntegrityApp(
+    chain: Record<string, ChainClaimState | null>,
+    opts: { apiKey?: string; failFor?: Set<string> } = {}
+  ): { app: Application; checker: ReturnType<typeof createIntegrityChecker> } {
+    const reader: ContractReader = {
+      async readProofRecord({ wallet, credentialType }) {
+        const key = `${wallet}/${credentialType}`;
+        if (opts.failFor?.has(key)) throw new Error("simulated RPC failure");
+        return chain[key] ?? null;
+      },
+    };
+    const checker = createIntegrityChecker(
+      makeConfig(tmpFile),
+      db,
+      { reader, clock: { now: async () => NOW } },
+    );
+    const app = buildApp(db, makeIngester(), { apiKey: opts.apiKey }, checker);
+    return { app, checker };
+  }
+
+  async function seedClaim(overrides: Partial<ClaimRow> = {}) {
+    await (db as ReturnType<typeof createSqliteDb>).upsertClaim({
+      wallet: WALLET,
+      credential_type: "kyc",
+      issuer: "GISSUER",
+      verified_at: NOW - 1000,
+      expiry: NOW + 1000,
+      ledger_sequence: 500,
+      threshold: null,
+      revoked: 0,
+      ...overrides,
+    });
+  }
+
+  const onChain: ChainClaimState = {
+    revoked: false,
+    expiry: 0, // filled per-test where it matters
+    verifiedAt: 0,
+    threshold: null,
+    issuer: "GISSUER",
+  };
+
+  it("exposes the mismatch count as an alerting metric", async () => {
+    await seedClaim();
+    // The chain revoked it; the indexer never saw the event.
+    const { app: integrityApp } = buildIntegrityApp({
+      [`${WALLET}/kyc`]: { ...onChain, revoked: true, expiry: NOW + 1000, verifiedAt: NOW - 1000 },
+    });
+    await request(integrityApp).post("/integrity/check").expect(200);
+
+    const res = await request(integrityApp).get("/metrics");
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("# TYPE indexer_state_mismatches gauge");
+    expect(res.text).toMatch(/^indexer_state_mismatches 1$/m);
+    expect(res.text).toMatch(
+      /^indexer_state_mismatches_by_kind\{kind="revoked_on_chain"\} 1$/m,
+    );
+    expect(res.text).toMatch(/^indexer_state_checked 1$/m);
+  });
+
+  it("publishes every mismatch kind as a labelled series", async () => {
+    // No indexed claims, so every per-kind counter is present and flat — the
+    // series must exist from startup so an alert rule never goes missing.
+    const { app: integrityApp } = buildIntegrityApp({});
+    await request(integrityApp).post("/integrity/check").expect(200);
+    const res = await request(integrityApp).get("/metrics");
+    for (const kind of MISMATCH_KINDS) {
+      expect(res.text).toContain(
+        `indexer_state_mismatches_by_kind{kind="${kind}"} 0`,
+      );
+    }
+  });
+
+  it("keeps an RPC failure out of the mismatch count", async () => {
+    await seedClaim();
+    const { app: integrityApp } = buildIntegrityApp({}, {
+      failFor: new Set([`${WALLET}/kyc`]),
+    });
+    const check = await request(integrityApp).post("/integrity/check");
+    expect(check.body.unreadable).toBe(1);
+    expect(check.body.mismatchCount).toBe(0);
+    expect(check.body.complete).toBe(false);
+
+    const metrics = await request(integrityApp).get("/metrics");
+    expect(metrics.text).toMatch(/^indexer_state_mismatches 0$/m);
+    expect(metrics.text).toMatch(/^indexer_state_check_errors 1$/m);
+    expect(metrics.text).toMatch(/^indexer_state_last_success_timestamp_seconds 0$/m);
+  });
+
+  it("reports the last run's mismatches on GET /integrity/status", async () => {
+    await seedClaim();
+    const { app: integrityApp } = buildIntegrityApp({
+      [`${WALLET}/kyc`]: { ...onChain, expiry: NOW + 1, verifiedAt: NOW - 1000 },
+    });
+
+    const before = await request(integrityApp).get("/integrity/status");
+    expect(before.status).toBe(200);
+    expect(before.body.lastRunTimestamp).toBeNull();
+    expect(before.body.mismatchCount).toBe(0);
+
+    await request(integrityApp).post("/integrity/check").expect(200);
+
+    const after = await request(integrityApp).get("/integrity/status");
+    expect(after.body.mismatchCount).toBe(1);
+    expect(after.body.mismatches[0].wallet).toBe(WALLET);
+    expect(after.body.mismatches[0].kinds).toEqual(["expiry_mismatch"]);
+  });
+
+  it("gates POST /integrity/check behind the API key when one is configured", async () => {
+    await seedClaim();
+    const { app: integrityApp } = buildIntegrityApp({}, { apiKey: "secret" });
+
+    await request(integrityApp).post("/integrity/check").expect(401);
+    const res = await request(integrityApp)
+      .post("/integrity/check")
+      .set("Authorization", "Bearer secret");
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a non-positive sampleSize on the on-demand check", async () => {
+    await seedClaim();
+    const { app: integrityApp } = buildIntegrityApp({});
+    await request(integrityApp)
+      .post("/integrity/check?sampleSize=0")
+      .expect(400);
+    await request(integrityApp)
+      .post("/integrity/check?sampleSize=abc")
+      .expect(400);
+  });
+
+  it("404s the integrity endpoints when no checker is wired in", async () => {
+    await request(app).get("/integrity/status").expect(404);
+    await request(app).post("/integrity/check").expect(404);
+  });
+
+  it("returns derived expired/state fields on /claims", async () => {
+    await seedClaim({ wallet: WALLET, credential_type: "kyc", expiry: NOW - 1 });
+    const res = await request(app).get(`/claims?wallet=${WALLET}`);
+    expect(res.status).toBe(200);
+    expect(res.body.claims[0].expired).toBe(true);
+    expect(res.body.claims[0].state).toBe("expired");
+    // `revoked` keeps its narrow meaning: only an on-chain revocation.
+    expect(res.body.claims[0].revoked).toBe(0);
   });
 });
 

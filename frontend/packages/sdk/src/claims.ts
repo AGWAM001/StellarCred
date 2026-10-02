@@ -17,6 +17,8 @@ import {
   findClaimRow,
   type IndexerClaimRow,
 } from "./indexer";
+// RpcError has been moved to ./errors.ts (issue #404)
+import { RpcError } from "./errors";
 
 export { IndexerError };
 export type { IndexerClaimRow };
@@ -416,25 +418,6 @@ export class InvalidThresholdError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidThresholdError";
-  }
-}
-
-/**
- * Error thrown when an RPC / contract-simulation call fails.
- */
-export class RpcError extends Error {
-  cause?: unknown;
-  constructor(
-    message = "StellarCred RPC call failed",
-    options?: { cause?: unknown } | unknown,
-  ) {
-    super(message);
-    this.name = "RpcError";
-    if (options && typeof options === "object" && "cause" in (options as any)) {
-      this.cause = (options as any).cause;
-    } else if (options !== undefined) {
-      this.cause = options;
-    }
   }
 }
 

@@ -31,10 +31,11 @@ export * from "./claims";
 export * from "./capabilities";
 export * from "./challenge";
 export * from "./subscriptions";
+export * from "./errors"; // Typed error taxonomy (#404)
 export { createClaimGate } from "./core";
 export type { ClaimGateConfig, ClaimGateState, ClaimGateListener, ClaimGate } from "./core";
 export { useStellarCred } from "./react";
-export type { UseStellarCredOptions, UseStellarCredResult } from "./react";
+export type { UseStellarCredResult } from "./react";
 
 import {
   configure,
@@ -57,9 +58,9 @@ import {
   TimeoutError,
   ConfigError,
   InvalidAddressError,
-  RpcError,
-  IndexerError,
 } from "./claims";
+
+import { RpcError, IndexerError, ContractError, ContractErrorCode, parseContractError } from "./errors";
 
 import {
   bootstrap,
@@ -105,5 +106,8 @@ export const StellarCred = {
   InvalidAddressError,
   RpcError,
   IndexerError,
+  ContractError,
+  ContractErrorCode,
+  parseContractError,
 };
 export default StellarCred;

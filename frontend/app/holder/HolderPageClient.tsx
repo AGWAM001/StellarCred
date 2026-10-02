@@ -37,12 +37,11 @@ import { IMPORT_PARAM } from "@/lib/transfer";
 import { PREVIEW_CREDENTIALS } from "@/lib/preview-fixtures";
 import { useWarmProver } from "@/lib/use-warm-prover";
 import type { Credential } from "@/lib/credential";
-
+import { DataWipePanel } from "@/components/DataWipePanel";
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 import { useCredentialStore } from "@/lib/hooks/useCredentialStore";
 import { useBatchSelection } from "@/lib/hooks/useBatchSelection";
 import { useImportExport } from "@/lib/hooks/useImportExport";
-
 // ── Components ────────────────────────────────────────────────────────────────
 import { CredCard } from "@/components/holder/CredCard";
 import { ImportPanel } from "@/components/holder/ImportPanel";
@@ -51,7 +50,6 @@ import { ProofFlowView } from "@/components/holder/ProofFlowView";
 import { BatchProofFlowView } from "@/components/holder/BatchProofFlowView";
 import { ConfirmRemoveModal } from "@/components/holder/ConfirmRemoveModal";
 import { proofStatus, isExpiringSoon, daysRemaining } from "@/lib/proof-helpers";
-
 // Heavy modals loaded lazily — keep the route's initial bundle small.
 const TransferExportModal = dynamic(
   () => import("@/components/TransferExportModal").then((m) => m.TransferExportModal),
@@ -298,6 +296,9 @@ function HolderInner() {
             </p>
           </div>
         )}
+
+        {/* ── Data Management ── */}
+        {!importing && <div style={{ marginTop: "2.5rem", paddingTop: "2rem", borderTop: "1px solid var(--border)" }}><DataWipePanel /></div>}
 
         {/* ── Expiring soon ── */}
         {expiringSoon.length > 0 && (
