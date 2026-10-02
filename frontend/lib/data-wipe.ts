@@ -14,7 +14,7 @@
  * credentials individually (which leaves timeline/cache/key behind).
  */
 
-import { getAllStorageKeys, STORAGE_KEYS } from "./storage-keys";
+import { getAllStorageKeys, getTimelineKeys, STORAGE_KEYS } from "./storage-keys";
 import { exportCredentials, lockCredentialStore } from "./credential";
 import { isStorageAvailable } from "./safe-storage";
 
