@@ -172,6 +172,16 @@ export interface Db {
   enqueueWebhookEvent(event: ClaimLifecycleEvent): void | Promise<void>;
   /** Return active claims whose expiry has passed. */
   expiredActiveClaims(now: number): ClaimRow[] | Promise<ClaimRow[]>;
+  /**
+   * Return the next slice of claims for the on-chain state verification routine
+   * (#612), advancing an internal cursor past the returned rows.
+   *
+   * The cursor makes successive calls walk the whole table in `id` order and
+   * wrap around, so a periodic check spread over many runs covers every claim
+   * instead of re-verifying the same head rows on every run. Checks never
+   * overlap, so `last_claim_id` needs no optimistic locking.
+   */
+  sampleClaimsForVerification(limit: number): ClaimRow[] | Promise<ClaimRow[]>;
   /** Return due, undelivered webhook attempts. */
   pendingWebhookDeliveries(now: number, limit: number, maxAttempts: number): WebhookDelivery[] | Promise<WebhookDelivery[]>;
   /** Persist one webhook attempt and its retry/delivery state. */
