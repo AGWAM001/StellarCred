@@ -123,13 +123,14 @@ export class ContractError extends Error {
    * before retrying (e.g. re-issue credential, register issuer).
    */
   isTerminal(): boolean {
-    return [
+    const terminalCodes: readonly number[] = [
       ContractErrorCode.VerificationFailed,
       ContractErrorCode.IssuerNotTrusted,
       ContractErrorCode.IssuerKeyMismatch,
       ContractErrorCode.InvalidExpiry,
       ContractErrorCode.NotInitialized,
-    ].includes(this.code as ContractErrorCodeType);
+    ];
+    return terminalCodes.includes(this.code);
   }
 }
 
