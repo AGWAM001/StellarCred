@@ -129,7 +129,7 @@ export class ContractError extends Error {
       ContractErrorCode.IssuerKeyMismatch,
       ContractErrorCode.InvalidExpiry,
       ContractErrorCode.NotInitialized,
-    ].includes(this.code);
+    ].includes(this.code as ContractErrorCodeType);
   }
 }
 
