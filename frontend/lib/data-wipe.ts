@@ -124,8 +124,11 @@ export async function wipeAllData(options: WipeOptions = {}): Promise<WipeResult
     // Remove each key individually to handle failures gracefully
     for (const key of keysToRemove) {
       try {
-        localStorage.removeItem(key);
-        removed++;
+        // Only count keys that actually existed
+        if (localStorage.getItem(key) !== null) {
+          localStorage.removeItem(key);
+          removed++;
+        }
       } catch (err) {
         console.error(`Failed to remove key: ${key}`, err);
         // Continue removing other keys even if one fails
