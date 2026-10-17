@@ -85,6 +85,14 @@ const envSchema = z
       emptyToUndefined,
       z.string().url().optional(),
     ),
+    // Public indexer URL — included in the /api/capabilities descriptor
+    // (issue #639) so integrators can discover the indexer. Only set this
+    // when the indexer is safe to expose publicly; INDEXER_URL above may
+    // point at a private URL and is never published.
+    NEXT_PUBLIC_INDEXER_URL: z.preprocess(
+      emptyToUndefined,
+      z.string().url().optional(),
+    ),
 
     // Server-only issuer signing key. Optional: absence runs the public demo
     // issuer key (logged loudly on every boot) instead of a real one.
@@ -150,6 +158,12 @@ const envSchema = z
     // --- Ops -------------------------------------------------------------------
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
     APP_ORIGIN: z.preprocess(emptyToUndefined, z.string().url().optional()),
+    OUTBOUND_SINK_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+    OUTBOUND_SINK_QUEUE_SIZE: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().positive().max(10_000).optional(),
+    ),
+    // Deprecated alias; OUTBOUND_SINK_URL is the shared setting going forward.
     ERROR_REPORTING_WEBHOOK: z.preprocess(emptyToUndefined, z.string().url().optional()),
   })
   .superRefine((val, ctx) => {
