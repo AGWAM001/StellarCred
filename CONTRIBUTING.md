@@ -397,6 +397,23 @@ Breaking changes: add `BREAKING CHANGE:` in the commit footer, or append `!` aft
 
 Commit messages are linted automatically on pull requests via `commitlint`.
 
+## Automated Dependency Updates & Auto-Merge Policy
+
+To keep dependencies secure and current without manual overhead, minor and patch dependency updates are automatically merged when all test suites pass.
+
+### Auto-Merge Criteria
+Pull requests are automatically evaluated and merged when:
+1. The PR carries the configured auto-merge label (default: `deps` or `dependencies`).
+2. All CI workflows and status checks pass (green build).
+3. The PR only modifies dependency manifests and lockfiles (`package.json`, `pnpm-lock.yaml`, `Cargo.toml`, `Cargo.lock`, etc.).
+
+### Safeguards & Threshold Rules
+To prevent breaking changes and supply chain regressions, strict threshold rules are enforced:
+- **Major Version Bumps Blocked:** Any update that increments the major semver version (e.g. `v1.2.0` → `v2.0.0`, or breaking `0.x` transitions such as `0.1.0` → `0.2.0`) is **strictly barred** from auto-merging. Major version upgrades require manual maintainer review, audit, and approval.
+- **Pinned Core Dependencies:** Cryptographic and zero-knowledge toolchain dependencies (`@aztec/bb.js`, `@noir-lang/*`, `soroban-sdk`, `ultrahonk_soroban_verifier`) are explicitly pinned in `.github/dependabot.yml` and cannot be bumped automatically.
+- **Source Code Protection:** If a dependency PR contains modifications to application source files (e.g. `src/`, `lib/`, `contracts/`, `circuits/`), auto-merge is immediately rejected.
+- **Configurable Label:** The required label can be configured via repository variable `AUTOMERGE_DEPS_LABEL` (defaulting to `deps`).
+
 ## Releasing
 
 Releases are tag-driven. The GitHub Actions release workflow fires on any tag matching `v*` and:
