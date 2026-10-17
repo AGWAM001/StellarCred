@@ -232,7 +232,7 @@ jobs:
       - name: Compile circuits
         run: |
           export PATH="$HOME/.nargo/bin:$PATH"
-          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof set_membership; do
+          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof set_membership date_range; do
             echo "=== $dir ==="
             (cd "$dir" && nargo compile)
           done
@@ -257,7 +257,7 @@ jobs:
           VK_TMP="/tmp/vk_check"
           rm -rf "$VK_TMP"
 
-          for dir in kyc_proof age_proof income_proof jurisdiction_proof funds_proof employment_proof aggregate_proof accreditation_proof set_membership; do
+          for dir in kyc_proof age_proof income_proof jurisdiction_proof funds_proof employment_proof aggregate_proof accreditation_proof set_membership date_range; do
             type=$(type_of "$dir")
             json="target/${dir}.json"
             out="$VK_TMP/$type"
@@ -324,7 +324,7 @@ jobs:
       - name: Run Noir unit tests (nargo test)
         run: |
           export PATH="$HOME/.nargo/bin:$PATH"
-          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof set_membership range_proof; do
+          for dir in commit commit3 kyc_proof age_proof income_proof jurisdiction_proof funds_proof accreditation_proof employment_proof aggregate_proof set_membership range_proof date_range; do
             echo "=== nargo test $dir ==="
             (cd "$dir" && nargo test)
           done
