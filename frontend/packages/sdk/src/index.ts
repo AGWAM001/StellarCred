@@ -54,13 +54,21 @@ import {
   parseReturnParams,
   watchClaim,
   withRetry,
+  normalizeRpcError,
+  classifyTransientFailure,
   CLAIM_TYPES,
   TimeoutError,
   ConfigError,
   InvalidAddressError,
 } from "./claims";
 
-import { RpcError, IndexerError, ContractError, ContractErrorCode, parseContractError } from "./errors";
+import {
+  RpcError,
+  IndexerError,
+  ContractError,
+  ContractErrorCode,
+  parseContractError,
+} from "./errors";
 
 import {
   bootstrap,
@@ -96,6 +104,8 @@ export const StellarCred = {
   parseReturnParams,
   watchClaim,
   withRetry,
+  normalizeRpcError,
+  classifyTransientFailure,
   subscribeClaims,
   createWalletChallenge,
   verifyWalletSignature,

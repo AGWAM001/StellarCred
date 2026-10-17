@@ -132,6 +132,27 @@ export class ContractError extends Error {
     ];
     return terminalCodes.includes(this.code);
   }
+
+  /**
+   * Normalize an arbitrary thrown value into a structured {@link ContractError}
+   * when it looks like a ProofRegistry contract panic, and otherwise return
+   * null so callers can fall back to RpcError / generic handling.
+   *
+   * This is the preferred entry point for submission paths that receive raw
+   * thrown values from the RPC/contract layer and want a consistent error
+   * object with a `code` and human-readable `friendlyMessage`.
+   */
+  static fromRaw(raw: unknown): ContractError | null {
+    if (raw instanceof ContractError) return raw;
+    if (typeof raw === "string") return parseContractError(raw);
+    if (raw && typeof raw === "object") {
+      const candidate = raw as Record<string, unknown>;
+      if (typeof candidate.message === "string") {
+        return parseContractError(candidate.message);
+      }
+    }
+    return null;
+  }
 }
 
 /**
