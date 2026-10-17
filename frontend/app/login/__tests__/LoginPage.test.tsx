@@ -27,7 +27,7 @@ let mockWalletState = {
   error: null as string | null,
   connect: vi.fn(),
   disconnect: vi.fn(),
-  isConnected: false,
+  networkMismatch: false,
 };
 
 vi.mock("@/lib/wallet-context", () => ({
@@ -43,7 +43,7 @@ describe("LoginPage Accessibility & Functionality (Issue #756)", () => {
       error: null,
       connect: vi.fn(),
       disconnect: vi.fn(),
-      isConnected: false,
+      networkMismatch: false,
     };
   });
 
@@ -120,7 +120,7 @@ describe("LoginPage Accessibility & Functionality (Issue #756)", () => {
       error: null,
       connect: vi.fn(),
       disconnect: vi.fn(),
-      isConnected: true,
+      networkMismatch: false,
     };
 
     render(<LoginPageClient />);

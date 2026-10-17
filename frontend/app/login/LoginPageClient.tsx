@@ -17,7 +17,8 @@ import { useWallet } from "@/lib/wallet-context";
 
 export function LoginPageClient() {
   const router = useRouter();
-  const { address, isConnected } = useWallet();
+  const { address } = useWallet();
+  const isConnected = Boolean(address);
   const [activeTab, setActiveTab] = useState<"wallet" | "passphrase">("wallet");
   const [identifier, setIdentifier] = useState("");
   const [passphrase, setPassphrase] = useState("");
