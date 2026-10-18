@@ -97,6 +97,7 @@ circuits/               Noir circuits (UltraHonk · Noir 1.0.0-beta.9 / bb 0.87.
   commit/                 issuer helper: returns Poseidon2([value, salt], 2)
   kyc_proof/              "I hold a credential the issuer committed to"
   age_proof/              "I am over N" without revealing date of birth
+  date_range/             "my credential was issued in this window" without revealing the date
   income_proof/           "my income exceeds T" without revealing it
   jurisdiction_proof/     "my country is not restricted" without revealing it
   funds_proof/            "my balance exceeds T" without revealing it
@@ -135,6 +136,8 @@ npm install @stellarcred/sdk
 > Full SDK docs: [`frontend/packages/sdk/README.md`](frontend/packages/sdk/README.md) · [npm](https://www.npmjs.com/package/@stellarcred/sdk)
 >
 > **Canonical Integration Example**: Looking for a complete, runnable end-to-end integration with wallet control challenge proof and server-side route gating? See [`examples/canonical-integration`](examples/canonical-integration).
+>
+> **TypeScript example**: A minimal, CI-typechecked walkthrough — typed claim reads, a signed Stellar transaction, and the challenge flow — is in [`docs/SDK_TYPESCRIPT_EXAMPLE.md`](docs/SDK_TYPESCRIPT_EXAMPLE.md) and [`examples/typescript-quickstart`](examples/typescript-quickstart).
 
 Protocols never handle credential data - they ask the on-chain registry one
 question: _has this wallet proven the claim I require?_
