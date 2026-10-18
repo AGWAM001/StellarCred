@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { IconCheck, IconExternalLink, IconAlertTriangle, IconCertificate, IconCpu, IconCloudUpload, IconShieldCheck } from "@tabler/icons-react";
 import { EXPLORER_TX } from "@/lib/stellar";
+import { truncateTxHash } from "@/lib/format";
 import type { TimelineEvent } from "@/lib/useProofTimeline";
 
 interface TimelineProps {
@@ -28,7 +29,12 @@ export function Timeline({ events }: TimelineProps) {
     <div className="timeline-container" style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px dashed var(--border)" }}>
       <span className="eyebrow" style={{ marginBottom: "1rem", display: "block" }}>Proof History</span>
       
-      <div className="timeline-steps" style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+      <div
+        className="timeline-steps"
+        role="list"
+        aria-label="Proof event history"
+        style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}
+      >
         {events.map((event, index) => {
           const info = stageInfo[event.stage];
           if (!info) return null;
@@ -40,9 +46,13 @@ export function Timeline({ events }: TimelineProps) {
           });
 
           return (
-            <div key={`${event.stage}-${event.timestamp}`} style={{ display: "flex", gap: "1rem" }}>
+            <div
+              key={`${event.stage}-${event.timestamp}`}
+              role="listitem"
+              style={{ display: "flex", gap: "1rem" }}
+            >
               {/* Left column: Connector & Icon */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }} aria-hidden="true">
                 <div 
                   className="timeline-icon" 
                   style={{ 
@@ -87,6 +97,7 @@ export function Timeline({ events }: TimelineProps) {
                     href={EXPLORER_TX(event.txHash)}
                     target="_blank"
                     rel="noreferrer"
+                    aria-label={`View transaction ${truncateTxHash(event.txHash)} on explorer`}
                     className="mono accent"
                     style={{ 
                       display: "inline-flex", 
@@ -99,8 +110,8 @@ export function Timeline({ events }: TimelineProps) {
                       textUnderlineOffset: "2px",
                     }}
                   >
-                    {event.txHash.slice(0, 8)}...{event.txHash.slice(-6)}
-                    <IconExternalLink size={11} />
+                    {truncateTxHash(event.txHash)}
+                    <IconExternalLink size={11} aria-hidden="true" />
                   </a>
                 )}
               </div>
