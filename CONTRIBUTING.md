@@ -363,12 +363,16 @@ CODEOWNERS routes the *request*; it does not change branch protection. To make a
 
 Please do **not** open a public issue for security vulnerabilities. See [SECURITY.md](SECURITY.md).
 
-## Code style
+## Code style & Linting
 
 - **Rust**: `cargo fmt` before committing. Follow the existing contract structure — cross-contract calls use `#[contractclient]` interface traits, not crate dependencies.
-- **TypeScript**: ESLint + Prettier (enforced by `pnpm lint`). No `NEXT_PUBLIC_` prefix on server-only env vars.
-- **Noir**: keep circuits as simple as possible — constraint count directly affects browser proving time.
-- **Comments**: only when the *why* is non-obvious (a constraint, a workaround, a subtle invariant). Don't explain what the code does.
+- **TypeScript & Web**: ESLint and Prettier are configured across the repository.
+  - Run linting: `pnpm --dir frontend lint` (or `pnpm --dir frontend/packages/sdk lint` for SDK).
+  - Check formatting: `pnpm --dir frontend format:check`.
+  - Auto-format code: `pnpm --dir frontend format`.
+- **Pre-commit hooks**: Husky and `lint-staged` run automatically on staged TypeScript, JavaScript, CSS, and JSON files on `git commit` to maintain format and lint standards.
+- **Noir**: Keep circuits as simple as possible — constraint count directly affects browser proving time.
+- **Comments**: Only when the *why* is non-obvious (a constraint, a workaround, a subtle invariant). Don't explain what the code does.
 
 ## Commit messages
 

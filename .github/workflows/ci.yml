@@ -417,6 +417,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Check code formatting (Prettier)
+        run: pnpm format:check
+
       - name: Guard HolderPageClient size (#606)
         # Fails if HolderPageClient.tsx grows past the line-count ceiling.
         # New holder features belong in lib/hooks/ and components/holder/ —
