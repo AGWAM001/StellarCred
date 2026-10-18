@@ -1,7 +1,12 @@
 {
  feature/encrypt-export-artifacts-786
   "name": "StellarCred",
-  "packageManager": "yarn@4.18.0",
+  "version": "1.0.0",
+  "description": "StellarCred security and export artifact service",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run"
+  },
   "devDependencies": {
     "vite": "^8.3.4",
     "vitest": "^5.0.5"
