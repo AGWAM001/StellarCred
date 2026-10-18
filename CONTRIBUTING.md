@@ -13,6 +13,31 @@ scripts/      deploy.sh — wires all contracts on testnet
 fixtures/     real vk / proof / public_inputs used by contract tests
 ```
 
+### Where a markdown file belongs
+
+The repository tracks documentation in two places, and the split has one rule:
+
+- **Repository root** — the entry points a person or a tool is expected to find
+  without looking: `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`,
+  `ROADMAP.md`, `LICENSE`. A component directory keeps its own `README.md`
+  (`services/indexer/README.md`, `frontend/packages/sdk/README.md`) as that
+  component's entry point.
+- **`docs/`** — everything else: specifications, integration guides, runbooks,
+  operational references (`docs/EVENTS.md`, `docs/THREAT_MODEL.md`,
+  `docs/ISSUER_ONBOARDING.md`, …), with decision records in `docs/adr/`.
+
+Two rules follow. The first is the one whose absence produced the duplicated
+`EVENTS.md` (issue #687):
+
+1. **One topic, one file.** Never mirror a document into a second path for
+   visibility. If it must stay reachable from the root `README.md`, link it from
+   there — a contract such as the event schema read by indexers and integrators
+   cannot exist in two copies, because one of them will go stale and its readers
+   will decode events wrong with no error to show them.
+2. **Link with a path that resolves from the file you are editing.** From the
+   root, `docs/EVENTS.md`; from another file in `docs/`, the sibling `EVENTS.md`;
+   from a component, the full walk up (`../../docs/EVENTS.md`).
+
 ### Writing a contract test
 
 Contract suites share one harness, `contracts/test_support`, so a test body is
