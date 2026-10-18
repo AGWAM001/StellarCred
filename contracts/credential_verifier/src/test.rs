@@ -1,6 +1,6 @@
 extern crate std;
 
-use soroban_sdk::{symbol_short, Bytes, Env, Symbol};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Bytes, Env, Symbol};
 use std::format;
 
 use crate::{CredentialVerifier, CredentialVerifierClient};
@@ -8,7 +8,8 @@ use crate::{CredentialVerifier, CredentialVerifierClient};
 #[test]
 fn test_negative_fixtures_all_circuits() {
     let env = Env::default();
-    let contract_id = env.register(CredentialVerifier, ());
+    let admin = Address::generate(&env);
+    let contract_id = env.register(CredentialVerifier, (admin,));
     let client = CredentialVerifierClient::new(&env, &contract_id);
 
     let test_cases = [
