@@ -18,7 +18,7 @@ import {
   type IndexerClaimRow,
 } from "./indexer";
 // RpcError has been moved to ./errors.ts (issue #404)
-import { RpcError } from "./errors";
+import { RpcError, ContractError, ContractErrorCode, parseContractError } from "./errors";
 
 export { IndexerError };
 export type { IndexerClaimRow };
@@ -744,11 +744,11 @@ export function normalizeRpcError(
   } else if (raw instanceof ContractError) {
     contractError = raw;
   } else if (typeof raw === "string") {
-    contractError = parseContractError(raw);
+    contractError = parseContractError(raw) ?? undefined;
   } else if (raw && typeof raw === "object") {
     const candidate = raw as Record<string, unknown>;
     if (typeof candidate.message === "string") {
-      contractError = parseContractError(candidate.message);
+      contractError = parseContractError(candidate.message) ?? undefined;
     }
     if (typeof candidate.status === "number") status = candidate.status;
   }
@@ -762,8 +762,6 @@ export function normalizeRpcError(
     contractError: opts.contractError,
   });
 }
-
-export type { NormalizedRpcErrorOptions };
 
 export async function withRetry<T>(
   operation: () => Promise<T>,
