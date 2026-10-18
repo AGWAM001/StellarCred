@@ -241,6 +241,34 @@ in [#606](https://github.com/ToluLabs/StellarCred/issues/606).
 6. Before pushing, walk [docs/CONTRIBUTOR_CHECKLIST.md § 9](docs/CONTRIBUTOR_CHECKLIST.md) — the CI job → command map there is how you reproduce anything red on the PR.
 7. Open a pull request against `main` with a clear description of what changed and why.
 
+### Process documents belong in the PR description
+
+An implementation summary, review checklist, status report, test summary or
+"final verification" write-up is a **PR artifact, not a repository file**. Put it
+in the pull request description (or a PR comment), where it is read once, stays
+attached to the diff it describes, and is searchable from the PR. Do not commit it.
+
+- **Why:** such a document describes a change, and a change ends at merge. In the
+  tree it is wrong within days — every later edit to the code it documents makes
+  its claims stale while its file name still asserts authority — and it is never
+  updated, only re-created by the next contributor. It also buries the documents
+  that stay true: the root directory is where a newcomer looks for `README`,
+  `CONTRIBUTING`, `SETUP`, `ROADMAP`, `SECURITY`.
+- **What to do instead:** if something in your summary is worth keeping after the
+  merge, it is documentation, so move that part into the doc that owns the topic
+  (`circuits/README.md` for a circuit, `docs/` for a subsystem, the component's
+  own `README.md`) and let the rest live in the PR.
+- **Enforced:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) fails a PR
+  that *adds* a file whose name matches a process-artifact pattern
+  (`*IMPLEMENTATION_SUMMARY`, `*IMPLEMENTATION_DETAILS`, `*IMPLEMENTATION_NOTES`,
+  `*REVIEW_SUMMARY`, `*STATUS_REPORT`, `PR_DESCRIPTION*`, `*_COMPLETE`,
+  `START_HERE`, `FILES_MODIFIED`, `CRITICAL_FIX_NEEDED`, `READY_FOR_BUILD` — any
+  extension). Only new files are checked; the legacy ones still in the tree are
+  being removed separately. If you genuinely mean to add a durable document under
+  one of those names, add it with a reason to the allowlist in
+  [`.github/scripts/check-process-docs.mjs`](.github/scripts/check-process-docs.mjs)
+  and justify it in the PR.
+
 ## Picking up an issue
 
 The repo carries dozens of open issues labelled by **area** (`contracts`, `circuits`,
