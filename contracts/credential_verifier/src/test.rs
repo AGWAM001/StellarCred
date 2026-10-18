@@ -1,6 +1,6 @@
 extern crate std;
 
-use soroban_sdk::{symbol_short, Address, Bytes, Env, Symbol};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Bytes, Env, Symbol};
 use std::format;
 
 use crate::{CredentialVerifier, CredentialVerifierClient};
