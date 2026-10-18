@@ -50,6 +50,12 @@ StellarCred.configure({
 const eligible = await StellarCred.hasClaim(walletAddress, "kyc");
 ```
 
+> **TypeScript example**: a minimal, CI-typechecked walkthrough — typed claim
+> reads, creating and signing a transaction, and the challenge flow — lives in
+> [`examples/typescript-quickstart`](../../../examples/typescript-quickstart) and
+> is explained in
+> [`docs/SDK_TYPESCRIPT_EXAMPLE.md`](../../../docs/SDK_TYPESCRIPT_EXAMPLE.md).
+
 ## Configuration
 
 Call `configure()` once before any other call, or set environment variables — both approaches work in Node.js, Next.js, and edge runtimes.
