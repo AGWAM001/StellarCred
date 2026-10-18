@@ -7,7 +7,7 @@
     "test": "nyc pnpm run test:unit",
     "test:unit": "node --test",
     "coverage": "nyc pnpm run test:unit",
-    "coverage:report": "nyc report --reporter=text-summary --reporter=lcov
+    "coverage:report": "nyc report --reporter=text-summary --reporter=lcov"
   },
   "devDependencies": {
     "nyc": "^17.1.0",
