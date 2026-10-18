@@ -1187,3 +1187,35 @@ fn cancel_admin_proposal_emits_expected_event() {
         ],
     );
 }
+
+#[test]
+fn test_negative_fixtures_all_circuits() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, CredentialVerifier);
+    let client = CredentialVerifierClient::new(&env, &contract_id);
+
+    // Negative fixture assertion helper
+    let test_cases = [
+        "kyc_wrong_issuer",
+        "kyc_truncated_inputs",
+        "kyc_wrong_circuit",
+        "age_unmet_threshold",
+        "income_unmet_threshold",
+        "funds_unmet_threshold",
+        "range_unmet_threshold",
+        "jurisdiction_denylisted",
+        "set_membership_wrong_root",
+        "aggregate_malformed_layout",
+        "employment_invalid_proof",
+    ];
+
+    for case in test_cases.iter() {
+        // Assert verifier returns error when verifying negative proof fixture
+        let proof = fixture_bytes!(concat!("negative/", case, "/proof"));
+        let vk = fixture_bytes!(concat!("negative/", case, "/vk"));
+        let public_inputs = fixture_bytes!(concat!("negative/", case, "/public_inputs"));
+
+        let res = client.try_verify_proof(&vk, &proof, &public_inputs);
+        assert!(res.is_err(), "Expected negative fixture {} to be rejected", case);
+    }
+}
