@@ -1,4 +1,6 @@
-// (Replacing negative test case helper with standard include_bytes!)
+use soroban_sdk::{Env, Bytes};
+use crate::{CredentialVerifier, CredentialVerifierClient};
+
 #[test]
 fn test_negative_fixtures_all_circuits() {
     let env = Env::default();
@@ -20,15 +22,18 @@ fn test_negative_fixtures_all_circuits() {
     ];
 
     for case in test_cases.iter() {
-        let proof_path = format!("../../../fixtures/negative/{}/proof", case);
-        let vk_path = format!("../../../fixtures/negative/{}/vk", case);
-        let inputs_path = format!("../../../fixtures/negative/{}/public_inputs", case);
+        let proof_path = format!("fixtures/negative/{}/proof", case);
+        let vk_path = format!("fixtures/negative/{}/vk", case);
+        let inputs_path = format!("fixtures/negative/{}/public_inputs", case);
 
-        // We assert that verification fails for all negative fixtures across circuits
-        let proof = bytes!(); // loaded via test bytes
-        let vk = bytes!();
-        let public_inputs = bytes!();
-        
+        let proof_bytes = std::fs::read(&proof_path).unwrap_or_else(|_| panic!("Failed to read {}", proof_path));
+        let vk_bytes = std::fs::read(&vk_path).unwrap_or_else(|_| panic!("Failed to read {}", vk_path));
+        let inputs_bytes = std::fs::read(&inputs_path).unwrap_or_else(|_| panic!("Failed to read {}", inputs_path));
+
+        let proof = Bytes::from_slice(&env, &proof_bytes);
+        let vk = Bytes::from_slice(&env, &vk_bytes);
+        let public_inputs = Bytes::from_slice(&env, &inputs_bytes);
+
         let res = client.try_verify_proof(&vk, &proof, &public_inputs, &None);
         assert!(res.is_err(), "Expected negative fixture {} to be rejected", case);
     }
