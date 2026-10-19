@@ -24,7 +24,8 @@ invariants are in [CONTRIBUTING.md](../CONTRIBUTING.md).
 - [ ] If the change touches the trust model, you have read the relevant
       [ADR](../CONTRIBUTING.md#architecture-decision-records).
 - [ ] Branch created from an up-to-date `main`, named for what it does.
-- [ ] You are **not** planning to commit a summary/status report — see § 6 below.
+- [ ] You are **not** planning to commit a summary/status report — the PR
+      description is where that belongs.
 
 ## 2 · Toolchain setup
 
@@ -155,12 +156,6 @@ Indexer (`cd services/indexer`):
 | [ ] | `npx --yes -p @commitlint/cli -p @commitlint/config-conventional commitlint --from <base> --to HEAD --verbose` | the `commitlint` job; prefixes in [CONTRIBUTING.md § Commit messages](../CONTRIBUTING.md#commit-messages) |
 | [ ] | `make lint` | clippy (`-D warnings`) + frontend ESLint/typecheck. Use `make fmt` only on a tree you have already formatted — it is `cargo fmt --all --check`, and committed code is not clean (see § 3) |
 
-**Process-artifact guard.** [`.github/scripts/check-process-docs.mjs`](../.github/scripts/check-process-docs.mjs)
-fails a PR that **adds** a file named like `*_SUMMARY`, `*_NOTES`, `STATUS_REPORT`,
-`PR_DESCRIPTION`, `*_COMPLETE`, `FILES_MODIFIED`, `START_HERE`, … — write-ups
-belong in the PR description. It only inspects added files, so editing an
-existing document (including this checklist) is fine.
-
 ## 7 · CI job → command map
 
 Use this when a check is red and you cannot reproduce it locally.
@@ -175,7 +170,6 @@ Use this when a check is red and you cannot reproduce it locally.
 | `sdk-integration` | § 5 SDK commands; skipped on forks without the repo variables |
 | `dependency-check` | `cd frontend && pnpm install --frozen-lockfile && node ../.github/scripts/verify-npm-licenses.mjs`; from the repo root, `node .github/scripts/check-runtime-deps.mjs` — a newly added runtime dependency or a disallowed license is the usual cause |
 | `env-check` (`.github/workflows/env-check.yml`) | § 6 env commands |
-| `process-docs` | § 6 guard note above |
 | `commitlint` | § 6 commitlint command |
 | `api-reference` | `make check-api-reference` |
 | `a11y` | `make test-a11y` — currently disabled in CI (`if: false`) while pre-existing violations are fixed |
@@ -208,7 +202,6 @@ paths), `e2e.yml` (schedule + manual only, not a PR gate),
 | `pnpm install --frozen-lockfile` fails in CI | Lockfile not committed / edited by hand | Regenerate with `pnpm install` in `frontend/` and commit `pnpm-lock.yaml` |
 | Format/lint problems appear only in CI | `core.hooksPath` is unset, so `.husky/pre-commit` never ran | `cd frontend && pnpm install` (its `prepare` step installs the hooks), or run `pnpm format` and `pnpm lint` before committing |
 | i18n parity failure | A key added to one locale only | Add it to every `frontend/public/locales/*.json`, then `pnpm check:i18n` |
-| A PR check fails naming docs you did not touch | The docs guard saw a new write-up file in your diff | Delete it; put the content in the PR description (§ 6 note) |
 
 ## 9 · Before you push
 
