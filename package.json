@@ -1,12 +1,17 @@
 {
-  "name": "StellarCred",
-  "version": "1.0.0",
-  "description": "StellarCred security and export artifact service",
-  "main": "index.js",
+  "name": "stellar-kyc-credentials",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kill Your Credentials - Stellar Soroban contracts and frontend",
   "scripts": {
-    "test": "vitest run"
+    "test": "nyc pnpm run test:unit",
+    "test:unit": "node --test",
+    "coverage": "nyc pnpm run test:unit",
+    "coverage:report": "nyc report --reporter=text-summary --reporter=lcov"
   },
   "devDependencies": {
+    "nyc": "^17.1.0",
+    "coverage": "^0.4.1",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"
   }
