@@ -201,3 +201,17 @@ trivially satisfiable and proves nothing.
 | 2 | `issuer_y` | `[u8; 32]` | Issuer secp256k1 public key Y coordinate |
 | 3 | `restricted` | `[u64; 8]` | List of up to 8 ISO 3166-1 numeric codes (padded with `0`s) |
 | 4 | `mode` | `u64` | Proof mode: `0` = denylist (country NOT in list), `1` = allowlist (country IS in list) |
+
+`mode` is a public input, not a second circuit: one compiled `jurisdiction_proof`
+serves both modes, so denylist and allowlist proofs verify against the *same* VK
+(`fixtures/jurisdiction/vk` and `fixtures/jurisdiction_allow/vk` are byte-identical).
+`circuits/scripts/build.sh` generates the second fixture set from
+`jurisdiction_proof/Prover_allowlist.toml` purely to have a real allowlist proof on
+hand for contract tests.
+
+Because both the list and the mode travel with the proof and are prover-supplied, the
+circuit only proves the *relation* — it cannot tell a verifier whether the accepted
+jurisdictions were the intended ones. A verifier that means "not sanctioned" must
+reject a proof presenting `mode = 1`, and one that means "region exclusive" must
+reject `mode = 0`; checking the mode alongside the list is the integrator's job.
+The witness API defaults to `mode = "0"` (`frontend/app/api/witness/route.ts`).
