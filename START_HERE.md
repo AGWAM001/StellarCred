@@ -133,8 +133,10 @@ reformat inside your own diff.
   touches a sensitive area:
   [CONTRIBUTING.md § Sensitive areas](CONTRIBUTING.md#sensitive-areas-and-their-invariants).
 - Do **not** commit an implementation summary, status report or "files modified"
-  write-up — those belong in the PR description and CI fails a PR that adds one:
-  [CONTRIBUTING.md § Process documents](CONTRIBUTING.md#process-documents-belong-in-the-pr-description).
+  write-up. They describe a change that ends at merge, so they belong in the PR
+  description; if part of one is worth keeping, move that part into the document
+  that owns the topic (`circuits/README.md`, a component `README.md`, or
+  [`docs/`](docs/)).
 
 ## Step 8 · Optional — run the product end to end
 
