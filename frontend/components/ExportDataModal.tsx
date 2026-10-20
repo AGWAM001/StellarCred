@@ -612,7 +612,7 @@ export function ExportDataModal({
               <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                 {jobs.map((job) => {
                   const remainingSec = timeRemainingMap[job.id] ?? 0;
-                  const isExpired = job.expiresAt ? Date.now() > job.expiresAt : false;
+                  const isExpired = job.expiresAt ? remainingSec <= 0 : false;
 
                   return (
                     <div
