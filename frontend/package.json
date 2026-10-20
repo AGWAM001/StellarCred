@@ -18,6 +18,7 @@
     "first-load": "pnpm dlx @lhci/cli@0.14.0 autorun --config=.lighthouserc.json && node scripts/assert-no-prover-on-critical-path.mjs",
     "size": "size-limit",
     "check:i18n": "node scripts/check-i18n-parity.mjs",
+    "backfill:export": "node --import tsx scripts/backfill-export.ts",
     "verify:audit-log": "node --import tsx --experimental-strip-types scripts/verify-audit-log.ts"
   },
   "dependencies": {
