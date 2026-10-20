@@ -1882,15 +1882,15 @@ export async function isNullifierUsed(
   nullifier: string,
   opts?: { requestTimeoutMs?: number; throwOnError?: boolean },
 ): Promise<boolean> {
-  const client = getRegistryClient();
+  const client = await getClient(opts?.throwOnError);
   if (!client) {
     if (opts?.throwOnError) {
-      throw new ConfigurationError("ProofRegistry client is not configured");
+      throw new ConfigError("ProofRegistry client is not configured");
     }
     return false;
   }
   try {
-    const isUsed = await client.is_nullifier_used({
+    const isUsed = await (client as any).is_nullifier_used({
       app_context: appContext,
       nullifier,
     });

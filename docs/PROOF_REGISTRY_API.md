@@ -118,6 +118,67 @@ fn submit_proof(env, holder: Address, issuer_id: Address, credential_type: Symbo
 - **Notes:** verifies issuer trust via IssuerRegistry *and* forwards the proof
   to CredentialVerifier; caches `ProofRecord` only if both pass.
 
+### `is_nullifier_used`
+
+```rust
+fn is_nullifier_used(env: Env, app_context: BytesN<32>, nullifier: BytesN<32>) -> bool
+```
+
+- **Audience:** Integrator, Holder
+- **Auth:** none (public read).
+- **Stability:** Stable
+- **Parameters:**
+  - `app_context` — 32-byte application identifier / domain separator.
+  - `nullifier` — 32-byte nullifier hash to check.
+- **Returns:** `bool` — `true` if the nullifier has already been recorded in `app_context`, `false` otherwise.
+- **Panics:** none.
+- **Events:** none.
+- **Notes:** Allows clients and verifiers to check if an identity proof has already been consumed for a given application context before submitting a transaction.
+
+### `record_nullifier`
+
+```rust
+fn record_nullifier(env: Env, app_context: BytesN<32>, nullifier: BytesN<32>)
+```
+
+- **Audience:** Holder, Integrator
+- **Auth:** none (caller pays invocation fees).
+- **Stability:** Stable
+- **Parameters:**
+  - `app_context` — 32-byte application identifier context.
+  - `nullifier` — 32-byte unique nullifier hash.
+- **Returns:** —
+- **Panics:** `SubmissionsPaused (11)`, `NullifierAlreadyUsed (16)`.
+- **Events:** `("proof_reg", "nullifier")` → `EventNullifierUsed { app_context, nullifier, recorded_at }`.
+- **Notes:** Records a nullifier in persistent storage with `PROOF_TTL` extension to enforce Sybil resistance and prevent double-spending proofs. Panics with `NullifierAlreadyUsed (16)` if the nullifier was previously consumed in this application context.
+
+### `submit_proof_with_nullifier`
+
+```rust
+fn submit_proof_with_nullifier(env: Env, holder: Address, issuer_id: Address, credential_type: Symbol,
+                               proof: Bytes, public_inputs: Bytes, vk_version: Option<u32>,
+                               expiry: u64, app_context: BytesN<32>, nullifier: BytesN<32>)
+```
+
+- **Audience:** Holder
+- **Auth:** `holder.require_auth()` — the holder's wallet signs.
+- **Stability:** Stable
+- **Parameters:**
+  - `holder` — address the claim will be cached for.
+  - `issuer_id` — issuer that signed the credential.
+  - `credential_type` — e.g. `"kyc"`, `"age"`, `"income"`.
+  - `proof` / `public_inputs` — UltraHonk proof bytes.
+  - `vk_version` — verifying-key version (`None` = latest).
+  - `expiry` — unix seconds.
+  - `app_context` — 32-byte application identifier.
+  - `nullifier` — 32-byte nullifier hash.
+- **Returns:** —
+- **Panics:** `NullifierAlreadyUsed (16)`, `SubmissionsPaused (11)`, `InvalidExpiry (12)`,
+  `IssuerNotTrusted (4)`, `IssuerKeyMismatch (5)`, `VerificationFailed (2)`.
+- **Events:** `("proof_reg", "nullifier")` → `EventNullifierUsed`, then
+  `("proof_reg", "submitted", credential_type)` → `EventProofSubmitted`.
+- **Notes:** Atomically consumes the nullifier and verifies the credential proof in a single transaction, preventing race conditions and ensuring one-per-person Sybil resistance for gated dApp interactions.
+
 ### `submit_proofs`
 
 ```rust
@@ -708,6 +769,7 @@ Full payload/field documentation: [EVENTS.md](EVENTS.md).
 | 13 | `RoleNotHeld` | The required role has no holder (or the caller is not its holder). |
 | 14 | `RoleHolderMismatch` | `revoke_role` named an address that is not the current role holder. |
 | 15 | `NoPendingAdmin` | `accept_admin` called without a pending `propose_admin`. |
+| 16 | `NullifierAlreadyUsed` | The nullifier has already been consumed in this application context (#395). |
 
 Client-side friendly messages: `frontend/lib/contract-errors.ts`
 (`PROOF_REGISTRY_ERRORS`). Cross-contract failures can also surface
