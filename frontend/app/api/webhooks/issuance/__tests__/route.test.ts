@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { createHmac } from "node:crypto";
 import { POST } from "../route";
@@ -26,6 +26,10 @@ function makeSignedRequest(
 
 describe("POST /api/webhooks/issuance (#846)", () => {
   const originalSecret = process.env.ISSUANCE_WEBHOOK_SECRET;
+
+  afterAll(() => {
+    process.env.ISSUANCE_WEBHOOK_SECRET = originalSecret;
+  });
 
   beforeEach(() => {
     process.env.ISSUANCE_WEBHOOK_SECRET = TEST_SECRET;

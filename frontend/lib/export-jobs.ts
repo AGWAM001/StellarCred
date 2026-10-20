@@ -1,5 +1,5 @@
 import { getSharedStore } from './shared-store';
-import { generateSecureDownloadUrl, verifySecureDownloadToken } from './security/secureDownload';
+import { generateSecureDownloadUrl } from './security/secureDownload';
 import { EXPORT_SCHEMA_VERSION, type ExportArtifactV1 } from './export-schema';
 
 export type ExportScope = 'credentials' | 'proofs' | 'activity' | 'full' | 'admin_audit';

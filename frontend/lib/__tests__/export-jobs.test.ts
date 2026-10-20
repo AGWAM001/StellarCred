@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   createExportJob,
   getExportJob,
   listUserExportJobs,
   getAllowedScopes,
-  isScopeAllowed,
   getExportArtifact,
 } from '../export-jobs';
 import {
