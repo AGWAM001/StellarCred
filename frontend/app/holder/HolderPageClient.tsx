@@ -20,6 +20,7 @@ import {
   IconDownload,
 } from "@tabler/icons-react";
 import { WalletButton } from "@/components/WalletButton";
+import { ExportVisibilitySettings } from "@/components/ExportVisibilitySettings";
 import { useWallet } from "@/lib/wallet-context";
 import { Badge } from "@/components/Badge";
 import { Check } from "@/components/Check";
@@ -810,6 +811,7 @@ function HolderInner() {
                   Where your credentials live
                 </Link>
               </p>
+              <ExportVisibilitySettings />
             </div>
           )}
         </div>
