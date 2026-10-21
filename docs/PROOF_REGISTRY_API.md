@@ -188,33 +188,6 @@ fn record_nullifier(env: Env, app_context: BytesN<32>, nullifier: BytesN<32>)
 - **Events:** `("proof_reg", "nullifier")` → `EventNullifierUsed { app_context, nullifier, recorded_at }`.
 - **Notes:** Records a nullifier in persistent storage with `PROOF_TTL` extension to enforce Sybil resistance and prevent double-spending proofs. Panics with `NullifierAlreadyUsed (16)` if the nullifier was previously consumed in this application context.
 
-### `submit_proof_with_nullifier`
-
-```rust
-fn submit_proof_with_nullifier(env: Env, holder: Address, issuer_id: Address, credential_type: Symbol,
-                               proof: Bytes, public_inputs: Bytes, vk_version: Option<u32>,
-                               expiry: u64, app_context: BytesN<32>, nullifier: BytesN<32>)
-```
-
-- **Audience:** Holder
-- **Auth:** `holder.require_auth()` — the holder's wallet signs.
-- **Stability:** Stable
-- **Parameters:**
-  - `holder` — address the claim will be cached for.
-  - `issuer_id` — issuer that signed the credential.
-  - `credential_type` — e.g. `"kyc"`, `"age"`, `"income"`.
-  - `proof` / `public_inputs` — UltraHonk proof bytes.
-  - `vk_version` — verifying-key version (`None` = latest).
-  - `expiry` — unix seconds.
-  - `app_context` — 32-byte application identifier.
-  - `nullifier` — 32-byte nullifier hash.
-- **Returns:** —
-- **Panics:** `NullifierAlreadyUsed (16)`, `SubmissionsPaused (11)`, `InvalidExpiry (12)`,
-  `IssuerNotTrusted (4)`, `IssuerKeyMismatch (5)`, `VerificationFailed (2)`.
-- **Events:** `("proof_reg", "nullifier")` → `EventNullifierUsed`, then
-  `("proof_reg", "submitted", credential_type)` → `EventProofSubmitted`.
-- **Notes:** Atomically consumes the nullifier and verifies the credential proof in a single transaction, preventing race conditions and ensuring one-per-person Sybil resistance for gated dApp interactions.
-
 ### `submit_proofs`
 
 ```rust
