@@ -118,6 +118,7 @@ fn submit_proof(env, holder: Address, issuer_id: Address, credential_type: Symbo
 - **Notes:** verifies issuer trust via IssuerRegistry *and* forwards the proof
   to CredentialVerifier; caches `ProofRecord` only if both pass.
 
+ feat/issue-789-export-ui-flow
 ### `is_nullifier_used`
 
 ```rust
@@ -135,12 +136,51 @@ fn is_nullifier_used(env: Env, app_context: BytesN<32>, nullifier: BytesN<32>) -
 - **Events:** none.
 - **Notes:** Allows clients and verifiers to check if an identity proof has already been consumed for a given application context before submitting a transaction.
 
+### `submit_proof_with_nullifier`
+
+```rust
+fn submit_proof_with_nullifier(
+    env: Env,
+    holder: Address,
+    issuer_id: Address,
+    credential_type: Symbol,
+    proof: Bytes,
+    public_inputs: Bytes,
+    vk_version: Option<u32>,
+    expiry: u64,
+    app_context: BytesN<32>,
+    nullifier: BytesN<32>,
+)
+```
+
+- **Audience:** Holder
+- **Auth:** `holder.require_auth()` — the holder's wallet signs.
+- **Stability:** Stable
+- **Parameters:**
+  - `holder` — address the claim will be cached for.
+  - `issuer_id` — issuer that signed the credential.
+  - `credential_type` — credential type symbol.
+  - `proof` / `public_inputs` — UltraHonk proof and public inputs bytes.
+  - `vk_version` — verifying-key version (`None` = latest).
+  - `expiry` — unix seconds; must be in the future and ≤ 1 year out.
+  - `app_context` — 32-byte application or action context identifier.
+  - `nullifier` — 32-byte unique-personhood nullifier hash.
+- **Returns:** —
+- **Panics:** `SubmissionsPaused (11)`, `NullifierAlreadyUsed (16)`,
+  `InvalidExpiry (12)`, `IssuerNotTrusted (4)`, `IssuerKeyMismatch (5)`,
+  `VerificationFailed (2)`.
+- **Events:** `("proof_reg", "nullifier")` → `EventNullifierUsed { app_context, nullifier, recorded_at }`,
+  `("proof_reg", "submitted", credential_type)` → `EventProofSubmitted { holder, issuer, verified_at, expiry }`.
+- **Notes:** atomically records the nullifier within `app_context` and calls `submit_proof`. Rejects if the nullifier has already been consumed in `app_context`.
+ main
+
 ### `record_nullifier`
 
 ```rust
 fn record_nullifier(env: Env, app_context: BytesN<32>, nullifier: BytesN<32>)
 ```
 
+ feat/issue-789-export-ui-flow
 - **Audience:** Holder, Integrator
 - **Auth:** none (caller pays invocation fees).
 - **Stability:** Stable
@@ -178,6 +218,18 @@ fn submit_proof_with_nullifier(env: Env, holder: Address, issuer_id: Address, cr
 - **Events:** `("proof_reg", "nullifier")` → `EventNullifierUsed`, then
   `("proof_reg", "submitted", credential_type)` → `EventProofSubmitted`.
 - **Notes:** Atomically consumes the nullifier and verifies the credential proof in a single transaction, preventing race conditions and ensuring one-per-person Sybil resistance for gated dApp interactions.
+
+- **Audience:** Holder / Integrator
+- **Auth:** none (enforces paused check and duplicate nullifier rejection).
+- **Stability:** Stable
+- **Parameters:**
+  - `app_context` — 32-byte application context identifier.
+  - `nullifier` — 32-byte unique-personhood nullifier hash.
+- **Returns:** —
+- **Panics:** `SubmissionsPaused (11)`, `NullifierAlreadyUsed (16)`.
+- **Events:** `("proof_reg", "nullifier")` → `EventNullifierUsed { app_context, nullifier, recorded_at }`.
+- **Notes:** records a nullifier directly for a given application context without submitting a new proof.
+ main
 
 ### `submit_proofs`
 
@@ -320,6 +372,23 @@ fn check_delegated_verification(env, holder: Address, verifier: Address,
   gating on, not a confidentiality boundary).
 - **Panics:** none.
 - **Events:** none.
+
+### `is_nullifier_used`
+
+```rust
+fn is_nullifier_used(env: Env, app_context: BytesN<32>, nullifier: BytesN<32>) -> bool
+```
+
+- **Audience:** Integrator / Holder
+- **Auth:** none (public read).
+- **Stability:** Stable
+- **Parameters:**
+  - `app_context` — 32-byte application or action context identifier.
+  - `nullifier` — 32-byte unique-personhood nullifier hash.
+- **Returns:** `bool` — `true` if the nullifier has already been recorded for this application context, `false` otherwise.
+- **Panics:** never.
+- **Events:** none.
+- **Notes:** checks persistent storage for whether `(app_context, nullifier)` exists.
 
 ## 4. Delegated reads (Holder operations)
 
@@ -721,7 +790,8 @@ fn last_migration_timestamp(env) -> u64
 
 | Operation | Function(s) | Audience |
 |-----------|-------------|----------|
-| Submit / refresh claims | `submit_proof`, `submit_proofs`, `submit_aggregate_proof` | Holder |
+| Submit / refresh claims | `submit_proof`, `submit_proof_with_nullifier`, `submit_proofs`, `submit_aggregate_proof` | Holder |
+| Nullifier checks & recording | `record_nullifier`, `is_nullifier_used` | Holder / Integrator |
 | Verify a claim | `is_verified`, `check_claim`, `get_record`, `claim_expiry` | Integrator |
 | Consent-scoped reads | `grant_verification`, `revoke_verification`, `check_delegated_verification` | Holder / Integrator |
 | Revoke | `revoke_proof`, `revoke_all` (holder), `revoke` (issuer) | Holder / Issuer |
@@ -737,7 +807,8 @@ introspection views in §7.
 
 | Topics | Payload | Emitted by |
 |--------|---------|------------|
-| `("proof_reg", "submitted", credential_type)` | `EventProofSubmitted { holder, issuer, verified_at, expiry }` | `submit_proof`, `submit_proofs`, `submit_aggregate_proof` |
+| `("proof_reg", "submitted", credential_type)` | `EventProofSubmitted { holder, issuer, verified_at, expiry }` | `submit_proof`, `submit_proof_with_nullifier`, `submit_proofs`, `submit_aggregate_proof` |
+| `("proof_reg", "nullifier")` | `EventNullifierUsed { app_context, nullifier, recorded_at }` | `record_nullifier`, `submit_proof_with_nullifier` |
 | `("proof_reg", "revoked", credential_type)` | `EventProofRevoked { holder, issuer, revoked_at }` | `revoke` |
 | `("proof_reg", "paused")` | `EventPaused { admin, paused_at }` | `pause` |
 | `("proof_reg", "unpaused")` | `EventUnpaused { admin, unpaused_at }` | `unpause` |
